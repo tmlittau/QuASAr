@@ -12,11 +12,17 @@ include(FetchContent)
 find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 
 if(QUASAR_USE_STIM)
-FetchContent_Declare(
-    stim
-    GIT_REPOSITORY https://github.com/quantumlib/Stim.git
-    GIT_TAG v1.15.0
-)
+  # Stim requires C++20 for std::span and other features
+  set(CMAKE_CXX_STANDARD 20)
+endif()
+
+if(QUASAR_USE_STIM)
+    FetchContent_Declare(
+        stim
+        GIT_REPOSITORY https://github.com/quantumlib/Stim.git
+        GIT_TAG v1.15.0
+    )
+
 FetchContent_Populate(stim)
 add_subdirectory(${stim_SOURCE_DIR} ${stim_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()

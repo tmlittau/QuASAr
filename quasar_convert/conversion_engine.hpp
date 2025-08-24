@@ -17,6 +17,10 @@
 
 namespace quasar {
 
+#ifdef QUASAR_USE_STIM
+using StimTableau = stim::Tableau<stim::MAX_BITWORD_WIDTH>;
+#endif
+
 struct SSD {
     std::vector<uint32_t> boundary_qubits;  // indices of qubits on the boundary
     std::size_t top_s;                      // number of Schmidt vectors kept
@@ -62,8 +66,8 @@ class ConversionEngine {
 #endif
 
 #ifdef QUASAR_USE_STIM
-    stim::Tableau convert_boundary_to_tableau(const SSD& ssd) const;
-    std::optional<stim::Tableau> try_build_tableau(const std::vector<std::complex<double>>& state) const;
+    StimTableau convert_boundary_to_tableau(const SSD& ssd) const;
+    std::optional<StimTableau> try_build_tableau(const std::vector<std::complex<double>>& state) const;
 #endif
 
   private:

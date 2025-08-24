@@ -96,12 +96,13 @@ dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
 #endif
 
 #ifdef QUASAR_USE_STIM
-stim::Tableau ConversionEngine::convert_boundary_to_tableau(const SSD& ssd) const {
+StimTableau ConversionEngine::convert_boundary_to_tableau(const SSD& ssd) const {
     // Return an identity tableau of the requested size.
-    return stim::Tableau::identity(ssd.boundary_qubits.size());
+    return StimTableau(ssd.boundary_qubits.size());
 }
 
-std::optional<stim::Tableau> ConversionEngine::try_build_tableau(const std::vector<std::complex<double>>& state) const {
+std::optional<StimTableau> ConversionEngine::try_build_tableau(const std::vector<std::complex<double>>& state) const {
+
     if (state.empty()) {
         return std::nullopt;
     }
@@ -114,7 +115,7 @@ std::optional<stim::Tableau> ConversionEngine::try_build_tableau(const std::vect
     }
     if (zero_state) {
         std::size_t n = static_cast<std::size_t>(std::log2(state.size()));
-        return stim::Tableau::identity(n);
+        return StimTableau(n);
     }
     return std::nullopt;
 }

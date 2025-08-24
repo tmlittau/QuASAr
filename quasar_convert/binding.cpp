@@ -14,6 +14,12 @@ PYBIND11_MODULE(quasar_convert, m) {
         .def_readwrite("boundary_qubits", &quasar::SSD::boundary_qubits)
         .def_readwrite("top_s", &quasar::SSD::top_s);
 
+#ifdef QUASAR_USE_STIM
+    py::class_<quasar::StimTableau>(m, "StimTableau")
+        .def(py::init<size_t>())
+        .def_readwrite("num_qubits", &quasar::StimTableau::num_qubits);
+#endif
+
     py::enum_<quasar::Backend>(m, "Backend")
         .value("StimTableau", quasar::Backend::StimTableau)
         .value("DecisionDiagram", quasar::Backend::DecisionDiagram);
