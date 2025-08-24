@@ -1,0 +1,43 @@
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/complex.h>
+
+#include "conversion_engine.hpp"
+
+namespace py = pybind11;
+
+PYBIND11_MODULE(quasar_convert, m) {
+    py::class_<quasar::SSD>(m, "SSD")
+        .def(py::init<>())
+        .def_readwrite("boundary_qubits", &quasar::SSD::boundary_qubits)
+        .def_readwrite("top_s", &quasar::SSD::top_s);
+
+    py::enum_<quasar::Backend>(m, "Backend")
+        .value("StimTableau", quasar::Backend::StimTableau)
+        .value("DecisionDiagram", quasar::Backend::DecisionDiagram);
+
+    py::enum_<quasar::Primitive>(m, "Primitive")
+        .value("B2B", quasar::Primitive::B2B)
+        .value("LW", quasar::Primitive::LW)
+        .value("ST", quasar::Primitive::ST)
+        .value("Full", quasar::Primitive::Full);
+
+    py::class_<quasar::ConversionResult>(m, "ConversionResult")
+        .def_readonly("primitive", &quasar::ConversionResult::primitive)
+        .def_readonly("cost", &quasar::ConversionResult::cost);
+
+    py::class_<quasar::ConversionEngine>(m, "ConversionEngine")
+        .def(py::init<>())
+        .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
+        .def("extract_ssd", &quasar::ConversionEngine::extract_ssd)
+        .def("convert", &quasar::ConversionEngine::convert)
+#ifdef QUASAR_USE_STIM
+        .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
+        .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
+#endif
+#ifdef QUASAR_USE_MQT
+        .def("convert_boundary_to_dd", &quasar::ConversionEngine::convert_boundary_to_dd)
+#endif
+        ;
+}
+
