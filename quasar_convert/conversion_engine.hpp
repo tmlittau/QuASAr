@@ -56,7 +56,9 @@ class ConversionEngine {
     ConversionResult convert(const SSD& ssd) const;
 
 #ifdef QUASAR_USE_MQT
-    dd::Package<>::vEdge convert_boundary_to_dd(const SSD& ssd) const;
+    // The decision diagram package exposes `vEdge` at the namespace level,
+    // so we use it directly instead of the previous `Package<>::vEdge` alias.
+    dd::vEdge convert_boundary_to_dd(const SSD& ssd) const;
 #endif
 
 #ifdef QUASAR_USE_STIM

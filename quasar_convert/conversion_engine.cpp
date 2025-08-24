@@ -85,9 +85,13 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
 }
 
 #ifdef QUASAR_USE_MQT
-dd::Package<>::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
+dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
     // Produce a zero-state decision diagram for the boundary qubits.
-    return dd_pkg->makeZeroState(static_cast<dd::QubitCount>(ssd.boundary_qubits.size()));
+    // The MQT Core package expects the number of qubits as a standard size type.
+    // Earlier versions used dd::QubitCount, but this alias is no longer exposed
+    // in recent releases. Using std::size_t keeps the code compatible across
+    // versions without introducing a direct dependency on an internal typedef.
+    return dd_pkg->makeZeroState(ssd.boundary_qubits.size());
 }
 #endif
 

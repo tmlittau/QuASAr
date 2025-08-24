@@ -2,6 +2,8 @@
 #include <pybind11/stl.h>
 #include <pybind11/complex.h>
 
+#include <cstdint>
+
 #include "conversion_engine.hpp"
 
 namespace py = pybind11;
@@ -36,7 +38,13 @@ PYBIND11_MODULE(quasar_convert, m) {
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
 #endif
 #ifdef QUASAR_USE_MQT
-        .def("convert_boundary_to_dd", &quasar::ConversionEngine::convert_boundary_to_dd)
+        .def("convert_boundary_to_dd", [](quasar::ConversionEngine& eng, const quasar::SSD& ssd) {
+            // Return the raw pointer of the decision diagram edge as an integer
+            // handle. This avoids binding the full dd::vEdge type while still
+            // allowing callers to verify that a non-null edge was produced.
+            auto edge = eng.convert_boundary_to_dd(ssd);
+            return reinterpret_cast<std::uintptr_t>(edge.p);
+        })
 #endif
         ;
 }
