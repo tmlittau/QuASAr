@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 
 from .cost import Backend, Cost
 
@@ -41,3 +41,10 @@ class SSD:
 
     def total_qubits(self) -> int:
         return sum(len(p.qubits) for p in self.partitions)
+
+    def by_backend(self) -> Dict[Backend, List[SSDPartition]]:
+        """Group partitions by their assigned simulation backend."""
+        groups: Dict[Backend, List[SSDPartition]] = {}
+        for part in self.partitions:
+            groups.setdefault(part.backend, []).append(part)
+        return groups
