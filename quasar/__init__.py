@@ -4,6 +4,13 @@ from .circuit import Gate, Circuit
 from .cost import Backend, Cost, ConversionEstimate, CostEstimator
 from .partitioner import Partitioner
 from .ssd import SSD, SSDPartition, ConversionLayer
+from .backends import (
+    Backend as SimulatorBackend,
+    StatevectorBackend,
+    MPSBackend,
+    StimBackend,
+    DecisionDiagramBackend,
+)
 
 __all__ = [
     "Gate",
@@ -16,4 +23,9 @@ __all__ = [
     "SSD",
     "SSDPartition",
     "ConversionLayer",
+    "SimulatorBackend",
+    "StatevectorBackend",
+    "MPSBackend",
+    "StimBackend",
+    "DecisionDiagramBackend",
 ]
