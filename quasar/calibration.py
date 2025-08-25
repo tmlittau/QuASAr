@@ -1,0 +1,130 @@
+"""Microbenchmark-based calibration of QuASAr cost coefficients.
+
+This module executes small Python microbenchmarks intended to provide
+rough timing information for the different simulation backends and
+conversion primitives used by :class:`quasar.cost.CostEstimator`.
+The results can be written to a JSON file and later re-loaded to tune
+cost predictions.
+
+The benchmarks are intentionally lightweight and avoid external
+dependencies.  They serve only as a coarse guide for relative
+performance on the current machine.
+"""
+from __future__ import annotations
+
+from time import perf_counter
+from typing import Dict
+import argparse
+import json
+from pathlib import Path
+
+
+def _bench_loop(iters: int) -> float:
+    """Run a tight Python loop ``iters`` times and return elapsed time."""
+    start = perf_counter()
+    total = 0
+    for _ in range(iters):
+        total += 1
+    end = perf_counter()
+    # Prevent optimisation
+    if total == -1:
+        print("impossible")
+    return end - start
+
+
+def benchmark_statevector(num_qubits: int = 8, num_gates: int = 50) -> Dict[str, float]:
+    amp = 1 << num_qubits
+    # Simulate state update on a dense vector
+    elapsed = _bench_loop(amp * num_gates)
+    return {
+        "sv_gate": elapsed / (num_gates * amp),
+        "sv_mem": 16.0,  # Rough bytes per amplitude for complex128
+    }
+
+
+def benchmark_tableau(num_qubits: int = 8, num_gates: int = 50) -> Dict[str, float]:
+    quad = num_qubits * num_qubits
+    elapsed = _bench_loop(quad * num_gates)
+    return {
+        "tab_gate": elapsed / (num_gates * quad),
+        "tab_mem": 1.0,
+    }
+
+
+def benchmark_mps(num_qubits: int = 8, num_gates: int = 50, chi: int = 8) -> Dict[str, float]:
+    ops = num_gates * num_qubits * (chi ** 3)
+    elapsed = _bench_loop(ops)
+    return {
+        "mps_gate": elapsed / ops,
+        "mps_mem": float(chi * chi),
+    }
+
+
+def benchmark_dd(num_gates: int = 50, frontier: int = 32) -> Dict[str, float]:
+    ops = num_gates * frontier
+    elapsed = _bench_loop(ops)
+    return {
+        "dd_gate": elapsed / ops,
+        "dd_mem": 1.0,
+    }
+
+
+def benchmark_b2b(q: int = 6, s: int = 4) -> Dict[str, float]:
+    ops = (s ** 3) + q * (s ** 2)
+    elapsed = _bench_loop(ops)
+    coeff = elapsed / ops
+    return {"b2b_svd": coeff, "b2b_copy": coeff}
+
+
+def benchmark_lw(w: int = 4) -> Dict[str, float]:
+    dense = 1 << w
+    elapsed = _bench_loop(dense)
+    coeff = elapsed / dense
+    return {"lw_extract": coeff}
+
+
+def benchmark_st(s: int = 8) -> Dict[str, float]:
+    chi = min(s, 16)
+    ops = chi ** 3
+    elapsed = _bench_loop(ops)
+    coeff = elapsed / ops
+    return {"st_stage": coeff}
+
+
+def benchmark_full(q: int = 8) -> Dict[str, float]:
+    full = 1 << q
+    elapsed = _bench_loop(full)
+    coeff = elapsed / full
+    return {"full_extract": coeff}
+
+
+def run_calibration() -> Dict[str, float]:
+    """Execute all benchmarks and return a coefficient dictionary."""
+    coeff: Dict[str, float] = {}
+    coeff.update(benchmark_statevector())
+    coeff.update(benchmark_tableau())
+    coeff.update(benchmark_mps())
+    coeff.update(benchmark_dd())
+    coeff.update(benchmark_b2b())
+    coeff.update(benchmark_lw())
+    coeff.update(benchmark_st())
+    coeff.update(benchmark_full())
+    return coeff
+
+
+def save_coefficients(path: str | Path, coeff: Dict[str, float]) -> None:
+    with Path(path).open("w") as fh:
+        json.dump(coeff, fh, indent=2, sort_keys=True)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Calibrate QuASAr cost coefficients")
+    parser.add_argument("--output", "-o", default="coeff.json", help="Destination JSON file")
+    args = parser.parse_args(argv)
+    coeff = run_calibration()
+    save_coefficients(args.output, coeff)
+    print(f"Saved coefficients to {args.output}")
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    main()

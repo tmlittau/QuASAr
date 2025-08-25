@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import json
+from pathlib import Path
 from typing import Dict, Optional
 
 
@@ -71,6 +73,23 @@ class CostEstimator:
         }
         if coeff:
             self.coeff.update(coeff)
+
+    # ------------------------------------------------------------------
+    def update_coefficients(self, updates: Dict[str, float]) -> None:
+        """Update calibration coefficients in-place."""
+        self.coeff.update(updates)
+
+    def to_file(self, path: str | Path) -> None:
+        """Persist coefficients to a JSON file."""
+        with Path(path).open("w") as fh:
+            json.dump(self.coeff, fh, indent=2, sort_keys=True)
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "CostEstimator":
+        """Construct an estimator with coefficients loaded from ``path``."""
+        with Path(path).open() as fh:
+            coeff = json.load(fh)
+        return cls(coeff=coeff)
 
     def statevector(self, num_qubits: int, num_gates: int) -> Cost:
         amp = 2 ** num_qubits
