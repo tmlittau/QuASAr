@@ -3,7 +3,7 @@
 from .circuit import Gate, Circuit
 from .cost import Backend, Cost, ConversionEstimate, CostEstimator
 from .partitioner import Partitioner
-from .ssd import SSD, SSDPartition
+from .ssd import SSD, SSDPartition, ConversionLayer
 
 __all__ = [
     "Gate",
@@ -15,4 +15,5 @@ __all__ = [
     "Partitioner",
     "SSD",
     "SSDPartition",
+    "ConversionLayer",
 ]

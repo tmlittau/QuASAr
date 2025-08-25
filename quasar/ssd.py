@@ -35,9 +35,10 @@ class SSDPartition:
 
 @dataclass
 class SSD:
-    """Simplified storage for circuit partitions."""
+    """Simplified storage for circuit partitions and conversions."""
 
     partitions: List[SSDPartition]
+    conversions: List["ConversionLayer"] = field(default_factory=list)
 
     def total_qubits(self) -> int:
         return sum(len(p.qubits) for p in self.partitions)
@@ -48,3 +49,38 @@ class SSD:
         for part in self.partitions:
             groups.setdefault(part.backend, []).append(part)
         return groups
+
+
+@dataclass(frozen=True)
+class ConversionLayer:
+    """Represents a conversion between two partition backends.
+
+    Parameters
+    ----------
+    boundary:
+        Qubits that lie on the boundary between the two partitions.
+    source, target:
+        Backends used before and after the conversion.
+    rank:
+        Estimated Schmidt rank across the cut.
+    frontier:
+        Decision diagram frontier size used for estimating conversion
+        costs.
+    primitive:
+        Conversion primitive selected by the estimator (``B2B``, ``LW``,
+        ``ST`` or ``Full``).
+    cost:
+        Estimated cost of performing the conversion.
+    """
+
+    boundary: Tuple[int, ...]
+    source: Backend
+    target: Backend
+    rank: int
+    frontier: int
+    primitive: str
+    cost: Cost
+
+
+__all__ = ["SSDPartition", "SSD", "ConversionLayer"]
+
