@@ -102,6 +102,7 @@ StimTableau ConversionEngine::convert_boundary_to_tableau(const SSD& ssd) const 
 }
 
 std::optional<StimTableau> ConversionEngine::try_build_tableau(const std::vector<std::complex<double>>& state) const {
+
     if (state.empty()) {
         return std::nullopt;
     }

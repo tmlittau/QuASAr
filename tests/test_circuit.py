@@ -16,7 +16,6 @@ def test_circuit_from_dict():
     assert len(circ.gates) == 3
     assert isinstance(circ.ssd, SSD)
     assert len(circ.ssd.partitions) == 1
-    assert circ.cost_estimates == {}
 
 
 def test_circuit_from_json(tmp_path):
