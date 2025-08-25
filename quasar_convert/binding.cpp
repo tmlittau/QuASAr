@@ -38,10 +38,14 @@ PYBIND11_MODULE(quasar_convert, m) {
         .def(py::init<>())
         .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
         .def("extract_ssd", &quasar::ConversionEngine::extract_ssd)
+        .def("extract_boundary_ssd", &quasar::ConversionEngine::extract_boundary_ssd)
+        .def("extract_local_window", &quasar::ConversionEngine::extract_local_window)
         .def("convert", &quasar::ConversionEngine::convert)
+        .def("build_bridge_tensor", &quasar::ConversionEngine::build_bridge_tensor)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
+        .def("learn_stabilizer", &quasar::ConversionEngine::learn_stabilizer)
 #endif
 #ifdef QUASAR_USE_MQT
         .def("convert_boundary_to_dd", [](quasar::ConversionEngine& eng, const quasar::SSD& ssd) {
