@@ -22,6 +22,7 @@ if(QUASAR_USE_STIM)
         GIT_REPOSITORY https://github.com/quantumlib/Stim.git
         GIT_TAG v1.15.0
     )
+
 FetchContent_Populate(stim)
 add_subdirectory(${stim_SOURCE_DIR} ${stim_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
