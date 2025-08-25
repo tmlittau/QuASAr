@@ -1,5 +1,5 @@
 import json
-from quasar import Circuit
+from quasar import Circuit, SSD
 
 
 def example_gates():
@@ -14,8 +14,8 @@ def test_circuit_from_dict():
     circ = Circuit.from_dict(example_gates())
     assert circ.num_qubits == 2
     assert len(circ.gates) == 3
-    assert circ.ssd == {}
-    assert circ.cost_estimates == {}
+    assert isinstance(circ.ssd, SSD)
+    assert len(circ.ssd.partitions) == 1
 
 
 def test_circuit_from_json(tmp_path):

@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List
 import json
 
+from .partitioner import Partitioner
+from .ssd import SSD
+
 
 @dataclass
 class Gate:
@@ -28,7 +31,6 @@ class Circuit:
     def __init__(self, gates: Iterable[Dict[str, Any] | Gate]):
         self.gates: List[Gate] = [g if isinstance(g, Gate) else Gate(**g) for g in gates]
         self.num_qubits = self._infer_qubit_count()
-        # Placeholders for future SSD and cost estimation logic.
         self.ssd = self._create_ssd()
         self.cost_estimates = self._estimate_costs()
 
@@ -59,23 +61,10 @@ class Circuit:
         max_q = max(qubit_indices)
         return max_q - min_q + 1
 
-    def _create_ssd(self) -> Dict[str, Any]:
-        """Placeholder for SSD construction.
-
-        Returns
-        -------
-        dict
-            Currently returns an empty dict. This will be replaced by
-            a call into the conversion engine once implemented.
-        """
-        return {}
+    def _create_ssd(self) -> SSD:
+        """Construct the initial subsystem descriptor."""
+        return Partitioner().partition(self)
 
     def _estimate_costs(self) -> Dict[str, float]:
-        """Placeholder cost estimation routine.
-
-        Returns
-        -------
-        dict
-            A mapping from backend identifiers to estimated costs.
-        """
+        """Placeholder cost estimation routine."""
         return {}
