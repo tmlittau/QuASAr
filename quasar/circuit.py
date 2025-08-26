@@ -108,5 +108,52 @@ class Circuit:
         return Partitioner().partition(self)
 
     def _estimate_costs(self) -> Dict[str, float]:
-        """Placeholder cost estimation routine."""
-        return {}
+        """Summarise estimated simulation and conversion costs.
+
+        The subsystem descriptor produced by :class:`Partitioner` stores a
+        :class:`~quasar.cost.Cost` object for each partition and conversion
+        layer.  This routine aggregates those estimates to provide a concise
+        circuit level view.  Runtime contributions are summed whereas memory
+        requirements track the largest individual peak, mirroring the
+        ``_add_cost`` helper used by the planner.
+
+        Returns
+        -------
+        Dict[str, float]
+            Mapping containing per-backend runtime and memory summaries as
+            well as overall totals.  Keys follow ``"{backend}_time"`` and
+            ``"{backend}_mem"`` naming conventions using backend short names
+            (``sv``, ``tab``, ``mps`` and ``dd``).
+        """
+
+        if not self.ssd.partitions and not self.ssd.conversions:
+            return {}
+
+        estimates: Dict[str, float] = {}
+        total_time = 0.0
+        peak_memory = 0.0
+
+        # Aggregate cost for each simulation backend.
+        for backend, parts in self.ssd.by_backend().items():
+            time = sum(p.cost.time * p.multiplicity for p in parts)
+            memory = max((p.cost.memory for p in parts), default=0.0)
+
+            estimates[f"{backend.value}_time"] = time
+            estimates[f"{backend.value}_mem"] = memory
+
+            total_time += time
+            peak_memory = max(peak_memory, memory)
+
+        # Include conversion layers between partitions.
+        conv_time = sum(c.cost.time for c in self.ssd.conversions)
+        conv_mem = max((c.cost.memory for c in self.ssd.conversions), default=0.0)
+        if conv_time > 0.0:
+            estimates["conversion_time"] = conv_time
+            total_time += conv_time
+        if conv_mem > 0.0:
+            estimates["conversion_mem"] = conv_mem
+            peak_memory = max(peak_memory, conv_mem)
+
+        estimates["total_time"] = total_time
+        estimates["peak_memory"] = peak_memory
+        return estimates
