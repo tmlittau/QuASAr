@@ -32,6 +32,17 @@ class Backend:
         """Initialise the simulator for ``num_qubits`` qubits."""
         raise NotImplementedError
 
+    # ------------------------------------------------------------------
+    def ingest(self, state: Any) -> None:
+        """Load an externally prepared ``state`` into the backend.
+
+        Implementations may accept backend specific state representations or
+        raise ``TypeError`` if the provided object is unsupported.  Backends
+        are expected to update ``num_qubits`` and any internal caches
+        accordingly.
+        """
+        raise NotImplementedError
+
     def apply_gate(
         self,
         name: str,

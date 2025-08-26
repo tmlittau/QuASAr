@@ -52,6 +52,17 @@ class StatevectorBackend(Backend):
         self.state[0] = 1.0
         self.history.clear()
 
+    def ingest(self, state: np.ndarray | Sequence[complex]) -> None:
+        """Initialise the backend from an external statevector."""
+        array = np.asarray(state, dtype=complex)
+        dim = len(array)
+        n = int(np.log2(dim))
+        if 2 ** n != dim:
+            raise TypeError("Statevector length is not a power of two")
+        self.num_qubits = n
+        self.state = array.reshape(-1).astype(complex)
+        self.history.clear()
+
     # ------------------------------------------------------------------
     def apply_gate(
         self,

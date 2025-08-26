@@ -69,8 +69,11 @@ class Scheduler:
                 backend.load(circuit.num_qubits)
             elif backend is not current_sim:
                 ssd = current_sim.extract_ssd()
-                self.conversion_engine.convert(ssd)
-                backend.load(circuit.num_qubits)
+                result = self.conversion_engine.convert(ssd)
+                try:
+                    backend.ingest(result)
+                except Exception:
+                    backend.load(circuit.num_qubits)
             current_sim = backend
             current_backend = target
 

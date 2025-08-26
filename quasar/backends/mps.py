@@ -54,6 +54,37 @@ class MPSBackend(Backend):
             tensor[0, 0, 0] = 1.0
         self.history.clear()
 
+    def ingest(self, state: Sequence[complex] | list[np.ndarray]) -> None:
+        """Initialise the MPS from a statevector or list of tensors."""
+        if isinstance(state, list):
+            self.tensors = [np.array(t, dtype=complex) for t in state]
+            self.num_qubits = len(self.tensors)
+            self.history.clear()
+            return
+
+        vec = np.asarray(state, dtype=complex)
+        dim = len(vec)
+        n = int(np.log2(dim))
+        if 2 ** n != dim:
+            raise TypeError("Statevector length is not a power of two")
+
+        self.num_qubits = n
+        self.tensors = []
+        psi = vec.reshape(1, dim)
+        chi_left = 1
+        for _ in range(n - 1):
+            psi = psi.reshape(chi_left * 2, -1)
+            u, s, vh = np.linalg.svd(psi, full_matrices=False)
+            chi = min(self.chi, len(s))
+            u = u[:, :chi]
+            s = s[:chi]
+            vh = vh[:chi, :]
+            self.tensors.append(u.reshape(chi_left, 2, chi))
+            psi = np.diag(s) @ vh
+            chi_left = chi
+        self.tensors.append(psi.reshape(chi_left, 2, 1))
+        self.history.clear()
+
     # ------------------------------------------------------------------
     def apply_gate(
         self,
