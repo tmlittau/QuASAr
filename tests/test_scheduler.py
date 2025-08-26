@@ -1,6 +1,7 @@
 from quasar import Circuit, Scheduler, Planner
 from quasar_convert import ConversionEngine
 from quasar.cost import Backend
+from quasar import SSD
 import time
 
 
@@ -43,6 +44,17 @@ def test_scheduler_triggers_conversion():
     circuit = build_switch_circuit()
     scheduler.run(circuit)
     assert engine.calls == 1
+
+
+def test_scheduler_returns_final_ssd():
+    scheduler = Scheduler()
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "X", "qubits": [0]},
+    ])
+    result = scheduler.run(circuit)
+    assert isinstance(result, SSD)
+    assert result.partitions[0].history == ("H", "X")
 
 
 class CountingPlanner(Planner):
