@@ -86,16 +86,74 @@ class MPSBackend(Backend):
         self.history.clear()
 
     # ------------------------------------------------------------------
+    def _param(self, params: Dict[str, float] | None, idx: int) -> float:
+        if not params:
+            return 0.0
+        key = f"param{idx}"
+        if key in params:
+            return float(params[key])
+        values = list(params.values())
+        return float(values[idx]) if idx < len(values) else 0.0
+
+    def _gate_matrix(self, name: str, params: Dict[str, float] | None) -> np.ndarray:
+        gate = self._GATES.get(name)
+        if gate is not None:
+            return gate
+
+        p0 = self._param(params, 0)
+        if name == "RX":
+            c = np.cos(p0 / 2)
+            s = np.sin(p0 / 2)
+            return np.array([[c, -1j * s], [-1j * s, c]], dtype=complex)
+        if name == "RY":
+            c = np.cos(p0 / 2)
+            s = np.sin(p0 / 2)
+            return np.array([[c, -s], [s, c]], dtype=complex)
+        if name == "RZ":
+            return np.diag([np.exp(-1j * p0 / 2), np.exp(1j * p0 / 2)]).astype(complex)
+        if name in {"P", "U1"}:
+            return np.diag([1.0, np.exp(1j * p0)]).astype(complex)
+        if name == "RZZ":
+            return np.diag(
+                [
+                    np.exp(-1j * p0 / 2),
+                    np.exp(1j * p0 / 2),
+                    np.exp(1j * p0 / 2),
+                    np.exp(-1j * p0 / 2),
+                ]
+            ).astype(complex)
+        if name == "U2":
+            p1 = self._param(params, 1)
+            return (1 / np.sqrt(2)) * np.array(
+                [
+                    [1.0, -np.exp(1j * p1)],
+                    [np.exp(1j * p0), np.exp(1j * (p0 + p1))],
+                ],
+                dtype=complex,
+            )
+        if name in {"U", "U3"}:
+            p1 = self._param(params, 1)
+            p2 = self._param(params, 2)
+            c = np.cos(p0 / 2)
+            s = np.sin(p0 / 2)
+            return np.array(
+                [
+                    [c, -np.exp(1j * p2) * s],
+                    [np.exp(1j * p1) * s, np.exp(1j * (p1 + p2)) * c],
+                ],
+                dtype=complex,
+            )
+        raise ValueError(f"Unsupported gate {name}")
+
     def apply_gate(
         self,
         name: str,
         qubits: Sequence[int],
         params: Dict[str, float] | None = None,
     ) -> None:
-        gate = self._GATES.get(name.upper())
-        if gate is None:
-            raise ValueError(f"Unsupported gate {name}")
-        self.history.append(name.upper())
+        lname = name.upper()
+        gate = self._gate_matrix(lname, params)
+        self.history.append(lname)
 
         if len(qubits) == 1:
             i = qubits[0]

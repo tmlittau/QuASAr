@@ -21,7 +21,7 @@ class DecisionDiagramBackend(Backend):
     history: list[str] = field(default_factory=list, init=False)
     state: object | None = field(default=None, init=False)
 
-    _ALIASES: Dict[str, str] = field(default_factory=lambda: {"SDG": "sdg"})
+    _ALIASES: Dict[str, str] = field(default_factory=lambda: {"SDG": "sdg", "U1": "p"})
 
     def load(self, num_qubits: int, **_: dict) -> None:
         self.circuit = QuantumComputation(num_qubits)
@@ -59,7 +59,8 @@ class DecisionDiagramBackend(Backend):
         func = getattr(self.circuit, lname, None)
         if func is None:
             raise ValueError(f"Unsupported MQT DD gate {name}")
-        func(*qubits)
+        args = [float(v) for v in params.values()] if params else []
+        func(*args, *qubits)
         self.history.append(name.upper())
 
     def extract_ssd(self) -> SSD:
