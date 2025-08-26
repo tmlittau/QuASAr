@@ -1,0 +1,16 @@
+[build-system]
+requires = ["scikit-build-core>=0.7", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "quasar"
+version = "0.1.0"
+description = "QuASAr simulation utilities"
+requires-python = ">=3.8"
+dependencies = ["numpy"]
+
+[tool.scikit-build]
+# Include the Python packages in the wheel and place the compiled extension
+# inside the ``quasar_convert`` package.
+wheel.packages = ["quasar", "quasar_convert"]
+
