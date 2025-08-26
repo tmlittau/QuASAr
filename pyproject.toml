@@ -14,7 +14,7 @@ dependencies = [
     "qiskit==2.1.2",
     "qiskit-qasm3-import==0.6.0",
     "stim==1.15.0",
-    "pytest====8.4.1",
+    "pytest==8.4.1",
 ]
 
 [project.optional-dependencies]
