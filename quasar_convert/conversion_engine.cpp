@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <set>
 #include <complex>
 #include <vector>
 
@@ -28,6 +29,61 @@ SSD ConversionEngine::extract_ssd(const std::vector<uint32_t>& qubits, std::size
     ssd.boundary_qubits = qubits;
     ssd.top_s = s;
     return ssd;
+}
+
+SSD ConversionEngine::extract_boundary_ssd(
+    const std::vector<std::pair<uint32_t, uint32_t>>& bridges, std::size_t s) const {
+    std::set<uint32_t> boundary;
+    for (const auto& b : bridges) {
+        boundary.insert(b.first);
+    }
+    SSD ssd;
+    ssd.boundary_qubits.assign(boundary.begin(), boundary.end());
+    ssd.top_s = s;
+    return ssd;
+}
+
+std::vector<std::complex<double>> ConversionEngine::extract_local_window(
+    const std::vector<std::complex<double>>& state,
+    const std::vector<uint32_t>& window_qubits) const {
+    const std::size_t n = static_cast<std::size_t>(std::log2(state.size()));
+    const std::size_t k = window_qubits.size();
+    const std::size_t dim = 1ULL << k;
+    std::vector<std::complex<double>> window(dim, {0.0, 0.0});
+
+    for (std::size_t i = 0; i < state.size(); ++i) {
+        bool match = true;
+        for (std::size_t q = 0; q < n && match; ++q) {
+            if (std::find(window_qubits.begin(), window_qubits.end(), q) == window_qubits.end()) {
+                if ((i >> q) & 1ULL) {
+                    match = false;
+                }
+            }
+        }
+        if (!match) {
+            continue;
+        }
+        std::size_t local_index = 0;
+        for (std::size_t j = 0; j < k; ++j) {
+            if ((i >> window_qubits[j]) & 1ULL) {
+                local_index |= 1ULL << j;
+            }
+        }
+        window[local_index] = state[i];
+    }
+
+    return window;
+}
+
+std::vector<std::complex<double>> ConversionEngine::build_bridge_tensor(const SSD& left,
+                                                                        const SSD& right) const {
+    const std::size_t total = left.boundary_qubits.size() + right.boundary_qubits.size();
+    const std::size_t dim = 1ULL << total;
+    std::vector<std::complex<double>> tensor(dim, {0.0, 0.0});
+    if (!tensor.empty()) {
+        tensor[0] = {1.0, 0.0};
+    }
+    return tensor;
 }
 
 ConversionResult ConversionEngine::convert(const SSD& ssd) const {
@@ -101,22 +157,46 @@ StimTableau ConversionEngine::convert_boundary_to_tableau(const SSD& ssd) const 
     return StimTableau(ssd.boundary_qubits.size());
 }
 
-std::optional<StimTableau> ConversionEngine::try_build_tableau(const std::vector<std::complex<double>>& state) const {
+std::optional<StimTableau> ConversionEngine::try_build_tableau(
+    const std::vector<std::complex<double>>& state) const {
+    return learn_stabilizer(state);
+}
+
+std::optional<StimTableau> ConversionEngine::learn_stabilizer(
+    const std::vector<std::complex<double>>& state) const {
 
     if (state.empty()) {
         return std::nullopt;
     }
+
+    const std::size_t dim = state.size();
+
     // Check whether the state is |0...0>.
     bool zero_state = std::abs(state[0] - std::complex<double>(1.0, 0.0)) < 1e-9;
-    for (std::size_t i = 1; i < state.size() && zero_state; ++i) {
+    for (std::size_t i = 1; i < dim && zero_state; ++i) {
         if (std::abs(state[i]) > 1e-9) {
             zero_state = false;
         }
     }
     if (zero_state) {
-        std::size_t n = static_cast<std::size_t>(std::log2(state.size()));
+        std::size_t n = static_cast<std::size_t>(std::log2(dim));
         return StimTableau(n);
     }
+
+    // Check for the uniform superposition |+...+>.
+    bool plus_state = true;
+    const double target_mag = 1.0 / std::sqrt(static_cast<double>(dim));
+    for (const auto& amp : state) {
+        if (std::abs(std::abs(amp) - target_mag) > 1e-9) {
+            plus_state = false;
+            break;
+        }
+    }
+    if (plus_state) {
+        std::size_t n = static_cast<std::size_t>(std::log2(dim));
+        return StimTableau(n);
+    }
+
     return std::nullopt;
 }
 #endif
