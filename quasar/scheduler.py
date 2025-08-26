@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .planner import Planner, PlanStep
 from .cost import Backend
 from .circuit import Circuit
+from .ssd import SSD
 from .backends import (
     StatevectorBackend,
     MPSBackend,
@@ -41,7 +42,7 @@ class Scheduler:
             }
 
     # ------------------------------------------------------------------
-    def run(self, circuit: Circuit, monitor: CostHook | None = None) -> None:
+    def run(self, circuit: Circuit, monitor: CostHook | None = None) -> SSD:
         """Execute ``circuit`` according to a planner-derived schedule.
 
         Parameters
@@ -52,6 +53,11 @@ class Scheduler:
             Optional callback receiving ``(step, cost)``.  If the callback
             returns ``True`` the scheduler re-plans the remaining gates starting
             from ``step.end``.
+        Returns
+        -------
+        SSD
+            Descriptor of the simulated state after all gates have been
+            executed.
         """
 
         plan = self.planner.plan(circuit)
@@ -116,6 +122,10 @@ class Scheduler:
                     ]
                     steps = steps[: i + 1] + new_steps
             i += 1
+
+        if current_sim is not None:
+            return current_sim.extract_ssd()
+        return circuit.ssd
 
     # ------------------------------------------------------------------
     def _estimate_cost(self, backend: Backend, n: int, m: int) -> float:
