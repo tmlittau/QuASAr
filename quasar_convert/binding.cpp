@@ -58,6 +58,7 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("extract_local_window", &quasar::ConversionEngine::extract_local_window)
         .def("convert", &quasar::ConversionEngine::convert)
         .def("build_bridge_tensor", &quasar::ConversionEngine::build_bridge_tensor)
+        .def("convert_boundary_to_statevector", &quasar::ConversionEngine::convert_boundary_to_statevector)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
@@ -65,11 +66,14 @@ PYBIND11_MODULE(_conversion_engine, m) {
 #endif
 #ifdef QUASAR_USE_MQT
         .def("convert_boundary_to_dd", [](quasar::ConversionEngine& eng, const quasar::SSD& ssd) {
-            // Return the raw pointer of the decision diagram edge as an integer
-            // handle. This avoids binding the full dd::vEdge type while still
-            // allowing callers to verify that a non-null edge was produced.
+            // Expose the decision diagram edge as a lightweight handle.  A
+            // tuple ``(num_qubits, ptr)`` is returned where ``ptr`` encodes the
+            // underlying edge pointer.  This keeps the Python binding simple
+            // while still allowing backends to verify that a non-null edge was
+            // produced.
             auto edge = eng.convert_boundary_to_dd(ssd);
-            return reinterpret_cast<std::uintptr_t>(edge.p);
+            std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(edge.p);
+            return py::make_tuple(ssd.boundary_qubits.size(), ptr);
         })
 #endif
         ;
