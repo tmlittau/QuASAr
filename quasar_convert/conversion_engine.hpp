@@ -54,6 +54,29 @@ class ConversionEngine {
 
     SSD extract_ssd(const std::vector<uint32_t>& qubits, std::size_t s) const;
 
+    // Extract the set of boundary qubits participating in cross-fragment
+    // operations.  The input `bridges` lists gates that connect a qubit in the
+    // current fragment (first element of the pair) with a qubit in another
+    // fragment (second element).  A simple SSD descriptor is constructed from
+    // the unique local qubits appearing in the bridge set.
+    SSD extract_boundary_ssd(const std::vector<std::pair<uint32_t, uint32_t>>& bridges,
+                             std::size_t s) const;
+
+    // Return a vector containing the amplitudes of a local window of qubits.
+    // The window is specified by the indices in `window_qubits` and assumes all
+    // other qubits are in the |0> state.  The returned vector has dimension
+    // 2**len(window_qubits) and is ordered with qubit 0 as the least
+    // significant bit.
+    std::vector<std::complex<double>> extract_local_window(
+        const std::vector<std::complex<double>>& state,
+        const std::vector<uint32_t>& window_qubits) const;
+
+    // Construct a simple bridge tensor that links two fragments described by
+    // their SSD descriptors.  The tensor corresponds to an identity operation
+    // on all boundary qubits and is returned as a flat amplitude vector.
+    std::vector<std::complex<double>> build_bridge_tensor(const SSD& left,
+                                                          const SSD& right) const;
+
     // Choose a conversion primitive for the given SSD and simulate the
     // associated cost. The implementation uses simple heuristics based on the
     // boundary size and Schmidt rank to select between B2B, LW, ST and Full.
@@ -68,6 +91,12 @@ class ConversionEngine {
 #ifdef QUASAR_USE_STIM
     StimTableau convert_boundary_to_tableau(const SSD& ssd) const;
     std::optional<StimTableau> try_build_tableau(const std::vector<std::complex<double>>& state) const;
+    // Attempt to learn a stabilizer tableau from an arbitrary state vector.
+    // Currently supports the computational basis state |0...0> and the fully
+    // uniform superposition |+...+>.  Returns std::nullopt if the state does
+    // not appear to be a stabilizer state under these checks.
+    std::optional<StimTableau> learn_stabilizer(
+        const std::vector<std::complex<double>>& state) const;
 #endif
 
   private:
