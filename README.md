@@ -16,3 +16,10 @@ pip install .
 If a compiler is not available the build will fall back to a pure Python stub
 implementation with reduced performance but identical APIs.
 
+The project's dependencies are declared in `pyproject.toml`. For development,
+including running the test suite, install the package with its testing extras:
+
+```bash
+pip install -e .[test]
+```
+
