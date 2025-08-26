@@ -60,7 +60,9 @@ class Scheduler:
             executed.
         """
 
-        plan = self.planner.plan(circuit)
+        plan = self.planner.cache_lookup(circuit.gates)
+        if plan is None:
+            plan = self.planner.plan(circuit)
         steps: List[PlanStep] = list(plan.steps)
 
         current_backend = None
@@ -152,7 +154,9 @@ class Scheduler:
                 cost = self._estimate_cost(target, len(qubits), len(frag))
                 if monitor(step, cost):
                     remaining = Circuit(circuit.gates[step.end :])
-                    replanned = self.planner.plan(remaining)
+                    replanned = self.planner.cache_lookup(remaining.gates)
+                    if replanned is None:
+                        replanned = self.planner.plan(remaining)
                     offset = step.end
                     new_steps = [
                         PlanStep(s.start + offset, s.end + offset, s.backend)
