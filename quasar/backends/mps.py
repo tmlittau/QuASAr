@@ -54,6 +54,12 @@ class MPSBackend(Backend):
             tensor[0, 0, 0] = 1.0
         self.history.clear()
 
+    def ingest_state(self, data: Sequence[np.ndarray]) -> None:
+        """Ingest an MPS represented as a sequence of tensors."""
+        self.tensors = [np.array(t, dtype=complex) for t in data]
+        self.num_qubits = len(self.tensors)
+        self.history.clear()
+
     # ------------------------------------------------------------------
     def apply_gate(
         self,

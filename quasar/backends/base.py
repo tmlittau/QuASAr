@@ -51,6 +51,10 @@ class Backend:
         """
         raise NotImplementedError
 
+    def ingest_state(self, data: Any) -> None:
+        """Ingest an external state representation into the backend."""
+        raise NotImplementedError
+
     def extract_ssd(self) -> 'SSD':
         """Return a :class:`~quasar.ssd.SSD` describing the backend state."""
         raise NotImplementedError

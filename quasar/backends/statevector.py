@@ -52,6 +52,13 @@ class StatevectorBackend(Backend):
         self.state[0] = 1.0
         self.history.clear()
 
+    def ingest_state(self, data: np.ndarray) -> None:
+        """Ingest a dense statevector ``data`` into the backend."""
+        arr = np.asarray(data, dtype=complex)
+        self.state = arr.copy()
+        self.num_qubits = int(np.log2(arr.size))
+        self.history.clear()
+
     # ------------------------------------------------------------------
     def apply_gate(
         self,

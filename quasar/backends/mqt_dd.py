@@ -29,6 +29,12 @@ class DecisionDiagramBackend(Backend):
         self.history.clear()
         self.state = None
 
+    def ingest_state(self, data: object) -> None:
+        """Ingest a decision-diagram handle ``data`` into the backend."""
+        self.state = data
+        self.circuit = None
+        self.history.clear()
+
     def apply_gate(
         self,
         name: str,

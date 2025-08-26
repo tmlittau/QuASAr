@@ -29,6 +29,13 @@ class StimBackend(Backend):
         self.num_qubits = num_qubits
         self.history.clear()
 
+    def ingest_state(self, data: stim.Tableau) -> None:
+        """Ingest a Stim tableau ``data`` into the simulator."""
+        self.simulator = stim.TableauSimulator()
+        self.simulator.set_inverse_tableau(data)
+        self.num_qubits = len(data)
+        self.history.clear()
+
     def apply_gate(
         self,
         name: str,
