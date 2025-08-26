@@ -4,6 +4,7 @@ from .circuit import Gate, Circuit
 from .cost import Backend, Cost, ConversionEstimate, CostEstimator
 from .partitioner import Partitioner
 from .planner import Planner, PlanResult, PlanStep, DPEntry
+from .scheduler import Scheduler
 from .ssd import SSD, SSDPartition, ConversionLayer
 from .calibration import run_calibration, save_coefficients
 from .backends import (
@@ -26,6 +27,7 @@ __all__ = [
     "PlanResult",
     "PlanStep",
     "DPEntry",
+    "Scheduler",
     "SSD",
     "SSDPartition",
     "ConversionLayer",
