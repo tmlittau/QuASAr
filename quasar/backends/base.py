@@ -65,3 +65,13 @@ class Backend:
     def extract_ssd(self) -> 'SSD':
         """Return a :class:`~quasar.ssd.SSD` describing the backend state."""
         raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    def statevector(self) -> Sequence[complex]:
+        """Return the full statevector representing the backend state.
+
+        Backends that do not maintain a dense representation may override
+        this to reconstruct a statevector on demand or raise
+        ``NotImplementedError`` if such extraction is not supported.
+        """
+        raise NotImplementedError

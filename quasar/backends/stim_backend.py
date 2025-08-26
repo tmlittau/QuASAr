@@ -80,3 +80,11 @@ class StimBackend(Backend):
             backend=self.backend,
         )
         return SSD([part])
+
+    # ------------------------------------------------------------------
+    def statevector(self) -> Sequence[complex]:
+        """Return a dense statevector for the current tableau state."""
+        if self.simulator is None:
+            raise RuntimeError("Backend not initialised; call 'load' first")
+        # Stim returns a numpy array of complex amplitudes
+        return self.simulator.state_vector().astype(complex)
