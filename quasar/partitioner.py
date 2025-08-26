@@ -137,6 +137,63 @@ class Partitioner:
         return SSD(partitions=partitions, conversions=conversions)
 
     # ------------------------------------------------------------------
+    def parallel_groups(self, gates: List['Gate']) -> List[Tuple[Tuple[int, ...], List['Gate']]]:
+        """Analyse entanglement structure within ``gates``.
+
+        Parameters
+        ----------
+        gates:
+            Contiguous list of gates operating under the same simulation
+            backend.
+
+        Returns
+        -------
+        list
+            A list of ``(qubits, gate_list)`` tuples, one for each
+            independent subcircuit that can be simulated in parallel.
+        """
+
+        if not gates:
+            return []
+
+        all_qubits = sorted({q for g in gates for q in g.qubits})
+        q_to_idx = {q: i for i, q in enumerate(all_qubits)}
+        idx_to_q = {i: q for q, i in q_to_idx.items()}
+        n = len(all_qubits)
+
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        # Build connectivity graph ignoring gate order
+        for gate in gates:
+            qubits = [q_to_idx[q] for q in gate.qubits]
+            if len(qubits) > 1:
+                base = qubits[0]
+                for other in qubits[1:]:
+                    union(base, other)
+
+        groups: Dict[int, List['Gate']] = {find(i): [] for i in range(n)}
+        for gate in gates:
+            root = find(q_to_idx[gate.qubits[0]])
+            groups[root].append(gate)
+
+        result: List[Tuple[Tuple[int, ...], List['Gate']]] = []
+        for root, gate_list in groups.items():
+            qubits = tuple(idx_to_q[i] for i in range(n) if find(i) == root)
+            result.append((tuple(sorted(qubits)), gate_list))
+        return result
+
+    # ------------------------------------------------------------------
     def _choose_backend(self, gates: List['Gate'], num_qubits: int) -> Tuple[Backend, 'Cost']:
         """Select the best simulation backend for a partition."""
 

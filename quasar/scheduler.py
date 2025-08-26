@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Dict, List
+from concurrent.futures import ThreadPoolExecutor
 
 from .planner import Planner, PlanStep
 from .cost import Backend
@@ -77,8 +78,24 @@ class Scheduler:
             current_sim = backend
             current_backend = target
 
-            for gate in circuit.gates[step.start : step.end]:
-                current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+            segment = circuit.gates[step.start : step.end]
+            if step.parallel and len(step.parallel) > 1:
+                groups: List[List] = [[] for _ in step.parallel]
+                mapping = {q: idx for idx, grp in enumerate(step.parallel) for q in grp}
+
+                for gate in segment:
+                    grp = mapping[gate.qubits[0]]
+                    groups[grp].append(gate)
+
+                def run_group(glist):
+                    for g in glist:
+                        current_sim.apply_gate(g.gate, g.qubits, g.params)
+
+                with ThreadPoolExecutor() as executor:
+                    executor.map(run_group, groups)
+            else:
+                for gate in segment:
+                    current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
 
             if monitor:
                 frag = circuit.gates[step.start : step.end]
