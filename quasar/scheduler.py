@@ -76,16 +76,54 @@ class Scheduler:
                 backend.load(circuit.num_qubits)
             elif backend is not current_sim:
                 ssd = current_sim.extract_ssd()
+                layer = next(
+                    (
+                        c
+                        for c in circuit.ssd.conversions
+                        if c.source == current_backend and c.target == target
+                    ),
+                    None,
+                )
+                boundary = list(layer.boundary) if layer else []
+                rank = layer.rank if layer else 0
+                primitive = layer.primitive if layer else None
+                if primitive is None:
+                    try:
+                        res = self.conversion_engine.convert(ssd)  # type: ignore[arg-type]
+                        primitive = (
+                            res.primitive.name
+                            if hasattr(res.primitive, "name")
+                            else str(res.primitive)
+                        )
+                    except Exception:
+                        primitive = None
                 try:
-                    if target == Backend.TABLEAU:
-                        state = self.conversion_engine.convert_boundary_to_tableau(ssd)
-                    elif target == Backend.DECISION_DIAGRAM:
-                        state = self.conversion_engine.convert_boundary_to_dd(ssd)
+                    if primitive == "B2B":
+                        rep = self.conversion_engine.extract_ssd(boundary, rank)
+                    elif primitive == "LW":
+                        dim = 1 << len(boundary)
+                        state = [0j] * dim
+                        if dim:
+                            state[0] = 1.0 + 0j
+                        rep = self.conversion_engine.extract_local_window(state, boundary)
+                    elif primitive == "ST":
+                        left = self.conversion_engine.extract_ssd(boundary, rank)
+                        right = self.conversion_engine.extract_ssd(boundary, rank)
+                        rep = self.conversion_engine.build_bridge_tensor(left, right)
                     else:
-                        state = self.conversion_engine.convert_boundary_to_statevector(ssd)
-                    backend.ingest(state)
+                        raise ValueError("unknown primitive")
+                    backend.ingest(rep)
                 except Exception:
-                    backend.load(circuit.num_qubits)
+                    try:
+                        if target == Backend.TABLEAU:
+                            state = self.conversion_engine.convert_boundary_to_tableau(ssd)
+                        elif target == Backend.DECISION_DIAGRAM:
+                            state = self.conversion_engine.convert_boundary_to_dd(ssd)
+                        else:
+                            state = self.conversion_engine.convert_boundary_to_statevector(ssd)
+                        backend.ingest(state)
+                    except Exception:
+                        backend.load(circuit.num_qubits)
             current_sim = backend
             current_backend = target
 
