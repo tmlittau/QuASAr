@@ -92,7 +92,7 @@ class Partitioner:
 
                 boundary = sorted(current_qubits & future_qubits[idx])
                 if boundary:
-                    rank = min(2 ** len(boundary), 2 ** 8)
+                    rank = 2 ** len(boundary)
                     frontier = len(boundary)
                     conv_est = self.estimator.conversion(
                         current_backend,

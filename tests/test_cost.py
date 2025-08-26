@@ -1,4 +1,5 @@
 from quasar import Backend, CostEstimator
+import math
 
 
 def test_statevector_scaling():
@@ -53,3 +54,17 @@ def test_conversion_primitive_selection():
     )
     assert large.primitive == "LW"
     assert large.cost.time > small.cost.time
+
+
+def test_conversion_caps():
+    est = CostEstimator(q_max=2, r_max=2, s_max=4)
+    res = est.conversion(
+        Backend.STATEVECTOR,
+        Backend.TABLEAU,
+        num_qubits=3,
+        rank=8,
+        frontier=3,
+    )
+    assert res.primitive == "Full"
+    assert math.isinf(res.cost.time)
+    assert math.isinf(res.cost.memory)

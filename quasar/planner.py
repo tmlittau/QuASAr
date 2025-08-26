@@ -263,7 +263,7 @@ class Planner:
                         if prev_backend is not None and prev_backend != backend:
                             boundary = boundaries[j]
                             if boundary:
-                                rank = min(2 ** len(boundary), 2 ** 8)
+                                rank = 2 ** len(boundary)
                                 frontier = len(boundary)
                                 conv_est = self.estimator.conversion(
                                     prev_backend,
