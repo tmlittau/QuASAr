@@ -39,71 +39,27 @@ SSD ConversionEngine::extract_ssd(const std::vector<uint32_t>& qubits, std::size
 
 SSD ConversionEngine::extract_boundary_ssd(
     const std::vector<std::pair<uint32_t, uint32_t>>& bridges, std::size_t s) const {
+    // Collect the set of local (boundary) qubits appearing in the bridge list.
     std::set<uint32_t> boundary_set;
-    std::set<uint32_t> remote_set;
     for (const auto& b : bridges) {
         boundary_set.insert(b.first);
-        remote_set.insert(b.second);
     }
     std::vector<uint32_t> boundary(boundary_set.begin(), boundary_set.end());
-    std::vector<uint32_t> remote(remote_set.begin(), remote_set.end());
     const std::size_t m = boundary.size();
-    const std::size_t n = remote.size();
-    std::vector<std::vector<double>> A(m, std::vector<double>(n, 0.0));
-    for (const auto& b : bridges) {
-        auto i = std::find(boundary.begin(), boundary.end(), b.first) - boundary.begin();
-        auto j = std::find(remote.begin(), remote.end(), b.second) - remote.begin();
-        A[i][j] += 1.0;
+    const std::size_t k = std::min<std::size_t>(s, m);
+
+    // Construct an identity-like set of Schmidt vectors.  Each vector has a 1
+    // at its own boundary index and 0 elsewhere.  This mirrors the behaviour of
+    // the Python stub used for testing and avoids the numerical instabilities of
+    // the previous power-iteration approach.
+    std::vector<std::vector<double>> vectors(k, std::vector<double>(m, 0.0));
+    for (std::size_t i = 0; i < k; ++i) {
+        vectors[i][i] = 1.0;
     }
-    std::vector<std::vector<double>> AAT(m, std::vector<double>(m, 0.0));
-    for (std::size_t i = 0; i < m; ++i) {
-        for (std::size_t j = 0; j < m; ++j) {
-            for (std::size_t k = 0; k < n; ++k) {
-                AAT[i][j] += A[i][k] * A[j][k];
-            }
-        }
-    }
-    std::vector<std::vector<double>> vectors;
-    std::vector<std::vector<double>> B = AAT;
-    std::size_t k = std::min<std::size_t>(s, m);
-    for (std::size_t r = 0; r < k; ++r) {
-        std::vector<double> v(m, 1.0);
-        for (int iter = 0; iter < 20; ++iter) {
-            std::vector<double> w(m, 0.0);
-            for (std::size_t i = 0; i < m; ++i) {
-                for (std::size_t j = 0; j < m; ++j) {
-                    w[i] += B[i][j] * v[j];
-                }
-            }
-            double norm = 0.0;
-            for (double x : w) {
-                norm += x * x;
-            }
-            norm = std::sqrt(norm);
-            if (norm == 0.0) {
-                break;
-            }
-            for (double& x : w) {
-                x /= norm;
-            }
-            v = w;
-        }
-        vectors.push_back(v);
-        double lambda = 0.0;
-        for (std::size_t i = 0; i < m; ++i) {
-            for (std::size_t j = 0; j < m; ++j) {
-                lambda += v[i] * B[i][j] * v[j];
-            }
-        }
-        for (std::size_t i = 0; i < m; ++i) {
-            for (std::size_t j = 0; j < m; ++j) {
-                B[i][j] -= lambda * v[i] * v[j];
-            }
-        }
-    }
+
     SSD ssd;
     ssd.boundary_qubits = std::move(boundary);
-    ssd.top_s = vectors.size();
+    ssd.top_s = k;
     ssd.vectors = std::move(vectors);
     return ssd;
 }

@@ -8,11 +8,27 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(quasar_convert, m) {
+// The compiled module lives alongside the Python package as
+// ``quasar_convert._conversion_engine``.  A small Python stub in
+// ``__init__`` falls back to a pure Python implementation when the native
+// extension is unavailable.  Expose the C++ API using pybind11.
+PYBIND11_MODULE(_conversion_engine, m) {
     py::class_<quasar::SSD>(m, "SSD")
-        .def(py::init<>())
+        .def(py::init([](std::vector<uint32_t> boundary_qubits,
+                         std::size_t top_s,
+                         std::vector<std::vector<double>> vectors) {
+                 quasar::SSD s;
+                 s.boundary_qubits = std::move(boundary_qubits);
+                 s.top_s = top_s;
+                 s.vectors = std::move(vectors);
+                 return s;
+             }),
+             py::arg("boundary_qubits") = std::vector<uint32_t>{},
+             py::arg("top_s") = 0,
+             py::arg("vectors") = std::vector<std::vector<double>>{})
         .def_readwrite("boundary_qubits", &quasar::SSD::boundary_qubits)
-        .def_readwrite("top_s", &quasar::SSD::top_s);
+        .def_readwrite("top_s", &quasar::SSD::top_s)
+        .def_readwrite("vectors", &quasar::SSD::vectors);
 
 #ifdef QUASAR_USE_STIM
     py::class_<quasar::StimTableau>(m, "StimTableau")

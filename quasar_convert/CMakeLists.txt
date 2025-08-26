@@ -46,17 +46,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
-pybind11_add_module(quasar_convert MODULE conversion_engine.cpp binding.cpp)
+# Build the Python extension as ``quasar_convert._conversion_engine``.
+pybind11_add_module(_conversion_engine MODULE conversion_engine.cpp binding.cpp)
+
+# Install the compiled module into the package directory so ``pip install .``
+# produces a usable wheel.
+install(TARGETS _conversion_engine DESTINATION quasar_convert)
 
 if(QUASAR_USE_STIM)
-target_link_libraries(quasar_convert PRIVATE libstim)
-target_compile_definitions(quasar_convert PRIVATE QUASAR_USE_STIM)
+target_link_libraries(_conversion_engine PRIVATE libstim)
+target_compile_definitions(_conversion_engine PRIVATE QUASAR_USE_STIM)
 endif()
 
 if(QUASAR_USE_MQT)
-target_link_libraries(quasar_convert PRIVATE MQT::DDPackage)
-target_include_directories(quasar_convert PRIVATE ${mqtcore_SOURCE_DIR}/extern/dd_package/include)
-target_compile_definitions(quasar_convert PRIVATE QUASAR_USE_MQT)
+target_link_libraries(_conversion_engine PRIVATE MQT::DDPackage)
+target_include_directories(_conversion_engine PRIVATE ${mqtcore_SOURCE_DIR}/extern/dd_package/include)
+target_compile_definitions(_conversion_engine PRIVATE QUASAR_USE_MQT)
 endif()
 
 enable_testing()
