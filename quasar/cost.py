@@ -48,7 +48,14 @@ class CostEstimator:
     ``w``).  Constants can be tuned using the ``coeff`` dictionary.
     """
 
-    def __init__(self, coeff: Optional[Dict[str, float]] = None):
+    def __init__(
+        self,
+        coeff: Optional[Dict[str, float]] = None,
+        *,
+        s_max: Optional[int] = None,
+        r_max: Optional[int] = None,
+        q_max: Optional[int] = None,
+    ):
         # Baseline coefficients; tuned empirically in a full system.
         self.coeff: Dict[str, float] = {
             "sv_gate": 1.0,
@@ -73,6 +80,10 @@ class CostEstimator:
         }
         if coeff:
             self.coeff.update(coeff)
+        # Policy caps for planner heuristics
+        self.s_max = s_max
+        self.r_max = r_max
+        self.q_max = q_max
 
     # ------------------------------------------------------------------
     def update_coefficients(self, updates: Dict[str, float]) -> None:
@@ -123,6 +134,10 @@ class CostEstimator:
         rank: int,
         frontier: int,
         window: Optional[int] = None,
+        *,
+        s_max: Optional[int] = None,
+        r_max: Optional[int] = None,
+        q_max: Optional[int] = None,
     ) -> ConversionEstimate:
         """Estimate cost to convert between representations.
 
@@ -139,6 +154,17 @@ class CostEstimator:
         window:
             Optional dense extraction window ``w`` for the LW primitive.
         """
+
+        s_cap = s_max if s_max is not None else self.s_max
+        r_cap = r_max if r_max is not None else self.r_max
+        q_cap = q_max if q_max is not None else self.q_max
+
+        if (
+            (q_cap is not None and num_qubits > q_cap)
+            or (s_cap is not None and rank > s_cap)
+            or (r_cap is not None and frontier > r_cap)
+        ):
+            return ConversionEstimate("Full", Cost(float("inf"), float("inf")))
 
         # --- B2B primitive ---
         b2b_time = (
