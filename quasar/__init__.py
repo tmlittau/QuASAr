@@ -5,6 +5,7 @@ from .cost import Backend, Cost, ConversionEstimate, CostEstimator
 from .partitioner import Partitioner
 from .planner import Planner, PlanResult, PlanStep, DPEntry
 from .ssd import SSD, SSDPartition, ConversionLayer
+from .calibration import run_calibration, save_coefficients
 from .backends import (
     Backend as SimulatorBackend,
     StatevectorBackend,
@@ -28,6 +29,8 @@ __all__ = [
     "SSD",
     "SSDPartition",
     "ConversionLayer",
+    "run_calibration",
+    "save_coefficients",
     "SimulatorBackend",
     "StatevectorBackend",
     "MPSBackend",
