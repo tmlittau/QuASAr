@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .quasar_cache/
 quasar_convert/build/
+Pipfile
+.vscode/

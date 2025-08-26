@@ -1,0 +1,6 @@
+mqt-core==3.2.1
+mqt.ddsim==2.0.0
+pytest==8.4.1
+qiskit==2.1.2
+qiskit-qasm3-import==0.6.0
+stim==1.15.0
