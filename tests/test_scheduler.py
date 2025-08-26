@@ -15,11 +15,15 @@ class CountingConversionEngine(ConversionEngine):
 
     def convert_boundary_to_tableau(self, ssd):  # type: ignore[override]
         self.calls += 1
-        return super().convert_boundary_to_tableau(ssd)
+        if hasattr(ConversionEngine, "convert_boundary_to_tableau"):
+            return super().convert_boundary_to_tableau(ssd)
+        raise AttributeError("convert_boundary_to_tableau not available")
 
     def convert_boundary_to_dd(self, ssd):  # type: ignore[override]
         self.calls += 1
-        return super().convert_boundary_to_dd(ssd)
+        if hasattr(ConversionEngine, "convert_boundary_to_dd"):
+            return super().convert_boundary_to_dd(ssd)
+        raise AttributeError("convert_boundary_to_dd not available")
 
 
 def build_switch_circuit():
