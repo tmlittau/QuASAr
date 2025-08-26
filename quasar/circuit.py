@@ -12,6 +12,7 @@ from qiskit_qasm3_import import api as qasm3_api
 
 from .partitioner import Partitioner
 from .ssd import SSD
+from .cost import Cost
 
 
 @dataclass
@@ -107,53 +108,11 @@ class Circuit:
         """Construct the initial subsystem descriptor."""
         return Partitioner().partition(self)
 
-    def _estimate_costs(self) -> Dict[str, float]:
-        """Summarise estimated simulation and conversion costs.
+    def _estimate_costs(self) -> Dict[str, Cost]:
+        """Estimate simulation costs for standard backends."""
 
-        The subsystem descriptor produced by :class:`Partitioner` stores a
-        :class:`~quasar.cost.Cost` object for each partition and conversion
-        layer.  This routine aggregates those estimates to provide a concise
-        circuit level view.  Runtime contributions are summed whereas memory
-        requirements track the largest individual peak, mirroring the
-        ``_add_cost`` helper used by the planner.
+        from .analyzer import CircuitAnalyzer
 
-        Returns
-        -------
-        Dict[str, float]
-            Mapping containing per-backend runtime and memory summaries as
-            well as overall totals.  Keys follow ``"{backend}_time"`` and
-            ``"{backend}_mem"`` naming conventions using backend short names
-            (``sv``, ``tab``, ``mps`` and ``dd``).
-        """
-
-        if not self.ssd.partitions and not self.ssd.conversions:
-            return {}
-
-        estimates: Dict[str, float] = {}
-        total_time = 0.0
-        peak_memory = 0.0
-
-        # Aggregate cost for each simulation backend.
-        for backend, parts in self.ssd.by_backend().items():
-            time = sum(p.cost.time * p.multiplicity for p in parts)
-            memory = max((p.cost.memory for p in parts), default=0.0)
-
-            estimates[f"{backend.value}_time"] = time
-            estimates[f"{backend.value}_mem"] = memory
-
-            total_time += time
-            peak_memory = max(peak_memory, memory)
-
-        # Include conversion layers between partitions.
-        conv_time = sum(c.cost.time for c in self.ssd.conversions)
-        conv_mem = max((c.cost.memory for c in self.ssd.conversions), default=0.0)
-        if conv_time > 0.0:
-            estimates["conversion_time"] = conv_time
-            total_time += conv_time
-        if conv_mem > 0.0:
-            estimates["conversion_mem"] = conv_mem
-            peak_memory = max(peak_memory, conv_mem)
-
-        estimates["total_time"] = total_time
-        estimates["peak_memory"] = peak_memory
-        return estimates
+        analyzer = CircuitAnalyzer(self)
+        estimates = analyzer.resource_estimates()
+        return {backend.name.lower(): cost for backend, cost in estimates.items()}

@@ -14,6 +14,7 @@ from .backends import (
     StimBackend,
     DecisionDiagramBackend,
 )
+from .analyzer import CircuitAnalyzer, AnalysisResult
 
 __all__ = [
     "Gate",
@@ -38,4 +39,6 @@ __all__ = [
     "MPSBackend",
     "StimBackend",
     "DecisionDiagramBackend",
+    "CircuitAnalyzer",
+    "AnalysisResult",
 ]
