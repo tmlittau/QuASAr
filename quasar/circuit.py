@@ -12,6 +12,7 @@ from qiskit_qasm3_import import api as qasm3_api
 
 from .partitioner import Partitioner
 from .ssd import SSD
+from .cost import Cost
 
 
 @dataclass
@@ -107,6 +108,11 @@ class Circuit:
         """Construct the initial subsystem descriptor."""
         return Partitioner().partition(self)
 
-    def _estimate_costs(self) -> Dict[str, float]:
-        """Placeholder cost estimation routine."""
-        return {}
+    def _estimate_costs(self) -> Dict[str, Cost]:
+        """Estimate simulation costs for standard backends."""
+
+        from .analyzer import CircuitAnalyzer
+
+        analyzer = CircuitAnalyzer(self)
+        estimates = analyzer.resource_estimates()
+        return {backend.name.lower(): cost for backend, cost in estimates.items()}
