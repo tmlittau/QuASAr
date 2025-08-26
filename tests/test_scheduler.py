@@ -1,5 +1,7 @@
 from quasar import Circuit, Scheduler, Planner
 from quasar_convert import ConversionEngine
+from quasar.cost import Backend
+import time
 
 
 class CountingConversionEngine(ConversionEngine):
@@ -55,3 +57,37 @@ def test_scheduler_reoptimises_when_requested():
 
     scheduler.run(circuit, monitor=monitor)
     assert planner.calls >= 2
+
+
+class SleepBackend:
+    def load(self, n):
+        pass
+
+    def apply_gate(self, gate, qubits, params):
+        time.sleep(0.2)
+
+    def extract_ssd(self):  # pragma: no cover - not used
+        return None
+
+    def ingest(self, ssd):  # pragma: no cover - not used
+        pass
+
+
+def test_parallel_execution_on_independent_subcircuits():
+    circuit = Circuit([
+        {"gate": "T", "qubits": [0]},
+        {"gate": "T", "qubits": [1]},
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [1]},
+    ])
+    scheduler = Scheduler(
+        backends={
+            Backend.STATEVECTOR: SleepBackend(),
+            Backend.DECISION_DIAGRAM: SleepBackend(),
+        },
+        planner=Planner(),
+    )
+    start = time.time()
+    scheduler.run(circuit)
+    duration = time.time() - start
+    assert duration < 0.7

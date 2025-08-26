@@ -11,10 +11,10 @@ an optimal execution plan.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Iterable, Set
+from typing import Dict, List, Optional, Iterable, Set, Tuple
 
 from .cost import Backend, Cost, CostEstimator
-from .partitioner import CLIFFORD_GATES
+from .partitioner import CLIFFORD_GATES, Partitioner
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -29,11 +29,24 @@ if True:  # pragma: no cover - used for type checking when available
 
 @dataclass
 class PlanStep:
-    """Single contiguous fragment of the circuit."""
+    """Single contiguous fragment of the circuit.
+
+    Attributes
+    ----------
+    start, end:
+        Gate index range ``[start, end)`` represented by this step.
+    backend:
+        Simulation backend chosen for this fragment.
+    parallel:
+        Optional groups of qubits that are independent within the
+        fragment and can therefore be executed in parallel.  Each entry
+        is a tuple of qubit indices belonging to one independent group.
+    """
 
     start: int
     end: int
     backend: Backend
+    parallel: Tuple[Tuple[int, ...], ...] = ()
 
 
 @dataclass
@@ -61,6 +74,7 @@ class PlanResult:
 
     table: List[Dict[Optional[Backend], DPEntry]]
     final_backend: Optional[Backend]
+    gates: List['Gate']
 
     # The ``steps`` property recovers the final plan lazily using the
     # backpointers contained in ``table``.
@@ -92,9 +106,20 @@ class PlanResult:
         steps: List[PlanStep] = []
         i = index
         b = backend
+        part = Partitioner()
         while i > 0 and b is not None:
             entry = self.table[i][b]
-            steps.append(PlanStep(start=entry.prev_index, end=i, backend=b))
+            segment = self.gates[entry.prev_index:i]
+            groups = part.parallel_groups(segment)
+            qubits = tuple(g[0] for g in groups) if groups else ()
+            steps.append(
+                PlanStep(
+                    start=entry.prev_index,
+                    end=i,
+                    backend=b,
+                    parallel=qubits,
+                )
+            )
             i = entry.prev_index
             b = entry.prev_backend
         steps.reverse()
@@ -198,7 +223,11 @@ class Planner:
         gates = circuit.gates
         n = len(gates)
         if n == 0:
-            return PlanResult(table=[{None: DPEntry(cost=Cost(0, 0), prev_index=0, prev_backend=None)}], final_backend=None)
+            return PlanResult(
+                table=[{None: DPEntry(cost=Cost(0, 0), prev_index=0, prev_backend=None)}],
+                final_backend=None,
+                gates=[],
+            )
 
         # Pre-compute prefix and future qubit sets to derive boundary sizes.
         prefix_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
@@ -262,7 +291,7 @@ class Planner:
         if final_entries:
             backend = min(final_entries.items(), key=lambda kv: kv[1].cost.time)[0]
 
-        return PlanResult(table=table, final_backend=backend)
+        return PlanResult(table=table, final_backend=backend, gates=gates)
 
 
 __all__ = ["Planner", "PlanResult", "PlanStep", "DPEntry"]
