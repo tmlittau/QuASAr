@@ -14,12 +14,19 @@ ConversionEngine::ConversionEngine() {
 #endif
 }
 
-std::pair<double, double> ConversionEngine::estimate_cost(std::size_t fragment_size, Backend backend) const {
-    // Simple placeholder model: cost grows linearly with fragment size.
-    double time_cost = static_cast<double>(fragment_size);
-    double memory_cost = static_cast<double>(fragment_size) * 0.1;
+std::pair<double, double> ConversionEngine::estimate_cost(std::size_t fragment_size,
+                                                          Backend backend) const {
+    // Very small toy cost model used by the tests.  The time cost scales
+    // quadratically with the fragment size while the memory cost grows with
+    // ``n log n``.  Different backends apply light weight modifiers so that the
+    // numbers vary in a predictable manner without requiring a detailed
+    // performance model.
+    double n = static_cast<double>(fragment_size);
+    double time_cost = n * n;
+    double memory_cost = n * std::log2(n + 1.0);
     if (backend == Backend::DecisionDiagram) {
-        time_cost *= 1.5;  // assume DD conversion is slightly more expensive
+        time_cost *= 1.2;
+        memory_cost *= 0.8;
     }
     return {time_cost, memory_cost};
 }
@@ -39,22 +46,80 @@ SSD ConversionEngine::extract_ssd(const std::vector<uint32_t>& qubits, std::size
 
 SSD ConversionEngine::extract_boundary_ssd(
     const std::vector<std::pair<uint32_t, uint32_t>>& bridges, std::size_t s) const {
-    // Collect the set of local (boundary) qubits appearing in the bridge list.
+    // Determine which local and remote qubits participate in a bridge.
     std::set<uint32_t> boundary_set;
+    std::set<uint32_t> remote_set;
     for (const auto& b : bridges) {
         boundary_set.insert(b.first);
+        remote_set.insert(b.second);
     }
     std::vector<uint32_t> boundary(boundary_set.begin(), boundary_set.end());
+    std::vector<uint32_t> remote(remote_set.begin(), remote_set.end());
     const std::size_t m = boundary.size();
+    const std::size_t n = remote.size();
     const std::size_t k = std::min<std::size_t>(s, m);
 
-    // Construct an identity-like set of Schmidt vectors.  Each vector has a 1
-    // at its own boundary index and 0 elsewhere.  This mirrors the behaviour of
-    // the Python stub used for testing and avoids the numerical instabilities of
-    // the previous power-iteration approach.
-    std::vector<std::vector<double>> vectors(k, std::vector<double>(m, 0.0));
-    for (std::size_t i = 0; i < k; ++i) {
-        vectors[i][i] = 1.0;
+    // Build the connection matrix ``A`` whose rows correspond to local boundary
+    // qubits and columns to remote qubits.  ``A[i][j]`` counts how many bridges
+    // connect the ``i``-th boundary qubit to the ``j``-th remote qubit.
+    std::vector<std::vector<double>> A(m, std::vector<double>(n, 0.0));
+    for (const auto& br : bridges) {
+        auto i = std::find(boundary.begin(), boundary.end(), br.first) - boundary.begin();
+        auto j = std::find(remote.begin(), remote.end(), br.second) - remote.begin();
+        A[i][j] += 1.0;
+    }
+
+    // Form the Gram matrix ``G = A * A^T``.  The leading eigenvectors of ``G``
+    // correspond to the left singular vectors of ``A`` and describe the dominant
+    // boundary directions.  A small power-iteration with Gram-Schmidt
+    // orthogonalisation is sufficient for the matrix sizes encountered in the
+    // tests.
+    std::vector<std::vector<double>> G(m, std::vector<double>(m, 0.0));
+    for (std::size_t i = 0; i < m; ++i) {
+        for (std::size_t j = 0; j < m; ++j) {
+            for (std::size_t r = 0; r < n; ++r) {
+                G[i][j] += A[i][r] * A[j][r];
+            }
+        }
+    }
+
+    std::vector<std::vector<double>> vectors;
+    vectors.reserve(k);
+    for (std::size_t vec = 0; vec < k; ++vec) {
+        std::vector<double> v(m, 0.0);
+        v[vec % m] = 1.0;  // deterministic initial guess
+        for (std::size_t iter = 0; iter < 20; ++iter) {
+            // Multiply by Gram matrix
+            std::vector<double> w(m, 0.0);
+            for (std::size_t i = 0; i < m; ++i) {
+                for (std::size_t j = 0; j < m; ++j) {
+                    w[i] += G[i][j] * v[j];
+                }
+            }
+            // Orthogonalise against previously found vectors
+            for (const auto& prev : vectors) {
+                double dot = 0.0;
+                for (std::size_t i = 0; i < m; ++i) {
+                    dot += w[i] * prev[i];
+                }
+                for (std::size_t i = 0; i < m; ++i) {
+                    w[i] -= dot * prev[i];
+                }
+            }
+            // Normalise
+            double norm = 0.0;
+            for (double x : w) {
+                norm += x * x;
+            }
+            norm = std::sqrt(norm);
+            if (norm < 1e-12) {
+                break;
+            }
+            for (std::size_t i = 0; i < m; ++i) {
+                v[i] = w[i] / norm;
+            }
+        }
+        vectors.push_back(v);
     }
 
     SSD ssd;
@@ -103,53 +168,30 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
     const std::size_t boundary = ssd.boundary_qubits.size();
     const std::size_t rank = ssd.top_s;
 
-    Primitive chosen;
-    double cost = 0.0;
+    // Small analytical cost estimates for the different primitives.  These are
+    // intentionally lightweight and only capture the general scaling of the
+    // algorithms.  Thresholds mirror those used in the Python reference
+    // implementation.
+    const double cost_b2b = static_cast<double>(boundary) * rank * rank;
+    const double cost_lw = std::pow(2.0, static_cast<double>(std::min<std::size_t>(boundary, 4)));
+    const double cost_st = static_cast<double>(boundary) * rank;
+    const double cost_full = std::pow(2.0, static_cast<double>(std::min<std::size_t>(boundary, 16)));
 
-    // Heuristics inspired by the draft:
-    // - B2B for small rank and small boundary.
-    // - LW for larger boundaries but still within a manageable window.
-    // - ST for moderate/large rank where approximation is attempted.
-    // - Full as a last resort.
+    Primitive chosen;
+    double cost;
     if (rank <= 4 && boundary <= 6) {
         chosen = Primitive::B2B;
-        // Simulate cubic cost with nested loops.
-        for (std::size_t i = 0; i < rank; ++i) {
-            for (std::size_t j = 0; j < rank; ++j) {
-                for (std::size_t k = 0; k < rank; ++k) {
-                    cost += static_cast<double>((i + j + k) % 5);
-                }
-            }
-        }
+        cost = cost_b2b;
     } else if (boundary <= 10) {
         chosen = Primitive::LW;
-        const std::size_t w = std::min<std::size_t>(boundary, 4);
-        const std::size_t dim = 1ULL << w;
-        std::vector<std::complex<double>> window(dim);
-        for (std::size_t i = 0; i < dim; ++i) {
-            window[i] = std::complex<double>(0.0, 0.0);
-        }
-        cost = static_cast<double>(dim);
+        cost = cost_lw;
     } else if (rank <= 16) {
         chosen = Primitive::ST;
-        const std::size_t chi = std::min<std::size_t>(rank, 8);
-        for (std::size_t i = 0; i < chi; ++i) {
-            for (std::size_t j = 0; j < chi; ++j) {
-                for (std::size_t k = 0; k < chi; ++k) {
-                    cost += static_cast<double>((i * j + k) % 7);
-                }
-            }
-        }
+        cost = cost_st;
     } else {
         chosen = Primitive::Full;
-        const std::size_t dim = 1ULL << std::min<std::size_t>(boundary, 16);
-        std::vector<std::complex<double>> state(dim);
-        for (std::size_t i = 0; i < dim; ++i) {
-            state[i] = std::complex<double>(0.0, 0.0);
-        }
-        cost = static_cast<double>(dim);
+        cost = cost_full;
     }
-
     return {chosen, cost};
 }
 
@@ -192,31 +234,61 @@ std::optional<StimTableau> ConversionEngine::learn_stabilizer(
     try {
         return StimTableau::from_state_vector(state);
     } catch (...) {
-        // Fall back to simple heuristic checks if Stim fails.
+        // Fall back to a handful of analytically recognisable states.  These
+        // checks are deliberately conservative – if the state does not clearly
+        // match a known stabilizer form we return ``nullopt`` instead of
+        // attempting an expensive reconstruction.
     }
+
     const std::size_t dim = state.size();
-    bool zero_state = std::abs(state[0] - std::complex<double>(1.0, 0.0)) < 1e-9;
-    for (std::size_t i = 1; i < dim && zero_state; ++i) {
-        if (std::abs(state[i]) > 1e-9) {
-            zero_state = false;
+    const std::size_t n = static_cast<std::size_t>(std::log2(dim));
+
+    // Check for a computational basis state |i>.
+    std::size_t nonzero = dim;  // index of the non-zero amplitude
+    bool basis_state = true;
+    for (std::size_t i = 0; i < dim; ++i) {
+        double mag = std::norm(state[i]);
+        if (mag > 1e-9) {
+            if (std::abs(mag - 1.0) > 1e-9 || nonzero != dim) {
+                basis_state = false;
+                break;
+            }
+            nonzero = i;
         }
     }
-    if (zero_state) {
-        std::size_t n = static_cast<std::size_t>(std::log2(dim));
+    if (basis_state && nonzero < dim) {
         return StimTableau(n);
     }
-    bool plus_state = true;
+
+    // Check for an equal superposition where amplitudes have magnitude
+    // ``1/sqrt(dim)`` and phases in {1, -1, i, -i} up to a global phase.
     const double target_mag = 1.0 / std::sqrt(static_cast<double>(dim));
+    auto phase_ok = [](std::complex<double> z) {
+        static const std::complex<double> phases[] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (const auto& p : phases) {
+            if (std::abs(z - p) < 1e-9) {
+                return true;
+            }
+        }
+        return false;
+    };
+    bool uniform_state = true;
+    std::complex<double> ref_phase = state[0] / target_mag;
     for (const auto& amp : state) {
         if (std::abs(std::abs(amp) - target_mag) > 1e-9) {
-            plus_state = false;
+            uniform_state = false;
+            break;
+        }
+        std::complex<double> rel = amp / target_mag / ref_phase;
+        if (!phase_ok(rel)) {
+            uniform_state = false;
             break;
         }
     }
-    if (plus_state) {
-        std::size_t n = static_cast<std::size_t>(std::log2(dim));
+    if (uniform_state) {
         return StimTableau(n);
     }
+
     return std::nullopt;
 }
 #endif
