@@ -61,12 +61,18 @@ class StatevectorBackend(Backend):
     ) -> None:
         if self.state is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
+        lname = name.upper()
+        if lname == "BRIDGE":
+            # Bridge tensors act as identities in this toy backend but we record
+            # their application for testing purposes.
+            self.history.append(lname)
+            return
 
-        gate = self._GATES.get(name.upper())
+        gate = self._GATES.get(lname)
         if gate is None:
             raise ValueError(f"Unsupported gate {name}")
 
-        self.history.append(name.upper())
+        self.history.append(lname)
         k = len(qubits)
         order = list(qubits) + [i for i in range(self.num_qubits) if i not in qubits]
         state = self.state.reshape([2] * self.num_qubits).transpose(order)

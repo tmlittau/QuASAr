@@ -38,7 +38,7 @@ class StimBackend(Backend):
         if self.simulator is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = self._ALIASES.get(name.upper(), name.lower())
-        if lname == "i" or lname == "id":
+        if lname in {"i", "id", "bridge"}:
             self.history.append(name.upper())
             return
         if lname == "cswap":

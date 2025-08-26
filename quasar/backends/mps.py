@@ -61,10 +61,16 @@ class MPSBackend(Backend):
         qubits: Sequence[int],
         params: Dict[str, float] | None = None,
     ) -> None:
-        gate = self._GATES.get(name.upper())
+        lname = name.upper()
+        if lname == "BRIDGE":
+            # Bridge tensors are identities for this reference backend.
+            self.history.append(lname)
+            return
+
+        gate = self._GATES.get(lname)
         if gate is None:
             raise ValueError(f"Unsupported gate {name}")
-        self.history.append(name.upper())
+        self.history.append(lname)
 
         if len(qubits) == 1:
             i = qubits[0]

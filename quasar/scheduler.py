@@ -56,29 +56,81 @@ class Scheduler:
         plan = self.planner.plan(circuit)
         steps: List[PlanStep] = list(plan.steps)
 
+        # Track qubit sets for each fragment to identify cross-fragment gates
+        step_qubits: List[set[int]] = [
+            {q for g in circuit.gates[s.start : s.end] for q in g.qubits}
+            for s in steps
+        ]
+
         current_backend = None
         current_sim = None
+        prev_sim = None
+        prev_qubits: set[int] = set()
+
         i = 0
         while i < len(steps):
             step = steps[i]
             target = step.backend
             backend = self.backends[target]
+            qubits = step_qubits[i]
+
+            gates = circuit.gates[step.start : step.end]
+
+            # Determine whether this fragment contains gates that span the
+            # previous fragment. This happens when a gate touches qubits from
+            # ``prev_qubits`` and qubits outside that set simultaneously.
+            spans_previous = any(
+                any(q in prev_qubits for q in g.qubits)
+                and any(q not in prev_qubits for q in g.qubits)
+                for g in gates
+            )
 
             # Prepare backend and perform conversions when switching
             if current_sim is None:
                 backend.load(circuit.num_qubits)
+                current_sim = backend
             elif backend is not current_sim:
-                ssd = current_sim.extract_ssd()
-                self.conversion_engine.convert(ssd)
-                backend.load(circuit.num_qubits)
-            current_sim = backend
-            current_backend = target
+                if spans_previous:
+                    # Keep ``current_sim`` alive for bridge operations and load
+                    # the new backend separately.
+                    backend.load(circuit.num_qubits)
+                    prev_sim = current_sim
+                    current_sim = backend
+                else:
+                    ssd = current_sim.extract_ssd()
+                    self.conversion_engine.convert(ssd)
+                    backend.load(circuit.num_qubits)
+                    current_sim = backend
 
-            for gate in circuit.gates[step.start : step.end]:
-                current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+            # Execute gates, building bridge tensors when required
+            for gate in gates:
+                crosses = prev_sim is not None and (
+                    any(q in prev_qubits for q in gate.qubits)
+                    and any(q not in prev_qubits for q in gate.qubits)
+                )
+                if crosses and prev_sim is not None:
+                    boundary = sorted(prev_qubits & set(gate.qubits))
+                    left = self.conversion_engine.extract_ssd(boundary, 0)
+                    right = self.conversion_engine.extract_ssd(
+                        sorted(set(gate.qubits) - prev_qubits), 0
+                    )
+                    tensor = self.conversion_engine.build_bridge_tensor(left, right)
+                    prev_sim.apply_gate("BRIDGE", boundary)
+                    current_sim.apply_gate("BRIDGE", boundary)
+                    prev_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+                    current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+                else:
+                    current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+
+            # After processing the gates we can discard the previous fragment if
+            # a bridge was used and convert its state for bookkeeping.
+            if prev_sim is not None and spans_previous:
+                ssd = prev_sim.extract_ssd()
+                self.conversion_engine.convert(ssd)
+                prev_sim = None
 
             if monitor:
-                frag = circuit.gates[step.start : step.end]
+                frag = gates
                 qubits = {q for g in frag for q in g.qubits}
                 cost = self._estimate_cost(target, len(qubits), len(frag))
                 if monitor(step, cost):
@@ -90,6 +142,9 @@ class Scheduler:
                         for s in replanned.steps
                     ]
                     steps = steps[: i + 1] + new_steps
+
+            prev_qubits = qubits
+            current_backend = target
             i += 1
 
     # ------------------------------------------------------------------

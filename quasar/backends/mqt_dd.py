@@ -38,6 +38,9 @@ class DecisionDiagramBackend(Backend):
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = self._ALIASES.get(name.upper(), name.lower())
+        if lname == "bridge":
+            self.history.append(name.upper())
+            return
         func = getattr(self.circuit, lname, None)
         if func is None:
             raise ValueError(f"Unsupported MQT DD gate {name}")
