@@ -153,6 +153,15 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
     return {chosen, cost};
 }
 
+std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevector(const SSD& ssd) const {
+    const std::size_t dim = 1ULL << ssd.boundary_qubits.size();
+    std::vector<std::complex<double>> state(dim, {0.0, 0.0});
+    if (dim > 0) {
+        state[0] = {1.0, 0.0};
+    }
+    return state;
+}
+
 #ifdef QUASAR_USE_MQT
 dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
     // Produce a zero-state decision diagram for the boundary qubits.

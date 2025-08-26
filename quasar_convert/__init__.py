@@ -53,6 +53,10 @@ try:  # pragma: no cover - exercised when the extension is available
             self._ensure_impl()
             return self._impl.build_bridge_tensor(*args, **kwargs)
 
+        def convert_boundary_to_statevector(self, *args, **kwargs):  # type: ignore[override]
+            self._ensure_impl()
+            return self._impl.convert_boundary_to_statevector(*args, **kwargs)
+
         if hasattr(_CEngine, "convert_boundary_to_tableau"):
             def convert_boundary_to_tableau(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
@@ -176,6 +180,13 @@ except Exception:  # pragma: no cover - exercised when extension missing
                         tensor[(l << n) | r] = 1.0 + 0j
             return tensor
 
+        def convert_boundary_to_statevector(self, ssd: SSD) -> List[complex]:
+            dim = 1 << len(ssd.boundary_qubits or [])
+            state = [0j] * dim
+            if dim:
+                state[0] = 1.0 + 0j
+            return state
+
         def convert_boundary_to_tableau(self, ssd: SSD):
             class Tableau:
                 def __init__(self, n: int):
@@ -184,7 +195,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
             return Tableau(len(ssd.boundary_qubits or []))
 
         def convert_boundary_to_dd(self, ssd: SSD):
-            return object()
+            return (len(ssd.boundary_qubits or []), 0)
 
         def learn_stabilizer(self, state: List[complex]):
             if not state:

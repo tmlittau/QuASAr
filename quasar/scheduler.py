@@ -70,9 +70,14 @@ class Scheduler:
                 backend.load(circuit.num_qubits)
             elif backend is not current_sim:
                 ssd = current_sim.extract_ssd()
-                result = self.conversion_engine.convert(ssd)
                 try:
-                    backend.ingest(result)
+                    if target == Backend.TABLEAU:
+                        state = self.conversion_engine.convert_boundary_to_tableau(ssd)
+                    elif target == Backend.DECISION_DIAGRAM:
+                        state = self.conversion_engine.convert_boundary_to_dd(ssd)
+                    else:
+                        state = self.conversion_engine.convert_boundary_to_statevector(ssd)
+                    backend.ingest(state)
                 except Exception:
                     backend.load(circuit.num_qubits)
             current_sim = backend

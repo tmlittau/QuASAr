@@ -85,6 +85,12 @@ class ConversionEngine {
     // boundary size and Schmidt rank to select between B2B, LW, ST and Full.
     ConversionResult convert(const SSD& ssd) const;
 
+    // Provide a concrete statevector representation for the boundary qubits.
+    // The returned vector represents the |0...0> state of size equal to the
+    // number of boundary qubits.  This acts as a minimal placeholder allowing
+    // Python backends to ingest a dense representation during conversion.
+    std::vector<std::complex<double>> convert_boundary_to_statevector(const SSD& ssd) const;
+
 #ifdef QUASAR_USE_MQT
     // The decision diagram package exposes `vEdge` at the namespace level,
     // so we use it directly instead of the previous `Package<>::vEdge` alias.

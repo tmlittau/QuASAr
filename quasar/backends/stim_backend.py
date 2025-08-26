@@ -37,6 +37,11 @@ class StimBackend(Backend):
         elif isinstance(state, stim.Tableau):
             self.simulator = stim.TableauSimulator(state)
             self.num_qubits = state.num_qubits
+        elif getattr(state, "num_qubits", None) is not None:
+            n = int(getattr(state, "num_qubits"))
+            self.simulator = stim.TableauSimulator()
+            self.simulator.do_tableau(stim.Tableau(n), list(range(n)))
+            self.num_qubits = n
         else:
             raise TypeError("Unsupported state for Stim backend")
         self.history.clear()

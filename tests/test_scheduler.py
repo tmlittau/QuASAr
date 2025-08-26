@@ -6,11 +6,20 @@ import time
 
 class CountingConversionEngine(ConversionEngine):
     def __init__(self):
+        super().__init__()
         self.calls = 0
 
-    def convert(self, ssd):
+    def convert_boundary_to_statevector(self, ssd):  # type: ignore[override]
         self.calls += 1
-        return super().convert(self.extract_ssd([], 0))
+        return super().convert_boundary_to_statevector(ssd)
+
+    def convert_boundary_to_tableau(self, ssd):  # type: ignore[override]
+        self.calls += 1
+        return super().convert_boundary_to_tableau(ssd)
+
+    def convert_boundary_to_dd(self, ssd):  # type: ignore[override]
+        self.calls += 1
+        return super().convert_boundary_to_dd(ssd)
 
 
 def build_switch_circuit():
