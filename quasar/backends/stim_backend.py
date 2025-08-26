@@ -29,6 +29,18 @@ class StimBackend(Backend):
         self.num_qubits = num_qubits
         self.history.clear()
 
+    def ingest(self, state: stim.Tableau | stim.TableauSimulator) -> None:
+        """Initialise simulator from a Stim tableau or simulator."""
+        if isinstance(state, stim.TableauSimulator):
+            self.simulator = state
+            self.num_qubits = state.num_qubits
+        elif isinstance(state, stim.Tableau):
+            self.simulator = stim.TableauSimulator(state)
+            self.num_qubits = state.num_qubits
+        else:
+            raise TypeError("Unsupported state for Stim backend")
+        self.history.clear()
+
     def apply_gate(
         self,
         name: str,
