@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Dict, List
+import time
 
 from .planner import Planner, PlanStep
 from .cost import Backend
@@ -69,7 +70,13 @@ class Scheduler:
                 backend.load(circuit.num_qubits)
             elif backend is not current_sim:
                 ssd = current_sim.extract_ssd()
-                result = self.conversion_engine.convert(ssd)
+                result = self.conversion_engine.lookup(ssd)
+                if result is None:
+                    fut = self.conversion_engine.convert_async(ssd)
+                    while not fut.done():
+                        time.sleep(0.001)
+                    result = fut.result()
+                    self.conversion_engine.store(ssd, result)
                 try:
                     backend.ingest(result)
                 except Exception:

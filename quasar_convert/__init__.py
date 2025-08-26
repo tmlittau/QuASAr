@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
-from typing import List, Tuple
+from typing import Dict, List, Tuple
+from concurrent.futures import Future, ThreadPoolExecutor
 
 
 @dataclass
@@ -39,6 +40,11 @@ class ConversionResult:
 
 
 class ConversionEngine:
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._cache: Dict[int, ConversionResult] = {}
+
+    # ------------------------------------------------------------------
     def estimate_cost(self, fragment_size: int, backend: Backend) -> Tuple[float, float]:
         time_cost = float(fragment_size)
         mem_cost = fragment_size * 0.1
@@ -86,6 +92,24 @@ class ConversionEngine:
             cost = 2 ** min(boundary, 16)
 
         return ConversionResult(primitive=primitive, cost=float(cost))
+
+    # Asynchronous API -------------------------------------------------
+    def _fingerprint(self, ssd: SSD) -> int:
+        try:
+            boundary = tuple(ssd.boundary_qubits or [])
+            vectors = tuple(tuple(v) for v in (ssd.vectors or []))
+            return hash((boundary, ssd.top_s, vectors))
+        except AttributeError:  # Fallback for scheduler SSD objects
+            return hash(repr(ssd))
+
+    def lookup(self, ssd: SSD) -> ConversionResult | None:
+        return self._cache.get(self._fingerprint(ssd))
+
+    def store(self, ssd: SSD, result: ConversionResult) -> None:
+        self._cache[self._fingerprint(ssd)] = result
+
+    def convert_async(self, ssd: SSD) -> Future:
+        return self._executor.submit(self.convert, ssd)
 
     # Optional helpers -------------------------------------------------
     def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
