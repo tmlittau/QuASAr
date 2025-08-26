@@ -7,7 +7,18 @@ name = "quasar"
 version = "0.1.0"
 description = "QuASAr simulation utilities"
 requires-python = ">=3.8"
-dependencies = ["numpy"]
+dependencies = [
+    "numpy",
+    "mqt-core==3.2.1",
+    "mqt.ddsim==2.0.0",
+    "qiskit==2.1.2",
+    "qiskit-qasm3-import==0.6.0",
+    "stim==1.15.0",
+    "pytest==8.4.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.4.1"]
 
 [tool.scikit-build]
 # Include the Python packages in the wheel and place the compiled extension
