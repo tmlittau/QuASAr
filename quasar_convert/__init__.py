@@ -17,6 +17,7 @@ from typing import List, Tuple
 class SSD:
     boundary_qubits: List[int] | None = None
     top_s: int = 0
+    vectors: List[List[float]] | None = None
 
 
 class Backend(Enum):
@@ -46,11 +47,25 @@ class ConversionEngine:
         return time_cost, mem_cost
 
     def extract_ssd(self, qubits: List[int], s: int) -> SSD:
-        return SSD(boundary_qubits=list(qubits), top_s=s)
+        n = len(qubits)
+        k = min(s, n)
+        vecs = [[1.0 if i == j else 0.0 for i in range(n)] for j in range(k)]
+        return SSD(boundary_qubits=list(qubits), top_s=k, vectors=vecs)
 
     def extract_boundary_ssd(self, bridges: List[Tuple[int, int]], s: int) -> SSD:
+        import numpy as np
+
         boundary = sorted({a for a, _ in bridges})
-        return SSD(boundary_qubits=boundary, top_s=s)
+        remote = sorted({b for _, b in bridges})
+        mat = np.zeros((len(boundary), len(remote)))
+        for a, b in bridges:
+            i = boundary.index(a)
+            j = remote.index(b)
+            mat[i, j] += 1.0
+        u, _s, _v = np.linalg.svd(mat, full_matrices=False)
+        k = min(s, u.shape[1])
+        vecs = [u[:, i].tolist() for i in range(k)]
+        return SSD(boundary_qubits=boundary, top_s=k, vectors=vecs)
 
     def convert(self, ssd: SSD) -> ConversionResult:
         boundary = len(ssd.boundary_qubits or [])
@@ -74,31 +89,27 @@ class ConversionEngine:
 
     # Optional helpers -------------------------------------------------
     def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
-        n = int(math.log2(len(state)))
         k = len(window_qubits)
         dim = 1 << k
         window = [0j] * dim
-        for idx, amp in enumerate(state):
-            match = True
-            for q in range(n):
-                if q not in window_qubits and ((idx >> q) & 1):
-                    match = False
-                    break
-            if not match:
-                continue
-            local = 0
+        for local in range(dim):
+            global_index = 0
             for i, q in enumerate(window_qubits):
-                if (idx >> q) & 1:
-                    local |= 1 << i
-            window[local] = amp
+                if (local >> i) & 1:
+                    global_index |= 1 << q
+            window[local] = state[global_index]
         return window
 
     def build_bridge_tensor(self, left: SSD, right: SSD) -> List[complex]:
-        total = len(left.boundary_qubits or []) + len(right.boundary_qubits or [])
-        dim = 1 << total
+        m = len(left.boundary_qubits or [])
+        n = len(right.boundary_qubits or [])
+        dim = 1 << (m + n)
         tensor = [0j] * dim
-        if dim:
-            tensor[0] = 1.0 + 0j
+        mask = (1 << min(m, n)) - 1
+        for l in range(1 << m):
+            for r in range(1 << n):
+                if (l & mask) == (r & mask):
+                    tensor[(l << n) | r] = 1.0 + 0j
         return tensor
 
     def convert_boundary_to_tableau(self, ssd: SSD):
@@ -114,9 +125,14 @@ class ConversionEngine:
     def learn_stabilizer(self, state: List[complex]):
         if not state:
             return None
+        try:
+            import stim
+
+            return stim.Tableau.from_state_vector(state)
+        except Exception:
+            pass
         dim = len(state)
         n = int(math.log2(dim))
-        # |0...0>
         if abs(state[0] - 1) < 1e-9 and all(abs(a) < 1e-9 for a in state[1:]):
             class Tableau:
                 def __init__(self, n: int):

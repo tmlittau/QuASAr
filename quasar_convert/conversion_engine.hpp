@@ -24,6 +24,9 @@ using StimTableau = stim::Tableau<stim::MAX_BITWORD_WIDTH>;
 struct SSD {
     std::vector<uint32_t> boundary_qubits;  // indices of qubits on the boundary
     std::size_t top_s;                      // number of Schmidt vectors kept
+    // Left singular vectors associated with the boundary decomposition.
+    // Each entry has length equal to the number of boundary qubits.
+    std::vector<std::vector<double>> vectors;
 };
 
 enum class Backend {
