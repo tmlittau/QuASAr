@@ -11,7 +11,7 @@ an optimal execution plan.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Iterable, Set, Tuple
+from typing import Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
 from .partitioner import CLIFFORD_GATES, Partitioner
@@ -208,6 +208,12 @@ class Planner:
         self.estimator = estimator or CostEstimator()
         self.top_k = top_k
         self.batch_size = batch_size
+        # Cache mapping gate fingerprints to ``PlanResult`` objects.
+        # The cache allows reusing planning results for repeated gate
+        # sequences which can occur when subcircuits are analysed multiple
+        # times during scheduling.
+        self.cache: Dict[Hashable, PlanResult] = {}
+        self.cache_hits = 0
 
     # ------------------------------------------------------------------
     def _dp(
@@ -296,17 +302,53 @@ class Planner:
         return PlanResult(table=table, final_backend=backend, gates=gates)
 
     # ------------------------------------------------------------------
-    def plan(self, circuit: Circuit) -> PlanResult:
+    def _fingerprint(self, gates: List["Gate"]) -> Hashable:
+        """Create an immutable fingerprint for a sequence of gates."""
+
+        fp: List[Hashable] = []
+        for g in gates:
+            params = tuple(sorted(g.params.items()))
+            fp.append((g.gate, tuple(g.qubits), params))
+        return tuple(fp)
+
+    def cache_lookup(self, gates: List["Gate"]) -> Optional[PlanResult]:
+        """Return a cached plan for ``gates`` if available."""
+
+        key = self._fingerprint(gates)
+        result = self.cache.get(key)
+        if result is not None:
+            self.cache_hits += 1
+        return result
+
+    def cache_insert(self, gates: List["Gate"], result: PlanResult) -> None:
+        """Insert ``result`` into the planning cache."""
+
+        key = self._fingerprint(gates)
+        self.cache[key] = result
+
+    def plan(self, circuit: Circuit, *, use_cache: bool = True) -> PlanResult:
         """Compute the optimal contiguous partition plan using optional
-        coarse and refinement passes."""
+        coarse and refinement passes.
+
+        The planner stores previously computed plans in an in-memory cache
+        keyed by the circuit's gate sequence.  Subsequent calls for an
+        identical gate sequence will reuse the cached result.
+        """
 
         gates = circuit.gates
+
+        if use_cache:
+            cached = self.cache_lookup(gates)
+            if cached is not None:
+                return cached
 
         # First perform a coarse plan using the configured batch size.
         coarse = self._dp(gates, batch_size=self.batch_size)
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
+            if use_cache:
+                self.cache_insert(gates, coarse)
             return coarse
 
         # Refine each coarse segment individually.
@@ -332,7 +374,10 @@ class Planner:
             prev_backend = step.backend
 
         final_backend = refined_steps[-1].backend if refined_steps else None
-        return PlanResult(table=[], final_backend=final_backend, gates=gates, explicit_steps=refined_steps)
+        result = PlanResult(table=[], final_backend=final_backend, gates=gates, explicit_steps=refined_steps)
+        if use_cache:
+            self.cache_insert(gates, result)
+        return result
 
 
 __all__ = ["Planner", "PlanResult", "PlanStep", "DPEntry"]
