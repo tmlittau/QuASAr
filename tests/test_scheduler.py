@@ -120,8 +120,9 @@ def test_scheduler_triggers_conversion():
     engine = CountingConversionEngine()
     scheduler = Scheduler(conversion_engine=engine)
     circuit = build_switch_circuit()
+    plan = scheduler.planner.plan(circuit)
     scheduler.run(circuit)
-    assert engine.calls == 1
+    assert engine.calls == len(plan.steps) - 1
 
 
 def test_scheduler_uses_non_dense_primitive():

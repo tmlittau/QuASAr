@@ -65,68 +65,75 @@ class Scheduler:
             plan = self.planner.plan(circuit)
         steps: List[PlanStep] = list(plan.steps)
 
+        sims: Dict[tuple, object] = {}
         current_backend = None
         current_sim = None
         i = 0
         while i < len(steps):
             step = steps[i]
             target = step.backend
-            backend = self.backends[target]
-
-            # Prepare backend and perform conversions when switching
-            if current_sim is None:
-                backend.load(circuit.num_qubits)
-            elif backend is not current_sim:
-                ssd = current_sim.extract_ssd()
-                layer = next(
-                    (
-                        c
-                        for c in circuit.ssd.conversions
-                        if c.source == current_backend and c.target == target
-                    ),
-                    None,
-                )
-                boundary = list(layer.boundary) if layer else []
-                rank = layer.rank if layer else 0
-                primitive = layer.primitive if layer else None
-                if primitive is None:
-                    try:
-                        res = self.conversion_engine.convert(ssd)  # type: ignore[arg-type]
-                        primitive = (
-                            res.primitive.name
-                            if hasattr(res.primitive, "name")
-                            else str(res.primitive)
-                        )
-                    except Exception:
-                        primitive = None
-                try:
-                    if primitive == "B2B":
-                        rep = ssd
-                    elif primitive == "LW":
-                        state = current_sim.statevector()
-                        rep = self.conversion_engine.extract_local_window(state, boundary)
-                    elif primitive == "ST":
-                        left = current_sim.extract_ssd()
-                        right = current_sim.extract_ssd()
-                        rep = self.conversion_engine.build_bridge_tensor(left, right)
-                    else:
-                        raise ValueError("unknown primitive")
-                    backend.ingest(rep)
-                except Exception:
-                    try:
-                        if target == Backend.TABLEAU:
-                            state = self.conversion_engine.convert_boundary_to_tableau(ssd)
-                        elif target == Backend.DECISION_DIAGRAM:
-                            state = self.conversion_engine.convert_boundary_to_dd(ssd)
-                        else:
-                            state = self.conversion_engine.convert_boundary_to_statevector(ssd)
-                        backend.ingest(state)
-                    except Exception:
-                        backend.load(circuit.num_qubits)
-            current_sim = backend
-            current_backend = target
 
             segment = circuit.gates[step.start : step.end]
+            qubits = frozenset(q for g in segment for q in g.qubits)
+            key = (qubits, target)
+
+            if key not in sims:
+                backend = type(self.backends[target])()
+                backend.load(circuit.num_qubits)
+                sims[key] = backend
+            backend = sims[key]
+
+            if backend is not current_sim:
+                if current_sim is not None:
+                    ssd = current_sim.extract_ssd()
+                    layer = next(
+                        (
+                            c
+                            for c in circuit.ssd.conversions
+                            if c.source == current_backend and c.target == target
+                        ),
+                        None,
+                    )
+                    boundary = list(layer.boundary) if layer else []
+                    rank = layer.rank if layer else 0
+                    primitive = layer.primitive if layer else None
+                    if primitive is None:
+                        try:
+                            res = self.conversion_engine.convert(ssd)  # type: ignore[arg-type]
+                            primitive = (
+                                res.primitive.name
+                                if hasattr(res.primitive, "name")
+                                else str(res.primitive)
+                            )
+                        except Exception:
+                            primitive = None
+                    try:
+                        if primitive == "B2B":
+                            rep = ssd
+                        elif primitive == "LW":
+                            state = current_sim.statevector()
+                            rep = self.conversion_engine.extract_local_window(state, boundary)
+                        elif primitive == "ST":
+                            left = current_sim.extract_ssd()
+                            right = current_sim.extract_ssd()
+                            rep = self.conversion_engine.build_bridge_tensor(left, right)
+                        else:
+                            raise ValueError("unknown primitive")
+                        backend.ingest(rep)
+                    except Exception:
+                        try:
+                            if target == Backend.TABLEAU:
+                                state = self.conversion_engine.convert_boundary_to_tableau(ssd)
+                            elif target == Backend.DECISION_DIAGRAM:
+                                state = self.conversion_engine.convert_boundary_to_dd(ssd)
+                            else:
+                                state = self.conversion_engine.convert_boundary_to_statevector(ssd)
+                            backend.ingest(state)
+                        except Exception:
+                            backend.load(circuit.num_qubits)
+                current_sim = backend
+                current_backend = target
+
             if step.parallel and len(step.parallel) > 1:
                 groups: List[List] = [[] for _ in step.parallel]
                 mapping = {q: idx for idx, grp in enumerate(step.parallel) for q in grp}
