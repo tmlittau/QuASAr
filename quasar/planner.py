@@ -60,26 +60,21 @@ class DPEntry:
 
 @dataclass
 class PlanResult:
-    """Return value of :meth:`Planner.plan`.
-
-    Attributes
-    ----------
-    table:
-        Full DP table.  ``table[i][b]`` contains the best known cost to
-        simulate the first ``i`` gates ending with backend ``b``.  Each entry
-        also stores a backpointer for plan reconstruction.
-    final_backend:
-        Backend used for the last fragment in the optimal plan.
-    """
+    """Return value of :meth:`Planner.plan`."""
 
     table: List[Dict[Optional[Backend], DPEntry]]
     final_backend: Optional[Backend]
     gates: List['Gate']
+    explicit_steps: Optional[List[PlanStep]] = None
 
     # The ``steps`` property recovers the final plan lazily using the
-    # backpointers contained in ``table``.
+    # backpointers contained in ``table``.  If ``explicit_steps`` is provided
+    # (e.g., after refinement passes) the stored sequence is returned
+    # directly without consulting the DP table.
     @property
     def steps(self) -> List[PlanStep]:
+        if self.explicit_steps is not None:
+            return self.explicit_steps
         return self.recover()
 
     def recover(
@@ -97,6 +92,8 @@ class PlanResult:
             entry).
         """
 
+        if self.explicit_steps is not None:
+            return self.explicit_steps
         if not self.table:
             return []
         if index is None:
@@ -201,33 +198,33 @@ def _simulation_cost(
 class Planner:
     """Plan optimal backend assignments using dynamic programming."""
 
-    def __init__(self, estimator: CostEstimator | None = None):
+    def __init__(
+        self,
+        estimator: CostEstimator | None = None,
+        *,
+        top_k: int = 4,
+        batch_size: int = 1,
+    ):
         self.estimator = estimator or CostEstimator()
+        self.top_k = top_k
+        self.batch_size = batch_size
 
     # ------------------------------------------------------------------
-    def plan(self, circuit: Circuit) -> PlanResult:
-        """Compute the optimal contiguous partition plan.
+    def _dp(
+        self,
+        gates: List["Gate"],
+        *,
+        initial_backend: Optional[Backend] = None,
+        target_backend: Optional[Backend] = None,
+        batch_size: int = 1,
+    ) -> PlanResult:
+        """Internal DP routine supporting batching and pruning."""
 
-        Parameters
-        ----------
-        circuit:
-            Input circuit to analyse.
-
-        Returns
-        -------
-        :class:`PlanResult`
-            Object containing the DP table and convenience methods to recover
-            the chosen plan.
-        """
-
-        gates = circuit.gates
         n = len(gates)
         if n == 0:
-            return PlanResult(
-                table=[{None: DPEntry(cost=Cost(0, 0), prev_index=0, prev_backend=None)}],
-                final_backend=None,
-                gates=[],
-            )
+            init = initial_backend if initial_backend is not None else None
+            table = [{init: DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)}]
+            return PlanResult(table=table, final_backend=init, gates=gates)
 
         # Pre-compute prefix and future qubit sets to derive boundary sizes.
         prefix_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
@@ -244,21 +241,21 @@ class Planner:
 
         boundaries = [prefix_qubits[i] & future_qubits[i] for i in range(n + 1)]
 
-        # DP table initialisation.  The entry at position 0 represents an
-        # empty prefix using ``None`` as a pseudo backend.
-        table: List[Dict[Optional[Backend], DPEntry]] = [
-            {None: DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)}
-        ] + [dict() for _ in range(n)]
+        table: List[Dict[Optional[Backend], DPEntry]] = [dict() for _ in range(n + 1)]
+        start_backend = initial_backend if initial_backend is not None else None
+        table[0][start_backend] = DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)
 
-        # Fill DP table -------------------------------------------------
-        for i in range(1, n + 1):
-            for j in range(i):
+        indices = list(range(0, n, batch_size)) + [n]
+
+        for idx_i in range(1, len(indices)):
+            i = indices[idx_i]
+            for idx_j in range(idx_i):
+                j = indices[idx_j]
                 segment = gates[j:i]
                 qubits = {q for g in segment for q in g.qubits}
                 num_qubits = len(qubits)
                 num_gates = i - j
                 backends = _supported_backends(segment)
-
                 for backend in backends:
                     sim_cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
                     for prev_backend, prev_entry in table[j].items():
@@ -284,14 +281,58 @@ class Planner:
                                 prev_index=j,
                                 prev_backend=prev_backend,
                             )
+            if self.top_k and len(table[i]) > self.top_k:
+                best = sorted(table[i].items(), key=lambda kv: kv[1].cost.time)[: self.top_k]
+                table[i] = dict(best)
 
-        # Select best terminal backend ---------------------------------
         final_entries = table[n]
         backend: Optional[Backend] = None
-        if final_entries:
+        if target_backend is not None:
+            if target_backend in final_entries:
+                backend = target_backend
+        elif final_entries:
             backend = min(final_entries.items(), key=lambda kv: kv[1].cost.time)[0]
 
         return PlanResult(table=table, final_backend=backend, gates=gates)
+
+    # ------------------------------------------------------------------
+    def plan(self, circuit: Circuit) -> PlanResult:
+        """Compute the optimal contiguous partition plan using optional
+        coarse and refinement passes."""
+
+        gates = circuit.gates
+
+        # First perform a coarse plan using the configured batch size.
+        coarse = self._dp(gates, batch_size=self.batch_size)
+
+        # If no batching was requested we are done.
+        if self.batch_size == 1:
+            return coarse
+
+        # Refine each coarse segment individually.
+        refined_steps: List[PlanStep] = []
+        prev_backend: Optional[Backend] = None
+        for step in coarse.steps:
+            segment = gates[step.start:step.end]
+            sub = self._dp(
+                segment,
+                initial_backend=prev_backend,
+                target_backend=step.backend,
+                batch_size=1,
+            )
+            for sub_step in sub.steps:
+                refined_steps.append(
+                    PlanStep(
+                        start=sub_step.start + step.start,
+                        end=sub_step.end + step.start,
+                        backend=sub_step.backend,
+                        parallel=sub_step.parallel,
+                    )
+                )
+            prev_backend = step.backend
+
+        final_backend = refined_steps[-1].backend if refined_steps else None
+        return PlanResult(table=[], final_backend=final_backend, gates=gates, explicit_steps=refined_steps)
 
 
 __all__ = ["Planner", "PlanResult", "PlanStep", "DPEntry"]
