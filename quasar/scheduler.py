@@ -101,16 +101,13 @@ class Scheduler:
                         primitive = None
                 try:
                     if primitive == "B2B":
-                        rep = self.conversion_engine.extract_ssd(boundary, rank)
+                        rep = ssd
                     elif primitive == "LW":
-                        dim = 1 << len(boundary)
-                        state = [0j] * dim
-                        if dim:
-                            state[0] = 1.0 + 0j
+                        state = current_sim.statevector()
                         rep = self.conversion_engine.extract_local_window(state, boundary)
                     elif primitive == "ST":
-                        left = self.conversion_engine.extract_ssd(boundary, rank)
-                        right = self.conversion_engine.extract_ssd(boundary, rank)
+                        left = current_sim.extract_ssd()
+                        right = current_sim.extract_ssd()
                         rep = self.conversion_engine.build_bridge_tensor(left, right)
                     else:
                         raise ValueError("unknown primitive")

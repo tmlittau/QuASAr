@@ -74,3 +74,12 @@ class DecisionDiagramBackend(Backend):
             backend=self.backend,
         )
         return SSD([part])
+
+    # ------------------------------------------------------------------
+    def statevector(self) -> Sequence[complex]:
+        """Return a dense statevector for the DD backend.
+
+        The decision diagram package does not currently expose an efficient
+        statevector extraction method, hence this is left unimplemented.
+        """
+        raise NotImplementedError("Statevector extraction not supported")

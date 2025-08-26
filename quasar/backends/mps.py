@@ -193,3 +193,13 @@ class MPSBackend(Backend):
             backend=self.backend,
         )
         return SSD([part])
+
+    # ------------------------------------------------------------------
+    def statevector(self) -> np.ndarray:
+        """Return a dense statevector corresponding to the MPS."""
+        if not self.tensors:
+            raise RuntimeError("Backend not initialised; call 'load' first")
+        psi = self.tensors[0]
+        for tensor in self.tensors[1:]:
+            psi = np.tensordot(psi, tensor, axes=(2, 0))
+        return psi.reshape(-1).copy()

@@ -152,3 +152,10 @@ class StatevectorBackend(Backend):
             backend=self.backend,
         )
         return SSD([part])
+
+    # ------------------------------------------------------------------
+    def statevector(self) -> np.ndarray:
+        """Return a dense statevector of the current simulator state."""
+        if self.state is None:
+            raise RuntimeError("Backend not initialised; call 'load' first")
+        return self.state.copy()
