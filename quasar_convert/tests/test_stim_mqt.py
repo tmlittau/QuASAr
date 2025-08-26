@@ -20,7 +20,14 @@ class OptionalBackendTests(unittest.TestCase):
             ssd.boundary_qubits = [0, 1]
             ssd.top_s = 2
             edge = eng.convert_boundary_to_dd(ssd)
-            self.assertIsNotNone(edge)
+            self.assertEqual(edge.num_qubits, 2)
+            try:
+                from quasar.backends import DecisionDiagramBackend
+            except Exception:
+                self.skipTest('MQT DD backend not available')
+            backend = DecisionDiagramBackend()
+            backend.ingest(edge)
+            self.assertEqual(backend.num_qubits, 2)
         else:
             self.skipTest('MQT DD support not built')
 

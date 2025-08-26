@@ -8,6 +8,19 @@
 
 namespace py = pybind11;
 
+#ifdef QUASAR_USE_MQT
+// Lightweight wrapper around a decision diagram edge that exposes the
+// underlying ``dd::vEdge`` along with the number of qubits the edge
+// represents.  This mirrors the behaviour of the Stim tableau binding where
+// the native object is surfaced directly to Python.
+namespace quasar {
+struct DDEdge {
+    dd::vEdge edge;
+    std::size_t num_qubits;
+};
+} // namespace quasar
+#endif
+
 // The compiled module lives alongside the Python package as
 // ``quasar_convert._conversion_engine``.  A small Python stub in
 // ``__init__`` falls back to a pure Python implementation when the native
@@ -34,6 +47,12 @@ PYBIND11_MODULE(_conversion_engine, m) {
     py::class_<quasar::StimTableau>(m, "StimTableau")
         .def(py::init<size_t>())
         .def_readwrite("num_qubits", &quasar::StimTableau::num_qubits);
+#endif
+
+#ifdef QUASAR_USE_MQT
+    py::class_<quasar::DDEdge>(m, "DDEdge")
+        .def_readonly("edge", &quasar::DDEdge::edge)
+        .def_readonly("num_qubits", &quasar::DDEdge::num_qubits);
 #endif
 
     py::enum_<quasar::Backend>(m, "Backend")
@@ -65,11 +84,8 @@ PYBIND11_MODULE(_conversion_engine, m) {
 #endif
 #ifdef QUASAR_USE_MQT
         .def("convert_boundary_to_dd", [](quasar::ConversionEngine& eng, const quasar::SSD& ssd) {
-            // Return the raw pointer of the decision diagram edge as an integer
-            // handle. This avoids binding the full dd::vEdge type while still
-            // allowing callers to verify that a non-null edge was produced.
             auto edge = eng.convert_boundary_to_dd(ssd);
-            return reinterpret_cast<std::uintptr_t>(edge.p);
+            return quasar::DDEdge{edge, ssd.boundary_qubits.size()};
         })
 #endif
         ;

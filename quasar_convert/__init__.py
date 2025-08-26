@@ -14,6 +14,7 @@ try:  # pragma: no cover - exercised when the extension is available
         Backend,
         Primitive,
         ConversionResult,
+        DDEdge,
         ConversionEngine as _CEngine,
     )
 
@@ -74,6 +75,7 @@ try:  # pragma: no cover - exercised when the extension is available
         "Primitive",
         "ConversionResult",
         "ConversionEngine",
+        "DDEdge",
     ]
 except Exception:  # pragma: no cover - exercised when extension missing
     from dataclasses import dataclass
@@ -101,6 +103,11 @@ except Exception:  # pragma: no cover - exercised when extension missing
     class ConversionResult:
         primitive: Primitive
         cost: float
+
+    @dataclass
+    class DDEdge:
+        edge: object | None = None
+        num_qubits: int = 0
 
     class ConversionEngine:
         def estimate_cost(self, fragment_size: int, backend: Backend) -> Tuple[float, float]:
@@ -184,7 +191,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
             return Tableau(len(ssd.boundary_qubits or []))
 
         def convert_boundary_to_dd(self, ssd: SSD):
-            return object()
+            return DDEdge(edge=object(), num_qubits=len(ssd.boundary_qubits or []))
 
         def learn_stabilizer(self, state: List[complex]):
             if not state:
@@ -218,5 +225,6 @@ except Exception:  # pragma: no cover - exercised when extension missing
         "Primitive",
         "ConversionResult",
         "ConversionEngine",
+        "DDEdge",
     ]
 

@@ -32,10 +32,11 @@ class DecisionDiagramBackend(Backend):
     def ingest(self, state: object) -> None:
         """Initialise the backend from an existing decision diagram state."""
         n = getattr(state, "num_qubits", None)
-        if n is None:
+        edge = getattr(state, "edge", None)
+        if n is None or edge is None:
             raise TypeError("Unsupported state for decision diagram backend")
         self.num_qubits = int(n)
-        self.state = state
+        self.state = edge
         self.circuit = QuantumComputation(self.num_qubits)
         self.history.clear()
 
