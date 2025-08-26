@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List
 import json
+import os
+
+from qiskit.circuit import QuantumCircuit
+from qiskit_qasm3_import import api as qasm3_api
 
 from .partitioner import Partitioner
 from .ssd import SSD
@@ -51,6 +55,44 @@ class Circuit:
         with open(path, "r", encoding="utf8") as f:
             data = json.load(f)
         return cls(data)
+
+    @classmethod
+    def from_qiskit(cls, circuit: QuantumCircuit) -> "Circuit":
+        """Build a :class:`Circuit` from a Qiskit ``QuantumCircuit``.
+
+        Parameters
+        ----------
+        circuit:
+            The input Qiskit circuit to convert.
+        """
+        gates = []
+        for ci in circuit.data:
+            op = ci.operation
+            qubits = [q._index for q in ci.qubits]
+            params: Dict[str, Any] = {}
+            if getattr(op, "params", None):
+                for i, val in enumerate(op.params):
+                    params[f"param{i}"] = float(val) if isinstance(val, (int, float)) else val
+            gates.append({"gate": op.name.upper(), "qubits": qubits, "params": params})
+        return cls(gates)
+
+    @classmethod
+    def from_qasm(cls, path_or_str: str) -> "Circuit":
+        """Build a :class:`Circuit` from an OpenQASM 3 string or file.
+
+        Parameters
+        ----------
+        path_or_str:
+            Either a filesystem path to an OpenQASM 3 file or a string
+            containing the OpenQASM program.
+        """
+        if os.path.exists(path_or_str):
+            with open(path_or_str, "r", encoding="utf8") as f:
+                qasm = f.read()
+        else:
+            qasm = path_or_str
+        qc = qasm3_api.parse(qasm)
+        return cls.from_qiskit(qc)
 
     # ------------------------------------------------------------------
     def _infer_qubit_count(self) -> int:
