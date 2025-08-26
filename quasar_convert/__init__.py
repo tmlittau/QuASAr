@@ -8,6 +8,8 @@ package continues to function.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+
 try:  # pragma: no cover - exercised when the extension is available
     from ._conversion_engine import (  # type: ignore[attr-defined]
         SSD,
@@ -18,28 +20,56 @@ try:  # pragma: no cover - exercised when the extension is available
     )
 
     class ConversionEngine:
-        """Thin Python wrapper around the C++ implementation.
+        """Thin Python wrapper around the C++ implementation with caching."""
 
-        The wrapper lazily constructs the underlying C++ object which allows
-        subclasses to omit a call to ``super().__init__`` in their ``__init__``
-        methods.  All public methods simply forward to the native instance.
-        """
+        def __init__(self, cache_limit: int | None = None) -> None:
+            self._cache_limit = cache_limit
+            self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
+            self._boundary_cache: OrderedDict[tuple, SSD] = OrderedDict()
+            self._bridge_cache: OrderedDict[tuple, list] = OrderedDict()
 
         def _ensure_impl(self) -> None:
             if "_impl" not in self.__dict__:
                 self.__dict__["_impl"] = _CEngine()
 
+        # Cache helpers -------------------------------------------------
+        def _trim_cache(self, cache: OrderedDict) -> None:
+            if self._cache_limit is not None:
+                while len(cache) > self._cache_limit:
+                    cache.popitem(last=False)
+
+        def clear_cache(self) -> None:
+            self._ssd_cache.clear()
+            self._boundary_cache.clear()
+            self._bridge_cache.clear()
+
+        def set_cache_limit(self, limit: int | None) -> None:
+            self._cache_limit = limit
+            for c in (self._ssd_cache, self._boundary_cache, self._bridge_cache):
+                if limit is not None:
+                    while len(c) > limit:
+                        c.popitem(last=False)
+
+        # Forwarding methods with caching -------------------------------
         def estimate_cost(self, *args, **kwargs):
             self._ensure_impl()
             return self._impl.estimate_cost(*args, **kwargs)
 
-        def extract_ssd(self, *args, **kwargs):
-            self._ensure_impl()
-            return self._impl.extract_ssd(*args, **kwargs)
+        def extract_ssd(self, qubits, s):
+            key = (tuple(qubits), s)
+            if key not in self._ssd_cache:
+                self._ensure_impl()
+                self._ssd_cache[key] = self._impl.extract_ssd(qubits, s)
+                self._trim_cache(self._ssd_cache)
+            return self._ssd_cache[key]
 
-        def extract_boundary_ssd(self, *args, **kwargs):
-            self._ensure_impl()
-            return self._impl.extract_boundary_ssd(*args, **kwargs)
+        def extract_boundary_ssd(self, bridges, s):
+            key = (tuple(tuple(b) for b in bridges), s)
+            if key not in self._boundary_cache:
+                self._ensure_impl()
+                self._boundary_cache[key] = self._impl.extract_boundary_ssd(bridges, s)
+                self._trim_cache(self._boundary_cache)
+            return self._boundary_cache[key]
 
         def extract_local_window(self, *args, **kwargs):
             self._ensure_impl()
@@ -49,25 +79,32 @@ try:  # pragma: no cover - exercised when the extension is available
             self._ensure_impl()
             return self._impl.convert(*args, **kwargs)
 
-        def build_bridge_tensor(self, *args, **kwargs):
-            self._ensure_impl()
-            return self._impl.build_bridge_tensor(*args, **kwargs)
+        def build_bridge_tensor(self, left, right):
+            key = (tuple(left.boundary_qubits or []), tuple(right.boundary_qubits or []))
+            if key not in self._bridge_cache:
+                self._ensure_impl()
+                self._bridge_cache[key] = self._impl.build_bridge_tensor(left, right)
+                self._trim_cache(self._bridge_cache)
+            return self._bridge_cache[key]
 
         def convert_boundary_to_statevector(self, *args, **kwargs):  # type: ignore[override]
             self._ensure_impl()
             return self._impl.convert_boundary_to_statevector(*args, **kwargs)
 
         if hasattr(_CEngine, "convert_boundary_to_tableau"):
+
             def convert_boundary_to_tableau(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
                 return self._impl.convert_boundary_to_tableau(*args, **kwargs)
 
         if hasattr(_CEngine, "convert_boundary_to_dd"):
+
             def convert_boundary_to_dd(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
                 return self._impl.convert_boundary_to_dd(*args, **kwargs)
 
         if hasattr(_CEngine, "learn_stabilizer"):
+
             def learn_stabilizer(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
                 return self._impl.learn_stabilizer(*args, **kwargs)
@@ -107,6 +144,31 @@ except Exception:  # pragma: no cover - exercised when extension missing
         cost: float
 
     class ConversionEngine:
+        def __init__(self, cache_limit: int | None = None) -> None:
+            self._cache_limit = cache_limit
+            self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
+            self._boundary_cache: OrderedDict[tuple, SSD] = OrderedDict()
+            self._bridge_cache: OrderedDict[tuple, list] = OrderedDict()
+
+        # Cache utilities -----------------------------------------------
+        def _trim_cache(self, cache: OrderedDict) -> None:
+            if self._cache_limit is not None:
+                while len(cache) > self._cache_limit:
+                    cache.popitem(last=False)
+
+        def clear_cache(self) -> None:
+            self._ssd_cache.clear()
+            self._boundary_cache.clear()
+            self._bridge_cache.clear()
+
+        def set_cache_limit(self, limit: int | None) -> None:
+            self._cache_limit = limit
+            for c in (self._ssd_cache, self._boundary_cache, self._bridge_cache):
+                if limit is not None:
+                    while len(c) > limit:
+                        c.popitem(last=False)
+
+        # Core behaviour with caching ----------------------------------
         def estimate_cost(self, fragment_size: int, backend: Backend) -> Tuple[float, float]:
             time_cost = float(fragment_size)
             mem_cost = fragment_size * 0.1
@@ -114,13 +176,20 @@ except Exception:  # pragma: no cover - exercised when extension missing
                 time_cost *= 1.5
             return time_cost, mem_cost
 
-        def extract_ssd(self, qubits: List[int], s: int) -> SSD:
+        def _extract_ssd_impl(self, qubits: List[int], s: int) -> SSD:
             n = len(qubits)
             k = min(s, n)
             vecs = [[1.0 if i == j else 0.0 for i in range(n)] for j in range(k)]
             return SSD(boundary_qubits=list(qubits), top_s=k, vectors=vecs)
 
-        def extract_boundary_ssd(self, bridges: List[Tuple[int, int]], s: int) -> SSD:
+        def extract_ssd(self, qubits: List[int], s: int) -> SSD:
+            key = (tuple(qubits), s)
+            if key not in self._ssd_cache:
+                self._ssd_cache[key] = self._extract_ssd_impl(qubits, s)
+                self._trim_cache(self._ssd_cache)
+            return self._ssd_cache[key]
+
+        def _extract_boundary_ssd_impl(self, bridges: List[Tuple[int, int]], s: int) -> SSD:
             import numpy as np
 
             boundary = sorted({a for a, _ in bridges})
@@ -134,6 +203,45 @@ except Exception:  # pragma: no cover - exercised when extension missing
             k = min(s, u.shape[1])
             vecs = [u[:, i].tolist() for i in range(k)]
             return SSD(boundary_qubits=boundary, top_s=k, vectors=vecs)
+
+        def extract_boundary_ssd(self, bridges: List[Tuple[int, int]], s: int) -> SSD:
+            key = (tuple(tuple(b) for b in bridges), s)
+            if key not in self._boundary_cache:
+                self._boundary_cache[key] = self._extract_boundary_ssd_impl(bridges, s)
+                self._trim_cache(self._boundary_cache)
+            return self._boundary_cache[key]
+
+        def _build_bridge_tensor_impl(self, left: SSD, right: SSD) -> list[complex]:
+            m = len(left.boundary_qubits or [])
+            n = len(right.boundary_qubits or [])
+            dim = 1 << (m + n)
+            tensor = [0j] * dim
+            mask = (1 << min(m, n)) - 1
+            for l in range(1 << m):
+                for r in range(1 << n):
+                    if (l & mask) == (r & mask):
+                        tensor[(l << n) | r] = 1.0 + 0j
+            return tensor
+
+        def build_bridge_tensor(self, left: SSD, right: SSD) -> list[complex]:
+            key = (tuple(left.boundary_qubits or []), tuple(right.boundary_qubits or []))
+            if key not in self._bridge_cache:
+                self._bridge_cache[key] = self._build_bridge_tensor_impl(left, right)
+                self._trim_cache(self._bridge_cache)
+            return self._bridge_cache[key]
+
+        # Optional helpers ---------------------------------------------
+        def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
+            k = len(window_qubits)
+            dim = 1 << k
+            window = [0j] * dim
+            for local in range(dim):
+                global_index = 0
+                for i, q in enumerate(window_qubits):
+                    if (local >> i) & 1:
+                        global_index |= 1 << q
+                window[local] = state[global_index]
+            return window
 
         def convert(self, ssd: SSD) -> ConversionResult:
             boundary = len(ssd.boundary_qubits or [])
@@ -154,31 +262,6 @@ except Exception:  # pragma: no cover - exercised when extension missing
                 cost = 2 ** min(boundary, 16)
 
             return ConversionResult(primitive=primitive, cost=float(cost))
-
-        # Optional helpers -------------------------------------------------
-        def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
-            k = len(window_qubits)
-            dim = 1 << k
-            window = [0j] * dim
-            for local in range(dim):
-                global_index = 0
-                for i, q in enumerate(window_qubits):
-                    if (local >> i) & 1:
-                        global_index |= 1 << q
-                window[local] = state[global_index]
-            return window
-
-        def build_bridge_tensor(self, left: SSD, right: SSD) -> List[complex]:
-            m = len(left.boundary_qubits or [])
-            n = len(right.boundary_qubits or [])
-            dim = 1 << (m + n)
-            tensor = [0j] * dim
-            mask = (1 << min(m, n)) - 1
-            for l in range(1 << m):
-                for r in range(1 << n):
-                    if (l & mask) == (r & mask):
-                        tensor[(l << n) | r] = 1.0 + 0j
-            return tensor
 
         def convert_boundary_to_statevector(self, ssd: SSD) -> List[complex]:
             dim = 1 << len(ssd.boundary_qubits or [])
