@@ -68,9 +68,22 @@ class Scheduler:
             if current_sim is None:
                 backend.load(circuit.num_qubits)
             elif backend is not current_sim:
-                ssd = current_sim.extract_ssd()
-                self.conversion_engine.convert(ssd)
-                backend.load(circuit.num_qubits)
+                # Use a placeholder SSD for the conversion engine.  The real
+                # state transfer is handled explicitly for supported backend
+                # pairs below.
+                boundary = list(range(circuit.num_qubits))
+                dummy_ssd = self.conversion_engine.extract_ssd(boundary, 0)
+                self.conversion_engine.convert(dummy_ssd)
+                if isinstance(current_sim, StimBackend) and isinstance(
+                    backend, StatevectorBackend
+                ):
+                    # Explicitly transfer state from the Clifford simulator to a
+                    # dense statevector.  This keeps the simulation consistent
+                    # across backend boundaries.
+                    state = current_sim.simulator.state_vector() if current_sim.simulator else None
+                    backend.load(circuit.num_qubits, state=state)
+                else:
+                    backend.load(circuit.num_qubits)
             current_sim = backend
             current_backend = target
 

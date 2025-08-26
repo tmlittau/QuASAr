@@ -46,10 +46,28 @@ class StatevectorBackend(Backend):
         ),
     }, init=False)
 
-    def load(self, num_qubits: int, **_: dict) -> None:
+    def load(self, num_qubits: int, state: np.ndarray | None = None, **_: dict) -> None:
+        """Initialise the simulator for ``num_qubits`` qubits.
+
+        Parameters
+        ----------
+        num_qubits:
+            Size of the system to simulate.
+        state:
+            Optional statevector to load.  When omitted the backend is
+            initialised in the ``|0...0>`` state.  If provided, ``state`` must
+            be a flat array of length ``2**num_qubits``.
+        """
+
         self.num_qubits = num_qubits
-        self.state = np.zeros(2 ** num_qubits, dtype=complex)
-        self.state[0] = 1.0
+        if state is None:
+            self.state = np.zeros(2 ** num_qubits, dtype=complex)
+            self.state[0] = 1.0
+        else:
+            arr = np.asarray(state, dtype=complex)
+            if arr.size != 2 ** num_qubits:
+                raise ValueError("state has incompatible dimension")
+            self.state = arr.copy()
         self.history.clear()
 
     # ------------------------------------------------------------------
