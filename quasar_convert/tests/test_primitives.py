@@ -5,24 +5,40 @@ class PrimitiveHelperTests(unittest.TestCase):
     def setUp(self):
         self.eng = qc.ConversionEngine()
 
-    def test_boundary_extraction(self):
-        bridges = [(0, 5), (1, 6), (0, 7)]
-        ssd = self.eng.extract_boundary_ssd(bridges, 2)
-        self.assertEqual(sorted(ssd.boundary_qubits), [0, 1])
+    def test_ssd_vectors(self):
+        ssd = self.eng.extract_ssd([0, 1, 2], 2)
         self.assertEqual(ssd.top_s, 2)
+        self.assertEqual(ssd.vectors[0], [1.0, 0.0, 0.0])
+        self.assertEqual(ssd.vectors[1], [0.0, 1.0, 0.0])
+
+    def test_boundary_extraction(self):
+        bridges = [(0, 5), (1, 6)]
+        ssd = self.eng.extract_boundary_ssd(bridges, 2)
+        self.assertEqual(ssd.boundary_qubits, [0, 1])
+        self.assertEqual(ssd.top_s, 2)
+        self.assertAlmostEqual(ssd.vectors[0][0], 1.0)
+        self.assertAlmostEqual(ssd.vectors[1][1], 1.0)
 
     def test_local_window(self):
-        state = [0j, 1+0j, 0j, 0j, 0j, 0j, 0j, 0j]
-        window = self.eng.extract_local_window(state, [0, 1])
+        state = [0j] * 8
+        state[5] = 1.0 + 0j  # binary 101
+        window = self.eng.extract_local_window(state, [2, 0])
         self.assertEqual(len(window), 4)
-        self.assertAlmostEqual(window[1], 1.0)
+        self.assertAlmostEqual(window[3], 1.0)
 
     def test_bridge_tensor(self):
         left = qc.SSD(boundary_qubits=[0, 1], top_s=2)
-        right = qc.SSD(boundary_qubits=[2], top_s=1)
+        right = qc.SSD(boundary_qubits=[0, 1], top_s=2)
         tensor = self.eng.build_bridge_tensor(left, right)
-        self.assertEqual(len(tensor), 8)
-        self.assertAlmostEqual(tensor[0], 1.0)
+        self.assertEqual(len(tensor), 16)
+        # Check that only indices where left == right have amplitude 1
+        for l in range(4):
+            for r in range(4):
+                amp = tensor[(l << 2) | r]
+                if l == r:
+                    self.assertAlmostEqual(amp, 1.0)
+                else:
+                    self.assertAlmostEqual(amp, 0.0)
 
     def test_stabilizer_learner(self):
         if hasattr(self.eng, 'learn_stabilizer'):
