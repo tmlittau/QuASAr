@@ -7,16 +7,16 @@ from typing import Callable, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 
 from .planner import Planner, PlanStep
-from .cost import Backend
+from .cost import Backend, Cost
 from .circuit import Circuit
-from .ssd import SSD
+from .ssd import SSD, ConversionLayer
 from .backends import (
     StatevectorBackend,
     MPSBackend,
     StimBackend,
     DecisionDiagramBackend,
 )
-from quasar_convert import ConversionEngine
+from quasar_convert import ConversionEngine, SSD as CESD
 
 # Type alias for cost monitoring hook
 CostHook = Callable[[PlanStep, float], bool]
@@ -85,7 +85,7 @@ class Scheduler:
 
             if backend is not current_sim:
                 if current_sim is not None:
-                    ssd = current_sim.extract_ssd()
+                    current_ssd = current_sim.extract_ssd()
                     layer = next(
                         (
                             c
@@ -94,43 +94,71 @@ class Scheduler:
                         ),
                         None,
                     )
-                    boundary = list(layer.boundary) if layer else []
-                    rank = layer.rank if layer else 0
-                    primitive = layer.primitive if layer else None
-                    if primitive is None:
-                        try:
-                            res = self.conversion_engine.convert(ssd)  # type: ignore[arg-type]
-                            primitive = (
-                                res.primitive.name
-                                if hasattr(res.primitive, "name")
-                                else str(res.primitive)
-                            )
-                        except Exception:
-                            primitive = None
+                    if layer:
+                        boundary = list(layer.boundary)
+                        rank = layer.rank
+                    else:
+                        if current_ssd is not None and getattr(current_ssd, "partitions", None):
+                            boundary = list(set(current_ssd.partitions[0].qubits) & set(qubits))
+                        else:
+                            boundary = list(qubits)
+                        rank = 2 ** len(boundary)
+                    conv_ssd = CESD(boundary_qubits=list(boundary), top_s=rank)
+                    primitive = None
+                    cost_val = 0.0
+                    try:
+                        res = self.conversion_engine.convert(conv_ssd)
+                        primitive = (
+                            res.primitive.name
+                            if hasattr(res.primitive, "name")
+                            else str(res.primitive)
+                        )
+                        cost_val = getattr(res, "cost", 0.0)
+                    except Exception:
+                        primitive = None
+                    if layer and primitive not in {"LW", "ST"}:
+                        primitive = layer.primitive
+                    primitive = primitive or "Full"
                     try:
                         if primitive == "B2B":
-                            rep = ssd
+                            try:
+                                backend.ingest(current_ssd)
+                            except Exception:
+                                if target == Backend.TABLEAU:
+                                    rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
+                                elif target == Backend.DECISION_DIAGRAM:
+                                    rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
+                                else:
+                                    rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
+                                backend.ingest(rep)
                         elif primitive == "LW":
                             state = current_sim.statevector()
                             rep = self.conversion_engine.extract_local_window(state, boundary)
+                            backend.ingest(rep)
                         elif primitive == "ST":
-                            left = current_sim.extract_ssd()
-                            right = current_sim.extract_ssd()
-                            rep = self.conversion_engine.build_bridge_tensor(left, right)
+                            rep = self.conversion_engine.build_bridge_tensor(conv_ssd, conv_ssd)
+                            backend.ingest(rep)
                         else:
-                            raise ValueError("unknown primitive")
-                        backend.ingest(rep)
-                    except Exception:
-                        try:
                             if target == Backend.TABLEAU:
-                                state = self.conversion_engine.convert_boundary_to_tableau(ssd)
+                                rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
                             elif target == Backend.DECISION_DIAGRAM:
-                                state = self.conversion_engine.convert_boundary_to_dd(ssd)
+                                rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
                             else:
-                                state = self.conversion_engine.convert_boundary_to_statevector(ssd)
-                            backend.ingest(state)
-                        except Exception:
-                            backend.load(circuit.num_qubits)
+                                rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
+                            backend.ingest(rep)
+                    except Exception:
+                        backend.load(circuit.num_qubits)
+                    circuit.ssd.conversions.append(
+                        ConversionLayer(
+                            boundary=tuple(boundary),
+                            source=current_backend,
+                            target=target,
+                            rank=rank,
+                            frontier=len(boundary),
+                            primitive=primitive,
+                            cost=Cost(time=cost_val, memory=0.0),
+                        )
+                    )
                 current_sim = backend
                 current_backend = target
 
