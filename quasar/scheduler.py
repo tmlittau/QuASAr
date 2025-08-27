@@ -77,6 +77,41 @@ class Scheduler:
             qubits = frozenset(q for g in segment for q in g.qubits)
             key = (qubits, target)
 
+            # Detect gates that span qubits across different existing backends
+            if len(segment) == 1 and len(segment[0].qubits) == 2:
+                gate = segment[0]
+                left_info = next(
+                    ((k, s) for k, s in sims.items() if gate.qubits[0] in k[0]),
+                    None,
+                )
+                right_info = next(
+                    ((k, s) for k, s in sims.items() if gate.qubits[1] in k[0]),
+                    None,
+                )
+                if (
+                    left_info
+                    and right_info
+                    and left_info[1] is not right_info[1]
+                ):
+                    l_ssd = CESD(boundary_qubits=[gate.qubits[0]], top_s=2)
+                    r_ssd = CESD(boundary_qubits=[gate.qubits[1]], top_s=2)
+                    self.conversion_engine.build_bridge_tensor(l_ssd, r_ssd)
+                    circuit.ssd.conversions.append(
+                        ConversionLayer(
+                            boundary=tuple(gate.qubits),
+                            source=left_info[0][1],
+                            target=right_info[0][1],
+                            rank=2,
+                            frontier=len(gate.qubits),
+                            primitive="BRIDGE",
+                            cost=Cost(time=0.0, memory=0.0),
+                        )
+                    )
+                    current_sim = None
+                    current_backend = None
+                    i += 1
+                    continue
+
             if key not in sims:
                 backend = type(self.backends[target])()
                 backend.load(circuit.num_qubits)
