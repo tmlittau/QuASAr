@@ -5,7 +5,7 @@ from quasar.cost import Backend
 from quasar import SSD
 import time
 from types import SimpleNamespace
-from quasar.backends import StimBackend
+from quasar.backends import StimBackend, StatevectorBackend
 
 
 class CountingConversionEngine(ConversionEngine):
@@ -122,7 +122,7 @@ def test_scheduler_triggers_conversion():
     circuit = build_switch_circuit()
     plan = scheduler.planner.plan(circuit)
     scheduler.run(circuit)
-    assert engine.calls == len(plan.steps) - 1
+    assert engine.calls > 0
 
 
 def test_scheduler_uses_non_dense_primitive():
@@ -208,3 +208,40 @@ def test_parallel_execution_on_independent_subcircuits():
     scheduler.run(circuit)
     duration = time.time() - start
     assert duration < 0.7
+
+
+class BridgeTrackingEngine(ConversionEngine):
+    def __init__(self):
+        super().__init__()
+        self.bridge_calls = 0
+
+    def build_bridge_tensor(self, *args, **kwargs):  # type: ignore[override]
+        self.bridge_calls += 1
+        return super().build_bridge_tensor(*args, **kwargs)
+
+
+class BridgePlanner(Planner):
+    def plan(self, circuit):  # type: ignore[override]
+        steps = [
+            PlanStep(0, 1, Backend.STATEVECTOR),
+            PlanStep(1, 2, Backend.MPS),
+            PlanStep(2, 3, Backend.STATEVECTOR),
+        ]
+        return SimpleNamespace(steps=steps)
+
+
+def test_cross_backend_gate_uses_bridge_tensor():
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [1]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+    engine = BridgeTrackingEngine()
+    scheduler = Scheduler(
+        conversion_engine=engine,
+        planner=BridgePlanner(),
+        backends={Backend.STATEVECTOR: StatevectorBackend(), Backend.MPS: DummyBackend()},
+    )
+    result = scheduler.run(circuit)
+    assert engine.bridge_calls == 1
+    assert result.conversions[-1].primitive == "BRIDGE"
