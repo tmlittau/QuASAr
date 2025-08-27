@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .planner import Planner, PlanStep
 from .cost import Backend, Cost
 from .circuit import Circuit
-from .ssd import SSD, ConversionLayer
+from .ssd import SSD, ConversionLayer, SSDPartition
 from .backends import (
     StatevectorBackend,
     MPSBackend,
@@ -196,6 +196,9 @@ class Scheduler:
                     )
                 current_sim = backend
                 current_backend = target
+                for k in list(sims.keys()):
+                    if k[0] == qubits and k != key:
+                        sims.pop(k)
 
             if step.parallel and len(step.parallel) > 1:
                 groups: List[List] = [[] for _ in step.parallel]
@@ -232,8 +235,20 @@ class Scheduler:
                     steps = steps[: i + 1] + new_steps
             i += 1
 
-        if current_sim is not None:
-            return current_sim.extract_ssd()
+        if sims:
+            parts: List[SSDPartition] = []
+            used_qubits = set()
+            for sim in sims.values():
+                ssd = sim.extract_ssd()
+                if ssd is None:
+                    continue
+                parts.extend(ssd.partitions)
+                used_qubits.update(q for p in ssd.partitions for q in p.qubits)
+                circuit.ssd.conversions.extend(ssd.conversions)
+            for part in circuit.ssd.partitions:
+                if all(q not in used_qubits for q in part.qubits):
+                    parts.append(part)
+            return SSD(parts, circuit.ssd.conversions)
         return circuit.ssd
 
     # ------------------------------------------------------------------
