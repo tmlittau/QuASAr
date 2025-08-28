@@ -50,3 +50,62 @@ def w_state_circuit(n_qubits: int) -> Circuit:
             continue
         new_qc.append(inst, qargs, cargs)
     return Circuit.from_qiskit(new_qc)
+
+
+def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
+    """Create a Grover search circuit targeting the all-ones state.
+
+    Args:
+        n_qubits: Number of search qubits.
+        n_iterations: Number of Grover iterations to apply.
+
+    Returns:
+        A :class:`Circuit` implementing the algorithm.
+    """
+
+    qc = QuantumCircuit(n_qubits)
+    qc.h(range(n_qubits))
+    for _ in range(n_iterations):
+        # Oracle marking the all-ones state
+        qc.h(n_qubits - 1)
+        if n_qubits > 1:
+            qc.mcx(list(range(n_qubits - 1)), n_qubits - 1)
+        qc.h(n_qubits - 1)
+
+        # Diffuser
+        qc.h(range(n_qubits))
+        qc.x(range(n_qubits))
+        qc.h(n_qubits - 1)
+        if n_qubits > 1:
+            qc.mcx(list(range(n_qubits - 1)), n_qubits - 1)
+        qc.h(n_qubits - 1)
+        qc.x(range(n_qubits))
+        qc.h(range(n_qubits))
+
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
+    return Circuit.from_qiskit(qc)
+
+
+def bernstein_vazirani_circuit(n_qubits: int, secret: int = 0) -> Circuit:
+    """Create a Bernstein-Vazirani circuit for a given secret string.
+
+    Args:
+        n_qubits: Number of secret bits.
+        secret: Integer encoding the secret string (little-endian).
+
+    Returns:
+        A :class:`Circuit` implementing the algorithm.
+    """
+
+    qc = QuantumCircuit(n_qubits + 1)
+    qc.h(range(n_qubits))
+    qc.x(n_qubits)
+    qc.h(n_qubits)
+
+    for i in range(n_qubits):
+        if (secret >> i) & 1:
+            qc.cx(i, n_qubits)
+
+    qc.h(range(n_qubits))
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
+    return Circuit.from_qiskit(qc)
