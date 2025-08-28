@@ -166,7 +166,7 @@ def test_scheduler_reoptimises_when_requested():
 
     triggered = {"done": False}
 
-    def monitor(step, cost):
+    def monitor(step, observed, estimated):
         if not triggered["done"]:
             triggered["done"] = True
             return True
