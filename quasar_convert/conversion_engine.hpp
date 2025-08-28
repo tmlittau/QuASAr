@@ -46,7 +46,8 @@ enum class Primitive {
 
 struct ConversionResult {
     Primitive primitive;   // primitive that was chosen
-    double cost;           // simplistic cost measure
+    double cost;           // estimated time cost
+    double fidelity;       // crude fidelity estimate
 };
 
 class ConversionEngine {

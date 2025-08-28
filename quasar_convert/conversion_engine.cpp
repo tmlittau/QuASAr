@@ -168,31 +168,54 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
     const std::size_t boundary = ssd.boundary_qubits.size();
     const std::size_t rank = ssd.top_s;
 
-    // Small analytical cost estimates for the different primitives.  These are
-    // intentionally lightweight and only capture the general scaling of the
-    // algorithms.  Thresholds mirror those used in the Python reference
-    // implementation.
-    const double cost_b2b = static_cast<double>(boundary) * rank * rank;
-    const double cost_lw = std::pow(2.0, static_cast<double>(std::min<std::size_t>(boundary, 4)));
-    const double cost_st = static_cast<double>(boundary) * rank;
-    const double cost_full = std::pow(2.0, static_cast<double>(std::min<std::size_t>(boundary, 16)));
+    // Cost estimates mirror the simple analytical models used by the Python
+    // ``CostEstimator``.  We treat the returned ``cost`` as a time cost and
+    // ignore memory for now since the conversion planner only compares runtime.
+    const std::size_t window = std::min<std::size_t>(boundary, 4);
+    const std::size_t dense = 1ULL << window;  // dense window size for LW
+    const std::size_t chi_tilde = std::min<std::size_t>(rank, 16);  // staged cap
+    const std::size_t full = 1ULL << std::min<std::size_t>(boundary, 16);
 
+    const double cost_b2b = std::pow(static_cast<double>(rank), 3) +
+                            static_cast<double>(boundary) * rank * rank +
+                            rank * rank;  // ingest
+    const double cost_lw = static_cast<double>(dense) * 2.0;  // extract + ingest
+    const double cost_st = std::pow(static_cast<double>(chi_tilde), 3) +
+                           chi_tilde * chi_tilde;  // stage + ingest
+    const double cost_full = static_cast<double>(full) * 2.0;  // full extraction
+
+    // Primitive selection mirrors the simple policy used by the Python
+    // reference implementation.  The more detailed cost model above is used to
+    // report the estimated cost for the chosen primitive only.
     Primitive chosen;
     double cost;
+    double fidelity;
     if (rank <= 4 && boundary <= 6) {
         chosen = Primitive::B2B;
         cost = cost_b2b;
+        fidelity = boundary ? std::min(1.0, static_cast<double>(rank) /
+                                              static_cast<double>(boundary))
+                            : 1.0;
     } else if (boundary <= 10) {
         chosen = Primitive::LW;
         cost = cost_lw;
+        fidelity = 1.0;  // dense extraction is exact
     } else if (rank <= 16) {
         chosen = Primitive::ST;
         cost = cost_st;
+        fidelity = rank ? static_cast<double>(chi_tilde) /
+                              static_cast<double>(rank)
+                        : 1.0;
+        if (fidelity > 1.0) {
+            fidelity = 1.0;
+        }
     } else {
         chosen = Primitive::Full;
         cost = cost_full;
+        fidelity = 1.0;
     }
-    return {chosen, cost};
+
+    return {chosen, cost, fidelity};
 }
 
 std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevector(const SSD& ssd) const {
