@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List
 from concurrent.futures import ThreadPoolExecutor
+import time
+import tracemalloc
 
 from .planner import Planner, PlanStep
 from .cost import Backend, Cost
@@ -19,7 +21,7 @@ from .backends import (
 from quasar_convert import ConversionEngine, SSD as CESD
 
 # Type alias for cost monitoring hook
-CostHook = Callable[[PlanStep, float], bool]
+CostHook = Callable[[PlanStep, Cost, Cost], bool]
 
 
 @dataclass
@@ -50,9 +52,9 @@ class Scheduler:
         circuit:
             Circuit to simulate.
         monitor:
-            Optional callback receiving ``(step, cost)``.  If the callback
-            returns ``True`` the scheduler re-plans the remaining gates starting
-            from ``step.end``.
+            Optional callback receiving ``(step, observed, estimated)``.  If the
+            callback returns ``True`` the scheduler re-plans the remaining gates
+            starting from ``step.end``.
         Returns
         -------
         SSD
@@ -200,6 +202,11 @@ class Scheduler:
                     if k[0] == qubits and k != key:
                         sims.pop(k)
 
+            est_cost = self._estimate_cost(target, len(qubits), len(segment))
+
+            tracemalloc.start()
+            start_time = time.perf_counter()
+
             if step.parallel and len(step.parallel) > 1:
                 groups: List[List] = [[] for _ in step.parallel]
                 mapping = {q: idx for idx, grp in enumerate(step.parallel) for q in grp}
@@ -218,21 +225,44 @@ class Scheduler:
                 for gate in segment:
                     current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
 
-            if monitor:
-                frag = circuit.gates[step.start : step.end]
-                qubits = {q for g in frag for q in g.qubits}
-                cost = self._estimate_cost(target, len(qubits), len(frag))
-                if monitor(step, cost):
-                    remaining = Circuit(circuit.gates[step.end :])
-                    replanned = self.planner.cache_lookup(remaining.gates)
-                    if replanned is None:
-                        replanned = self.planner.plan(remaining)
-                    offset = step.end
-                    new_steps = [
-                        PlanStep(s.start + offset, s.end + offset, s.backend)
-                        for s in replanned.steps
-                    ]
-                    steps = steps[: i + 1] + new_steps
+            elapsed = time.perf_counter() - start_time
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            observed = Cost(time=elapsed, memory=float(peak))
+
+            # Update cost model based on observation
+            coeff = {
+                Backend.STATEVECTOR: ("sv_gate", "sv_mem"),
+                Backend.MPS: ("mps_gate", "mps_mem"),
+                Backend.TABLEAU: ("tab_gate", "tab_mem"),
+                Backend.DECISION_DIAGRAM: ("dd_gate", "dd_mem"),
+            }[target]
+            updates: Dict[str, float] = {}
+            est = self.planner.estimator
+            gate_key, mem_key = coeff
+            if est_cost.time > 0:
+                updates[gate_key] = est.coeff[gate_key] * observed.time / est_cost.time
+            if est_cost.memory > 0 and observed.memory > 0:
+                updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+            if updates:
+                est.update_coefficients(updates)
+
+            trigger_replan = False
+            if observed.time > est_cost.time:
+                trigger_replan = True
+            if monitor and monitor(step, observed, est_cost):
+                trigger_replan = True
+            if trigger_replan:
+                remaining = Circuit(circuit.gates[step.end :])
+                replanned = self.planner.cache_lookup(remaining.gates)
+                if replanned is None:
+                    replanned = self.planner.plan(remaining)
+                offset = step.end
+                new_steps = [
+                    PlanStep(s.start + offset, s.end + offset, s.backend, parallel=s.parallel)
+                    for s in replanned.steps
+                ]
+                steps = steps[: i + 1] + new_steps
             i += 1
 
         if sims:
@@ -252,12 +282,12 @@ class Scheduler:
         return circuit.ssd
 
     # ------------------------------------------------------------------
-    def _estimate_cost(self, backend: Backend, n: int, m: int) -> float:
+    def _estimate_cost(self, backend: Backend, n: int, m: int) -> Cost:
         est = self.planner.estimator
         if backend == Backend.TABLEAU:
-            return est.tableau(n, m).time
+            return est.tableau(n, m)
         if backend == Backend.MPS:
-            return est.mps(n, m, chi=4).time
+            return est.mps(n, m, chi=4)
         if backend == Backend.DECISION_DIAGRAM:
-            return est.decision_diagram(num_gates=m, frontier=n).time
-        return est.statevector(n, m).time
+            return est.decision_diagram(num_gates=m, frontier=n)
+        return est.statevector(n, m)
