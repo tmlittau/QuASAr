@@ -187,10 +187,12 @@ class MPSBackend(Backend):
 
     # ------------------------------------------------------------------
     def extract_ssd(self) -> SSD:
+        state = [t.copy() for t in self.tensors]
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
+            state=state,
         )
         return SSD([part])
 

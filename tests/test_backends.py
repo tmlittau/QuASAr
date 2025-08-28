@@ -16,6 +16,7 @@ def _exercise_backend(backend_cls):
     ssd = backend.extract_ssd()
     assert ssd.partitions[0].backend == backend.backend
     assert ssd.partitions[0].history == ("H", "CX")
+    assert ssd.extract_state(ssd.partitions[0]) is not None
 
 
 def test_statevector_backend():

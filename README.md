@@ -23,3 +23,24 @@ including running the test suite, install the package with its testing extras:
 pip install -e .[test]
 ```
 
+## Retrieving partition states
+
+Running a circuit with :class:`quasar.SimulationEngine` returns a
+:class:`~quasar.ssd.SSD` object describing the final state.  Each entry in
+``SSD.partitions`` exposes the backend specific state of that subsystem via
+``SSD.extract_state``.  Users can iterate over all partitions to access the
+raw data:
+
+```python
+from quasar import Circuit, SimulationEngine
+
+engine = SimulationEngine()
+result = engine.simulate(Circuit([{"gate": "H", "qubits": [0]}]))
+for part in result.ssd.partitions:
+    state = result.ssd.extract_state(part)
+    print(part.backend, type(state))
+```
+
+Depending on the backend, ``state`` may be a dense NumPy vector, a list of MPS
+tensors, a ``stim.Tableau`` or a decision diagram node.
+

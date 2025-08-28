@@ -72,6 +72,7 @@ class DecisionDiagramBackend(Backend):
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
+            state=self.state,
         )
         return SSD([part])
 
