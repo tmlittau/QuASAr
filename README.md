@@ -44,3 +44,37 @@ for part in result.ssd.partitions:
 Depending on the backend, ``state`` may be a dense NumPy vector, a list of MPS
 tensors, a ``stim.Tableau`` or a decision diagram node.
 
+## Scalable benchmark circuits
+
+QuASAr can simulate parameterized circuits sourced from MQTBench and QASMBench.
+The table below lists families from MQTBench that allow adjusting qubit count or
+depth.
+
+| Algorithm | Parameters | Notes for QuASAr |
+|-----------|------------|-----------------|
+| Amplitude Estimation | `num_qubits`, `probability` | Bind probability then convert with `Circuit.from_qiskit`. |
+| BMW‑QUARK cardinality/circular ansätze | `num_qubits`, `depth` | Uses `RXX` layers; ensure backend support. |
+| Bernstein–Vazirani | `num_qubits`, `dynamic`, `hidden_string` | Includes classical bits; custom string optional. |
+| CDKM/Draper/VBE adders | `num_qubits`, `kind` | Select adder style as needed. |
+| Deutsch–Jozsa | `num_qubits`, `balanced` | Oracle choice affects circuit structure. |
+| GHZ / W state | `num_qubits` | Straightforward conversion. |
+| Graph state | `num_qubits`, `degree` | Generates random regular graph. |
+| Grover | `num_qubits` | Decompose multi‑controlled phase if backend lacks support. |
+| HHL | `num_qubits` | Requires ≥3 qubits for phase estimation. |
+| HRS arithmetic circuits | `num_qubits` | Check divisibility/odd‑even constraints before generation. |
+| QAOA | `num_qubits`, `repetitions`, `seed` | Depth controlled via repetitions; bind parameters. |
+| QNN | `num_qubits` | Uses feature map + ansatz. |
+| QPE (exact/inexact) | `num_qubits` | Ancilla qubits handled internally. |
+| QFT / QFT with GHZ input | `num_qubits` | Standard or entangled input. |
+| Quantum Walk | `num_qubits`, `depth` | Multi‑controlled X may need decomposition. |
+| Random circuit | `num_qubits` | Depth = 2 × qubits; seeded. |
+| Shor | `circuit_size` | Limited preset sizes. |
+| Variational ansätze (RealAmplitudes, EfficientSU2, TwoLocal) | `num_qubits`, `reps`, `entanglement` | Bind ansatz parameters as needed. |
+
+QASMBench supplies OpenQASM‑2 files covering small, medium and large circuit
+families. Select the file matching the desired qubit count (e.g.
+``adder_n10.qasm``). Some families encode depth in the filename, such as
+``QAOA_3SAT_N10000_p1``. Load the file with
+``QuantumCircuit.from_qasm_file`` and convert via ``Circuit.from_qiskit``;
+decompose any gates unsupported by the chosen backend.
+
