@@ -143,7 +143,7 @@ class MPSBackend(Backend):
                 ],
                 dtype=complex,
             )
-        raise ValueError(f"Unsupported gate {name}")
+        raise NotImplementedError(f"Unsupported gate {name}")
 
     def apply_gate(
         self,

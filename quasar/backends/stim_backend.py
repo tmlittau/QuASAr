@@ -35,8 +35,10 @@ class StimBackend(Backend):
             self.simulator = state
             self.num_qubits = state.num_qubits
         elif isinstance(state, stim.Tableau):
-            self.simulator = stim.TableauSimulator(state)
-            self.num_qubits = state.num_qubits
+            self.simulator = stim.TableauSimulator()
+            n = len(state)
+            self.simulator.do_tableau(state.inverse(), list(range(n)))
+            self.num_qubits = n
         elif getattr(state, "num_qubits", None) is not None:
             n = int(getattr(state, "num_qubits"))
             self.simulator = stim.TableauSimulator()
@@ -69,7 +71,7 @@ class StimBackend(Backend):
             return
         func = getattr(self.simulator, lname, None)
         if func is None:
-            raise ValueError(f"Unsupported Stim gate {name}")
+            raise NotImplementedError(f"Unsupported Stim gate {name}")
         func(*qubits)
         self.history.append(name.upper())
 
