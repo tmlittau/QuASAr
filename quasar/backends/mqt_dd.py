@@ -34,18 +34,11 @@ class DecisionDiagramBackend(Backend):
         if isinstance(state, tuple) and len(state) == 2:
             n, ptr = state
             self.num_qubits = int(n)
-            self.state = {"ptr": ptr, "num_qubits": self.num_qubits}
+            self.state = ptr
             self.circuit = QuantumComputation(self.num_qubits)
             self.history.clear()
             return
-
-        n = getattr(state, "num_qubits", None)
-        if n is None:
-            raise TypeError("Unsupported state for decision diagram backend")
-        self.num_qubits = int(n)
-        self.state = state
-        self.circuit = QuantumComputation(self.num_qubits)
-        self.history.clear()
+        raise TypeError("Unsupported state for decision diagram backend")
 
     def apply_gate(
         self,
@@ -58,7 +51,7 @@ class DecisionDiagramBackend(Backend):
         lname = self._ALIASES.get(name.upper(), name.lower())
         func = getattr(self.circuit, lname, None)
         if func is None:
-            raise ValueError(f"Unsupported MQT DD gate {name}")
+            raise NotImplementedError(f"Unsupported MQT DD gate {name}")
         args = [float(v) for v in params.values()] if params else []
         func(*args, *qubits)
         self.history.append(name.upper())
@@ -66,13 +59,17 @@ class DecisionDiagramBackend(Backend):
     def extract_ssd(self) -> SSD:
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
-        simulator = ddsim.CircuitSimulator(self.circuit)
-        self.state = simulator.get_constructed_dd()
+        if self.state is not None and not self.history:
+            state = self.state
+        else:
+            simulator = ddsim.CircuitSimulator(self.circuit)
+            self.state = simulator.get_constructed_dd()
+            state = self.state
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
-            state=self.state,
+            state=(self.num_qubits, state),
         )
         return SSD([part])
 
