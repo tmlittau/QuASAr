@@ -142,6 +142,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
     class ConversionResult:
         primitive: Primitive
         cost: float
+        fidelity: float
 
     class ConversionEngine:
         def __init__(self, cache_limit: int | None = None) -> None:
@@ -247,21 +248,37 @@ except Exception:  # pragma: no cover - exercised when extension missing
             boundary = len(ssd.boundary_qubits or [])
             rank = ssd.top_s
 
+            window = min(boundary, 4)
+            dense = 1 << window
+            chi_tilde = min(rank, 16)
+            full = 1 << min(boundary, 16)
+
+            cost_b2b = rank ** 3 + boundary * (rank ** 2) + rank ** 2
+            cost_lw = 2.0 * dense
+            cost_st = chi_tilde ** 3 + chi_tilde ** 2
+            cost_full = 2.0 * full
+
             if rank <= 4 and boundary <= 6:
                 primitive = Primitive.B2B
-                cost = rank ** 3
+                cost = float(cost_b2b)
+                fidelity = (rank / boundary) if boundary else 1.0
             elif boundary <= 10:
                 primitive = Primitive.LW
-                cost = 2 ** min(boundary, 4)
+                cost = float(cost_lw)
+                fidelity = 1.0
             elif rank <= 16:
                 primitive = Primitive.ST
-                chi = min(rank, 8)
-                cost = chi ** 3
+                cost = float(cost_st)
+                fidelity = (chi_tilde / rank) if rank else 1.0
             else:
                 primitive = Primitive.Full
-                cost = 2 ** min(boundary, 16)
+                cost = float(cost_full)
+                fidelity = 1.0
 
-            return ConversionResult(primitive=primitive, cost=float(cost))
+            if fidelity > 1.0:
+                fidelity = 1.0
+
+            return ConversionResult(primitive=primitive, cost=cost, fidelity=float(fidelity))
 
         def convert_boundary_to_statevector(self, ssd: SSD) -> List[complex]:
             dim = 1 << len(ssd.boundary_qubits or [])

@@ -48,7 +48,8 @@ PYBIND11_MODULE(_conversion_engine, m) {
 
     py::class_<quasar::ConversionResult>(m, "ConversionResult")
         .def_readonly("primitive", &quasar::ConversionResult::primitive)
-        .def_readonly("cost", &quasar::ConversionResult::cost);
+        .def_readonly("cost", &quasar::ConversionResult::cost)
+        .def_readonly("fidelity", &quasar::ConversionResult::fidelity);
 
     py::class_<quasar::ConversionEngine>(m, "ConversionEngine")
         .def(py::init<>())
