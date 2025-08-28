@@ -1,11 +1,11 @@
 from quasar import Circuit, Scheduler, Planner
 from quasar.planner import PlanStep
 from quasar_convert import ConversionEngine
-from quasar.cost import Backend
+from quasar.cost import Backend, CostEstimator
 from quasar import SSD
 import time
 from types import SimpleNamespace
-from quasar.backends import StimBackend, StatevectorBackend
+from quasar.backends import StimBackend, StatevectorBackend, MPSBackend
 
 
 class CountingConversionEngine(ConversionEngine):
@@ -245,3 +245,123 @@ def test_cross_backend_gate_uses_bridge_tensor():
     result = scheduler.run(circuit)
     assert engine.bridge_calls == 1
     assert result.conversions[-1].primitive == "BRIDGE"
+
+
+def test_partition_histories_multiple_backends():
+    circuit = Circuit([
+        # Two identical Clifford subcircuits -> tableau backend
+        {"gate": "H", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "S", "qubits": [1]},
+        {"gate": "H", "qubits": [2]},
+        {"gate": "CX", "qubits": [2, 3]},
+        {"gate": "S", "qubits": [3]},
+        # Local non-Clifford chain -> MPS backend
+        {"gate": "T", "qubits": [4]},
+        {"gate": "CX", "qubits": [4, 5]},
+        {"gate": "T", "qubits": [5]},
+        {"gate": "CX", "qubits": [5, 6]},
+        {"gate": "T", "qubits": [6]},
+        # Sparse non-local gates -> decision diagram backend
+        {"gate": "T", "qubits": [7]},
+        {"gate": "CX", "qubits": [7, 9]},
+        {"gate": "T", "qubits": [9]},
+    ])
+    groups = circuit.ssd.by_backend()
+    assert set(groups.keys()) == {
+        Backend.TABLEAU,
+        Backend.MPS,
+        Backend.DECISION_DIAGRAM,
+    }
+    tableau = groups[Backend.TABLEAU][0]
+    assert tableau.multiplicity == 2
+    assert set(tableau.qubits) == {0, 1, 2, 3}
+    assert tableau.history == ("H", "CX", "S")
+    mps_histories = [p.history for p in groups[Backend.MPS]]
+    assert ("T", "CX", "T", "CX", "T") in mps_histories
+    dd = groups[Backend.DECISION_DIAGRAM][0]
+    assert dd.history == ("CX", "T")
+
+
+class B2BFallbackEngine(ConversionEngine):
+    def __init__(self):
+        super().__init__()
+        self.dense_calls = 0
+
+    def convert(self, ssd):  # type: ignore[override]
+        return SimpleNamespace(primitive=SimpleNamespace(name="B2B"), cost=0.0)
+
+    def convert_boundary_to_statevector(self, ssd):  # type: ignore[override]
+        self.dense_calls += 1
+        return super().convert_boundary_to_statevector(ssd)
+
+
+class FailingOnceBackend(DummyBackend):
+    calls = 0
+
+    def ingest(self, state):  # type: ignore[override]
+        type(self).calls += 1
+        if type(self).calls == 1:
+            raise RuntimeError("fail")
+        self.state = state
+
+
+class SVThenMPSPlanner(Planner):
+    def plan(self, circuit):  # type: ignore[override]
+        steps = [
+            PlanStep(0, 1, Backend.STATEVECTOR),
+            PlanStep(1, 2, Backend.MPS),
+        ]
+        return SimpleNamespace(steps=steps)
+
+
+def test_conversion_fallback_path():
+    engine = B2BFallbackEngine()
+    scheduler = Scheduler(
+        conversion_engine=engine,
+        planner=SVThenMPSPlanner(),
+        backends={Backend.STATEVECTOR: StatevectorBackend(), Backend.MPS: FailingOnceBackend()},
+    )
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [0]},
+    ])
+    scheduler.run(circuit)
+    assert engine.dense_calls == 1
+    assert FailingOnceBackend.calls == 2
+
+
+class AutoTwoStepPlanner(Planner):
+    def __init__(self, estimator):
+        super().__init__(estimator=estimator)
+        self.calls = 0
+
+    def plan(self, circuit):  # type: ignore[override]
+        self.calls += 1
+        if not circuit.gates:
+            steps = []
+        elif len(circuit.gates) > 1:
+            steps = [
+                PlanStep(0, 1, Backend.STATEVECTOR),
+                PlanStep(1, len(circuit.gates), Backend.STATEVECTOR),
+            ]
+        else:
+            steps = [PlanStep(0, 1, Backend.STATEVECTOR)]
+        return SimpleNamespace(steps=steps)
+
+
+def test_scheduler_auto_reoptimises_on_cost_mismatch():
+    coeff = {k: 0.0 for k in CostEstimator().coeff}
+    est = CostEstimator(coeff)
+    planner = AutoTwoStepPlanner(est)
+    scheduler = Scheduler(
+        planner=planner,
+        conversion_engine=CountingConversionEngine(),
+        backends={Backend.STATEVECTOR: SleepBackend()},
+    )
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [0]},
+    ])
+    scheduler.run(circuit)
+    assert planner.calls >= 2
