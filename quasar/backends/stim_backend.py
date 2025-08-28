@@ -74,10 +74,17 @@ class StimBackend(Backend):
         self.history.append(name.upper())
 
     def extract_ssd(self) -> SSD:
+        tableau = None
+        if self.simulator is not None:
+            try:
+                tableau = self.simulator.current_inverse_tableau()
+            except Exception:
+                tableau = None
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
+            state=tableau,
         )
         return SSD([part])
 

@@ -13,14 +13,16 @@ class SSDPartition:
     Each entry in :attr:`subsystems` holds the qubits belonging to one
     independent subsystem that is in the same state as the others.  The
     partition also records the execution history, the chosen simulation
-    backend and an estimated cost for simulating one representative
-    subsystem.
+    backend, an estimated cost for simulating one representative
+    subsystem, and optionally the backend specific ``state`` object
+    describing the terminal state of the subsystem.
     """
 
     subsystems: Tuple[Tuple[int, ...], ...]
     history: Tuple[str, ...] = ()
     backend: Backend = Backend.STATEVECTOR
     cost: Cost = field(default_factory=lambda: Cost(time=0.0, memory=0.0))
+    state: object | None = field(default=None, repr=False, compare=False, hash=False)
 
     @property
     def multiplicity(self) -> int:
@@ -49,6 +51,29 @@ class SSD:
         for part in self.partitions:
             groups.setdefault(part.backend, []).append(part)
         return groups
+
+    # ------------------------------------------------------------------
+    def extract_state(self, partition: SSDPartition | int) -> object | None:
+        """Return the backend specific state for ``partition``.
+
+        Parameters
+        ----------
+        partition:
+            Either a partition instance from :attr:`partitions` or an
+            integer index into that list.
+
+        Returns
+        -------
+        object or ``None``
+            Backend dependent state representation.  For example a dense
+            statevector, a list of MPS tensors, a ``stim.Tableau`` or a
+            decision diagram node.  ``None`` is returned if no state was
+            recorded for the given partition.
+        """
+
+        if isinstance(partition, int):
+            partition = self.partitions[partition]
+        return partition.state
 
 
 @dataclass(frozen=True)
