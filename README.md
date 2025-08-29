@@ -78,3 +78,6 @@ families. Select the file matching the desired qubit count (e.g.
 ``QuantumCircuit.from_qasm_file`` and convert via ``Circuit.from_qiskit``;
 decompose any gates unsupported by the chosen backend.
 
+
+See [benchmarks/README.md](benchmarks/README.md) for instructions on running
+and extending the benchmark suite.
