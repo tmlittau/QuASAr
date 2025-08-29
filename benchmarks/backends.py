@@ -100,9 +100,101 @@ class DecisionDiagramAdapter(_BaseAdapter):
         super().__init__(name="mqt_dd", backend_cls=DecisionDiagramBackend)
 
 
+class _AerAdapter(_BaseAdapter):
+    """Common helper for Qiskit Aer based backends."""
+
+    method: str
+
+    def __init__(self, name: str, method: str) -> None:
+        super().__init__(name=name, backend_cls=None)
+        self.method = method
+
+    def run(
+        self,
+        circuit: Union[
+            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
+        ],
+    ) -> Any:  # pragma: no cover - optional dependency
+        if isinstance(circuit, Circuit):
+            num_qubits, ops = self.prepare(circuit)
+        else:
+            num_qubits, ops = circuit
+
+        from qiskit import QuantumCircuit
+        from qiskit_aer import AerSimulator
+
+        qc = QuantumCircuit(num_qubits)
+        for name, qubits, params in ops:
+            func = getattr(qc, name.lower(), None)
+            if func is None:
+                raise NotImplementedError(f"Unsupported Qiskit gate {name}")
+            args = [float(v) for v in params.values()] if params else []
+            func(*args, *qubits)
+
+        qc.save_statevector()
+        sim = AerSimulator(method=self.method)
+        result = sim.run(qc).result()
+        try:
+            return result.get_statevector()
+        except Exception:
+            return None
+
+
+class AerStatevectorAdapter(_AerAdapter):
+    """Adapter for the Qiskit Aer dense statevector simulator."""
+
+    def __init__(self) -> None:  # pragma: no cover - optional dependency
+        super().__init__(name="aer_statevector", method="statevector")
+
+
+class AerMPSAdapter(_AerAdapter):
+    """Adapter for the Qiskit Aer matrix product state simulator."""
+
+    def __init__(self) -> None:  # pragma: no cover - optional dependency
+        super().__init__(name="aer_mps", method="matrix_product_state")
+
+
+class MQTDDAdapter(_BaseAdapter):
+    """Adapter executing circuits using the MQT decision diagram simulator."""
+
+    _ALIASES = {"SDG": "sdg", "U1": "p"}
+
+    def __init__(self) -> None:
+        super().__init__(name="mqt_ddsim", backend_cls=None)
+
+    def run(
+        self,
+        circuit: Union[
+            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
+        ],
+    ) -> Any:  # pragma: no cover - optional dependency
+        if isinstance(circuit, Circuit):
+            num_qubits, ops = self.prepare(circuit)
+        else:
+            num_qubits, ops = circuit
+
+        from mqt.core.ir import QuantumComputation
+        import mqt.ddsim as ddsim
+
+        qc = QuantumComputation(num_qubits)
+        for name, qubits, params in ops:
+            lname = self._ALIASES.get(name.upper(), name.lower())
+            func = getattr(qc, lname, None)
+            if func is None:
+                raise NotImplementedError(f"Unsupported MQT DD gate {name}")
+            args = [float(v) for v in params.values()] if params else []
+            func(*args, *qubits)
+
+        simulator = ddsim.CircuitSimulator(qc)
+        return simulator.get_constructed_dd()
+
+
 __all__ = [
     "StatevectorAdapter",
     "StimAdapter",
     "MPSAdapter",
     "DecisionDiagramAdapter",
+    "AerStatevectorAdapter",
+    "AerMPSAdapter",
+    "MQTDDAdapter",
 ]

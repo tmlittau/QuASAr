@@ -52,10 +52,17 @@ class BenchmarkRunner:
 
     # ------------------------------------------------------------------
     def run(self, circuit: Any, backend: Any) -> Dict[str, Any]:
-        """Execute ``circuit`` on ``backend`` and record the runtime."""
+        """Execute ``circuit`` on ``backend`` and record the runtime.
+
+        If ``backend`` provides a :meth:`prepare` method, it is invoked prior
+        to measurement so that only the actual simulation call is timed.
+        """
+        prepared = circuit
+        if hasattr(backend, "prepare"):
+            prepared = backend.prepare(circuit)
 
         start = time.perf_counter()
-        result = self._invoke(backend, circuit)
+        result = self._invoke(backend, prepared)
         elapsed = time.perf_counter() - start
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
