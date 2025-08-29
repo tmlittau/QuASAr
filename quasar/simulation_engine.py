@@ -51,20 +51,23 @@ class SimulationEngine:
         scheduler: Scheduler | None = None,
         conversion_engine: ConversionEngine | None = None,
         estimator: Optional[CostEstimator] = None,
+        memory_threshold: float | None = None,
     ) -> None:
         ce = conversion_engine or ConversionEngine()
-        self.planner = planner or Planner(estimator=estimator)
+        self.planner = planner or Planner(estimator=estimator, max_memory=memory_threshold)
         # Reuse the planner and conversion engine when creating the scheduler
         self.scheduler = scheduler or Scheduler(planner=self.planner, conversion_engine=ce)
         self.conversion_engine = ce
+        self.memory_threshold = memory_threshold
 
     # ------------------------------------------------------------------
-    def simulate(self, circuit: Circuit) -> SimulationResult:
+    def simulate(self, circuit: Circuit, *, memory_threshold: float | None = None) -> SimulationResult:
         """Simulate ``circuit`` and return the final :class:`SSD` and metrics."""
 
         analyzer = CircuitAnalyzer(circuit, estimator=self.planner.estimator)
         analysis = analyzer.analyze()
-        plan = self.planner.plan(circuit)
+        threshold = memory_threshold if memory_threshold is not None else self.memory_threshold
+        plan = self.planner.plan(circuit, max_memory=threshold)
         ssd = self.scheduler.run(circuit)
         return SimulationResult(ssd=ssd, analysis=analysis, plan=plan)
 

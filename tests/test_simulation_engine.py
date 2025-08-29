@@ -22,3 +22,17 @@ def test_partition_state_extraction():
     result = engine.simulate(circuit)
     states = [result.ssd.extract_state(p) for p in result.ssd.partitions]
     assert any(s is not None for s in states)
+
+
+def test_memory_threshold_triggers_adaptive_plan():
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "X", "qubits": [1]},
+    ])
+    high = SimulationEngine().simulate(circuit, memory_threshold=1000)
+    assert high.plan.explicit_steps is not None
+    assert len(high.plan.steps) == 1
+    low = SimulationEngine().simulate(circuit, memory_threshold=1)
+    assert low.plan.explicit_steps is None
+    assert len(low.plan.steps) > 1
