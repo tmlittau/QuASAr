@@ -1,0 +1,41 @@
+name: Benchmarks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Run small benchmarks
+        run: |
+          mkdir benchmark-results
+          python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:4 --repetitions 3 --output benchmark-results/ghz
+          python benchmarks/run_benchmarks.py --circuit qft --qubits 4:4 --repetitions 3 --output benchmark-results/qft
+      - name: Verify performance thresholds
+        run: |
+          python - <<'PY'
+          import json, glob
+          thresholds = {"ghz": 0.5, "qft": 0.5}
+          for path in glob.glob("benchmark-results/*.json"):
+            name = path.split("/")[-1].split(".")[0]
+            with open(path) as f:
+              data = json.load(f)
+            for rec in data:
+              if rec["avg_time"] > thresholds[name]:
+                raise SystemExit(f"{name} benchmark too slow: {rec['avg_time']}s > {thresholds[name]}s")
+          PY
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results
