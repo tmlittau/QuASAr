@@ -4,3 +4,4 @@ __pycache__/
 quasar_convert/build/
 Pipfile
 .vscode/
+benchmark-results/
