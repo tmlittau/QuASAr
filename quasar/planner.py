@@ -204,10 +204,12 @@ class Planner:
         *,
         top_k: int = 4,
         batch_size: int = 1,
+        max_memory: float | None = None,
     ):
         self.estimator = estimator or CostEstimator()
         self.top_k = top_k
         self.batch_size = batch_size
+        self.max_memory = max_memory
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -223,6 +225,7 @@ class Planner:
         initial_backend: Optional[Backend] = None,
         target_backend: Optional[Backend] = None,
         batch_size: int = 1,
+        max_memory: float | None = None,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning."""
 
@@ -262,8 +265,18 @@ class Planner:
                 num_qubits = len(qubits)
                 num_gates = i - j
                 backends = _supported_backends(segment)
+                candidates: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
-                    sim_cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+                    cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+                    if max_memory is not None and cost.memory > max_memory:
+                        continue
+                    candidates.append((backend, cost))
+                if not candidates:
+                    candidates = [
+                        (backend, _simulation_cost(self.estimator, backend, num_qubits, num_gates))
+                        for backend in backends
+                    ]
+                for backend, sim_cost in candidates:
                     for prev_backend, prev_entry in table[j].items():
                         conv_cost = Cost(0.0, 0.0)
                         if prev_backend is not None and prev_backend != backend:
@@ -279,6 +292,8 @@ class Planner:
                                     frontier=frontier,
                                 )
                                 conv_cost = conv_est.cost
+                                if max_memory is not None and conv_cost.memory > max_memory:
+                                    continue
                         total_cost = _add_cost(_add_cost(prev_entry.cost, conv_cost), sim_cost)
                         entry = table[i].get(backend)
                         if entry is None or _better(total_cost, entry.cost):
@@ -326,7 +341,33 @@ class Planner:
         key = self._fingerprint(gates)
         self.cache[key] = result
 
-    def plan(self, circuit: Circuit, *, use_cache: bool = True) -> PlanResult:
+    def _single_backend(self, gates: List["Gate"], max_memory: float | None) -> Tuple[Backend, Cost]:
+        """Return best single-backend estimate for the full gate list."""
+
+        qubits = {q for g in gates for q in g.qubits}
+        num_qubits = len(qubits)
+        num_gates = len(gates)
+        backends = _supported_backends(gates)
+        candidates: List[Tuple[Backend, Cost]] = []
+        for backend in backends:
+            cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+            if max_memory is not None and cost.memory > max_memory:
+                continue
+            candidates.append((backend, cost))
+        if not candidates:
+            candidates = [
+                (backend, _simulation_cost(self.estimator, backend, num_qubits, num_gates))
+                for backend in backends
+            ]
+        return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))
+
+    def plan(
+        self,
+        circuit: Circuit,
+        *,
+        use_cache: bool = True,
+        max_memory: float | None = None,
+    ) -> PlanResult:
         """Compute the optimal contiguous partition plan using optional
         coarse and refinement passes.
 
@@ -337,13 +378,27 @@ class Planner:
 
         gates = circuit.gates
 
+        threshold = max_memory if max_memory is not None else self.max_memory
+
         if use_cache:
             cached = self.cache_lookup(gates)
             if cached is not None:
                 return cached
 
+        if threshold is not None and gates:
+            backend, cost = self._single_backend(gates, threshold)
+            if cost.memory <= threshold:
+                part = Partitioner()
+                groups = part.parallel_groups(gates)
+                parallel = tuple(g[0] for g in groups) if groups else ()
+                step = PlanStep(start=0, end=len(gates), backend=backend, parallel=parallel)
+                result = PlanResult(table=[], final_backend=backend, gates=gates, explicit_steps=[step])
+                if use_cache:
+                    self.cache_insert(gates, result)
+                return result
+
         # First perform a coarse plan using the configured batch size.
-        coarse = self._dp(gates, batch_size=self.batch_size)
+        coarse = self._dp(gates, batch_size=self.batch_size, max_memory=threshold)
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
@@ -361,6 +416,7 @@ class Planner:
                 initial_backend=prev_backend,
                 target_backend=step.backend,
                 batch_size=1,
+                max_memory=threshold,
             )
             for sub_step in sub.steps:
                 refined_steps.append(
