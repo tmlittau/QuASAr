@@ -203,10 +203,10 @@ class _AerAdapter(_BaseAdapter):
     ) -> Tuple[int, Any]:  # pragma: no cover - optional dependency
         """Translate ``circuit`` into a :class:`qiskit.QuantumCircuit`.
 
-        Compilation is performed here so that ``run_time`` only measures the
-        actual execution of the Aer simulator.
+        Compilation (via :func:`qiskit.transpile`) is performed here so that
+        ``run_time`` only measures the actual execution of the Aer simulator.
         """
-        from qiskit import QuantumCircuit
+        from qiskit import QuantumCircuit, transpile
 
         num_qubits, ops = super().prepare(circuit)
         qc = QuantumCircuit(num_qubits)
@@ -221,6 +221,9 @@ class _AerAdapter(_BaseAdapter):
             qc.save_statevector()
         else:
             qc.save_matrix_product_state()  # type: ignore[attr-defined]
+
+        # Transpile with the lowest optimization level to ensure fair timing.
+        qc = transpile(qc, optimization_level=0)
 
         return num_qubits, qc
 
@@ -241,7 +244,7 @@ class _AerAdapter(_BaseAdapter):
 
         sim = AerSimulator(method=self.method)
         # Only the simulator execution is timed; ``prepare`` performs the heavy
-        # QuantumCircuit construction.
+        # QuantumCircuit construction and transpilation.
         result = sim.run(qc).result()
         if not return_state:
             return result
