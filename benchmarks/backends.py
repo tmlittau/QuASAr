@@ -93,19 +93,51 @@ class StimAdapter(_BaseAdapter):
     def __init__(self) -> None:
         super().__init__(name="stim", backend_cls=StimBackend)
 
+    def prepare(
+        self, circuit: Circuit
+    ) -> Tuple[int, Any]:  # pragma: no cover - trivial wrapper
+        import stim
+
+        num_qubits, ops = super().prepare(circuit)
+        stim_circuit = stim.Circuit()
+        aliases = {k.upper(): v.upper() for k, v in StimBackend()._ALIASES.items()}
+        for name, qubits, params in ops:
+            lname = aliases.get(name.upper(), name.upper())
+            if lname in {"I", "ID"}:
+                continue
+            if lname == "CSWAP":
+                c, a, b = qubits
+                stim_circuit.append("CX", [c, b])
+                stim_circuit.append("CX", [a, b])
+                stim_circuit.append("CX", [c, a])
+                stim_circuit.append("CX", [a, b])
+                stim_circuit.append("CX", [c, b])
+                continue
+            stim_circuit.append(lname, qubits)
+        return num_qubits, stim_circuit
+
     def run(
         self,
-        circuit: Union[
-            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
-        ],
+        circuit: Union[Circuit, Tuple[int, Any]],
         *,
         return_state: bool = True,
     ) -> Any:
-        backend = super().run(circuit, return_state=False)
+        import stim
+
+        if isinstance(circuit, Circuit):
+            num_qubits, stim_circuit = self.prepare(circuit)
+        else:
+            num_qubits, stim_circuit = circuit
+
+        sim = stim.TableauSimulator()
+        sim.do_circuit(stim_circuit)
+
+        backend = self.backend_cls()
+        backend.ingest(sim)
         if not return_state:
             return backend
         try:
-            return backend.simulator.current_inverse_tableau()  # type: ignore[attr-defined]
+            return sim.current_inverse_tableau()
         except Exception:
             return None
 

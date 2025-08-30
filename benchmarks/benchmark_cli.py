@@ -49,7 +49,7 @@ def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repeti
         runner = BenchmarkRunner()
         for _ in range(repetitions):
             runner.run(circuit, backend, return_state=False)
-        times = [r["time"] for r in runner.results]
+        times = [r["run_time"] for r in runner.results]
         record = {
             "circuit": circuit_fn.__name__,
             "qubits": n,
