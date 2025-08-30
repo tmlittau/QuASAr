@@ -58,20 +58,26 @@ class BenchmarkRunner:
         """Execute ``circuit`` on ``backend`` and record the runtime.
 
         If ``backend`` provides a :meth:`prepare` method, it is invoked prior
-        to measurement so that only the actual simulation call is timed.  Any
-        keyword arguments are forwarded to the backend's ``run`` method.
+        to measurement.  The time spent in this step is recorded separately so
+        that only the actual simulation call contributes to the ``run_time``
+        measurement.  Any keyword arguments are forwarded to the backend's
+        ``run`` method.
         """
 
         prepared = circuit
+        prepare_time = 0.0
         if hasattr(backend, "prepare"):
+            start_prepare = time.perf_counter()
             prepared = backend.prepare(circuit)
+            prepare_time = time.perf_counter() - start_prepare
 
-        start = time.perf_counter()
+        start_run = time.perf_counter()
         result = self._invoke(backend, prepared, **kwargs)
-        elapsed = time.perf_counter() - start
+        run_time = time.perf_counter() - start_run
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
-            "time": elapsed,
+            "prepare_time": prepare_time,
+            "run_time": run_time,
             "result": result,
         }
         self.results.append(record)
@@ -90,18 +96,30 @@ class BenchmarkRunner:
 
         scheduler = getattr(engine, "scheduler", engine)
         planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
+        prepare_time = 0.0
         if planner is not None:
+            start_prepare = time.perf_counter()
             planner.plan(circuit)
-        start = time.perf_counter()
+            prepare_time = time.perf_counter() - start_prepare
+        start_run = time.perf_counter()
         result = scheduler.run(circuit)
-        elapsed = time.perf_counter() - start
-        record = {"framework": "quasar", "time": elapsed, "result": result}
+        run_time = time.perf_counter() - start_run
+        record = {
+            "framework": "quasar",
+            "prepare_time": prepare_time,
+            "run_time": run_time,
+            "result": result,
+        }
         self.results.append(record)
         return record
 
     # ------------------------------------------------------------------
     def dataframe(self) -> "pd.DataFrame | List[Dict[str, Any]]":
-        """Return collected results as a :class:`pandas.DataFrame` if available."""
+        """Return collected results as a :class:`pandas.DataFrame` if available.
+
+        The returned data includes separate ``prepare_time`` and ``run_time``
+        columns for downstream analysis.
+        """
 
         if pd is None:
             return self.results
