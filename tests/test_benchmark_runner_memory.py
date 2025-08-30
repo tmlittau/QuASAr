@@ -17,15 +17,15 @@ class DummyBackend:
 def test_run_records_memory():
     runner = BenchmarkRunner()
     record = runner.run(None, DummyBackend())
-    assert record["prepare_memory"] > 0
-    assert record["run_memory"] > 0
+    assert record["prepare_peak_memory"] > 0
+    assert record["run_peak_memory"] > 0
 
     df = runner.dataframe()
     if isinstance(df, list):
-        assert "prepare_memory" in df[0]
-        assert "run_memory" in df[0]
+        assert "prepare_peak_memory" in df[0]
+        assert "run_peak_memory" in df[0]
     else:  # pragma: no cover - requires pandas
-        assert set(["prepare_memory", "run_memory"]).issubset(df.columns)
+        assert set(["prepare_peak_memory", "run_peak_memory"]).issubset(df.columns)
 
 
 class DummyPlanner:
@@ -45,5 +45,5 @@ class DummyScheduler:
 def test_run_quasar_records_memory():
     runner = BenchmarkRunner()
     record = runner.run_quasar(None, DummyScheduler())
-    assert record["prepare_memory"] > 0
-    assert record["run_memory"] > 0
+    assert record["prepare_peak_memory"] > 0
+    assert record["run_peak_memory"] > 0
