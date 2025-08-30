@@ -69,8 +69,8 @@ except ImportError as exc:  # pragma: no cover - executed when MQT libraries mis
 
         def _unavailable(self, *_, **__):
             raise ImportError(
-                "DecisionDiagramBackend requires the 'mqt.core' and 'mqt.ddsim' "
-                "packages. Install them to use this backend."
+                "DecisionDiagramBackend requires the 'mqt.core' package. "
+                "Install it to use this backend."
             ) from exc
 
         load = ingest = apply_gate = extract_ssd = _unavailable
