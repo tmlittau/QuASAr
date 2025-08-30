@@ -99,6 +99,7 @@ class BenchmarkRunner:
             "framework": getattr(backend, "name", backend.__class__.__name__),
             "prepare_time": prepare_time,
             "run_time": run_time,
+            "total_time": prepare_time + run_time,
             "prepare_peak_memory": prepare_peak_memory,
             "run_peak_memory": run_peak_memory,
             "result": result,
@@ -139,6 +140,7 @@ class BenchmarkRunner:
             "framework": "quasar",
             "prepare_time": prepare_time,
             "run_time": run_time,
+            "total_time": prepare_time + run_time,
             "prepare_peak_memory": prepare_peak_memory,
             "run_peak_memory": run_peak_memory,
             "result": result,
@@ -151,8 +153,8 @@ class BenchmarkRunner:
         """Return collected results as a :class:`pandas.DataFrame` if available.
 
         The returned data includes separate ``prepare_time``/``run_time`` and
-        ``prepare_peak_memory``/``run_peak_memory`` columns for downstream
-        analysis.
+        their sum ``total_time`` as well as ``prepare_peak_memory``/``run_peak_memory``
+        columns for downstream analysis.
         """
 
         if pd is None:

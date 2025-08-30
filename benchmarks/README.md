@@ -28,11 +28,13 @@ python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 
 - `--repetitions` repeats each configuration to compute a mean and variance.
 - `--output` is the base path for the generated `.json` and `.csv` files.
 
-Each benchmark records two separate timings:
+Each benchmark records separate timings for the preparation and execution
+phases as well as their sum:
 
 - **prepare_time** – conversion, circuit construction and any backend specific
   compilation that happens before execution.
 - **run_time** – execution of the prepared circuit on the backend.
+- **total_time** – combined runtime of both phases.
 
 Adapters are expected to perform heavy translation work in the preparation
 phase so that `run_time` reflects only the actual simulation cost.
