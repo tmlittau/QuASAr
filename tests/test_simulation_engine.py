@@ -1,4 +1,4 @@
-from quasar import Circuit, SimulationEngine, SSD
+from quasar import Circuit, SimulationEngine, SSD, Backend
 
 
 def test_simulation_engine_simulate_returns_metrics():
@@ -36,3 +36,14 @@ def test_memory_threshold_triggers_adaptive_plan():
     low = SimulationEngine().simulate(circuit, memory_threshold=1)
     assert low.plan.explicit_steps is None
     assert len(low.plan.steps) > 1
+
+
+def test_backend_selection():
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "S", "qubits": [1]},
+    ])
+    engine = SimulationEngine()
+    result = engine.simulate(circuit, backend=Backend.TABLEAU)
+    assert all(step.backend == Backend.TABLEAU for step in result.plan.steps)
