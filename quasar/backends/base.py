@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Common backend interface for QuASAr simulators."""
 
-from typing import Sequence, Dict, Any, TYPE_CHECKING
+from typing import Sequence, Dict, Any, TYPE_CHECKING, List, Tuple
 
 from ..cost import Backend as BackendType
 
@@ -31,6 +31,41 @@ class Backend:
     def load(self, num_qubits: int, **kwargs: Any) -> None:
         """Initialise the simulator for ``num_qubits`` qubits."""
         raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    def prepare_benchmark(self, circuit: Any | None = None) -> None:
+        """Enable benchmark mode so that ``apply_gate`` merely records operations.
+
+        Backends can use this hook to defer expensive state updates until
+        :meth:`run_benchmark` is invoked.  Implementations are expected to
+        populate ``_benchmark_mode`` and ``_benchmark_ops`` attributes but no
+        further action is required here.
+        """
+        self._benchmark_mode = True  # type: ignore[attr-defined]
+        self._benchmark_ops = []  # type: ignore[attr-defined]
+
+    def run_benchmark(self) -> Any:
+        """Execute any operations queued during benchmark preparation.
+
+        The default implementation replays the stored gate descriptors via
+        :meth:`apply_gate` with benchmark mode disabled and then attempts to
+        return a state representation.  Sub-classes may override this method to
+        customise the returned data.
+        """
+        ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = getattr(
+            self, "_benchmark_ops", []
+        )
+        self._benchmark_mode = False  # type: ignore[attr-defined]
+        for name, qubits, params in ops:
+            self.apply_gate(name, qubits, params)
+        self._benchmark_ops = []  # type: ignore[attr-defined]
+        try:
+            return self.statevector()
+        except Exception:
+            try:
+                return self.extract_ssd()
+            except Exception:
+                return None
 
     # ------------------------------------------------------------------
     def ingest(self, state: Any) -> None:

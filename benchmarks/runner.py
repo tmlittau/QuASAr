@@ -56,32 +56,46 @@ class BenchmarkRunner:
 
     # ------------------------------------------------------------------
     def run(self, circuit: Any, backend: Any, **kwargs: Any) -> Dict[str, Any]:
-        """Execute ``circuit`` on ``backend`` and record runtime and memory.
+        """Execute ``circuit`` on ``backend`` and record runtime and memory."""
 
-        If ``backend`` provides a :meth:`prepare` method, it is invoked prior
-        to measurement.  Both the time and peak memory used during this phase
-        are recorded separately so that only the actual simulation call
-        contributes to the ``run_time`` and ``run_memory`` measurements.  Any
-        keyword arguments are forwarded to the backend's ``run`` method.
-        """
-
-        prepared = circuit
         prepare_time = 0.0
         prepare_memory = 0
-        if hasattr(backend, "prepare"):
+
+        if hasattr(backend, "prepare_benchmark") and hasattr(backend, "run_benchmark"):
             tracemalloc.start()
             start_prepare = time.perf_counter()
-            prepared = backend.prepare(circuit)
+            if hasattr(backend, "load") and getattr(circuit, "num_qubits", None) is not None:
+                backend.load(circuit.num_qubits)
+            backend.prepare_benchmark(circuit)
+            for g in getattr(circuit, "gates", []):
+                backend.apply_gate(g.gate, g.qubits, g.params)
             prepare_time = time.perf_counter() - start_prepare
             _, prepare_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
 
-        tracemalloc.start()
-        start_run = time.perf_counter()
-        result = self._invoke(backend, prepared, **kwargs)
-        run_time = time.perf_counter() - start_run
-        _, run_memory = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+            tracemalloc.start()
+            start_run = time.perf_counter()
+            result = backend.run_benchmark(**kwargs)
+            run_time = time.perf_counter() - start_run
+            _, run_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        else:
+            prepared = circuit
+            if hasattr(backend, "prepare"):
+                tracemalloc.start()
+                start_prepare = time.perf_counter()
+                prepared = backend.prepare(circuit)
+                prepare_time = time.perf_counter() - start_prepare
+                _, prepare_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+
+            tracemalloc.start()
+            start_run = time.perf_counter()
+            result = self._invoke(backend, prepared, **kwargs)
+            run_time = time.perf_counter() - start_run
+            _, run_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
             "prepare_time": prepare_time,

@@ -3,7 +3,7 @@ from __future__ import annotations
 """Wrapper around the Stim tableau simulator."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Sequence
+from typing import Dict, Sequence, List, Tuple
 import stim
 
 from ..ssd import SSD, SSDPartition
@@ -17,6 +17,10 @@ class StimBackend(Backend):
     simulator: stim.TableauSimulator | None = field(default=None, init=False)
     num_qubits: int = field(default=0, init=False)
     history: list[str] = field(default_factory=list, init=False)
+    _benchmark_mode: bool = field(default=False, init=False)
+    _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
+        default_factory=list, init=False
+    )
 
     _ALIASES: Dict[str, str] = field(
         default_factory=lambda: {
@@ -54,6 +58,9 @@ class StimBackend(Backend):
         qubits: Sequence[int],
         params: Dict[str, float] | None = None,
     ) -> None:
+        if self._benchmark_mode:
+            self._benchmark_ops.append((name, tuple(qubits), params))
+            return
         if self.simulator is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = self._ALIASES.get(name.upper(), name.lower())
