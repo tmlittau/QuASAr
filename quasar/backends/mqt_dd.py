@@ -1,49 +1,77 @@
+"""Decision diagram backend based on :class:`mqt.core.dd.DDPackage`."""
+
 from __future__ import annotations
 
-"""Wrapper for the MQT decision diagram simulators."""
-
 from dataclasses import dataclass, field
-from typing import Dict, Sequence, List, Tuple
+from typing import Dict, List, Sequence, Tuple
 
-from mqt.core.ir import QuantumComputation
-import mqt.ddsim as ddsim
+from mqt.core import dd
+from mqt.core.ir import operations
 
-from ..ssd import SSD, SSDPartition
 from ..cost import Backend as BackendType
+from ..ssd import SSD, SSDPartition
 from .base import Backend
 
 
 @dataclass
 class DecisionDiagramBackend(Backend):
+    """Simulation backend using MQT's decision diagram package."""
+
     backend: BackendType = BackendType.DECISION_DIAGRAM
-    circuit: QuantumComputation | None = field(default=None, init=False)
     num_qubits: int = field(default=0, init=False)
     history: list[str] = field(default_factory=list, init=False)
-    state: object | None = field(default=None, init=False)
+    state: dd.VectorDD | None = field(default=None, init=False)
+    package: dd.DDPackage | None = field(default=None, init=False)
     _benchmark_mode: bool = field(default=False, init=False)
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
 
-    _ALIASES: Dict[str, str] = field(default_factory=lambda: {"SDG": "sdg", "U1": "p"})
+    _ALIASES: Dict[str, str] = field(
+        default_factory=lambda: {"SDG": "sdg", "SXDG": "sxdg", "TDG": "tdg", "VDG": "vdg", "U1": "p"}
+    )
 
+    # ------------------------------------------------------------------
     def load(self, num_qubits: int, **_: dict) -> None:
-        self.circuit = QuantumComputation(num_qubits)
+        """Initialise a new zero state for ``num_qubits`` qubits."""
+
+        self.package = dd.DDPackage(num_qubits)
+        self.state = self.package.zero_state(num_qubits)
+        self.package.inc_ref_vec(self.state)
         self.num_qubits = num_qubits
         self.history.clear()
-        self.state = None
 
     def ingest(self, state: object) -> None:
-        """Initialise the backend from an existing decision diagram state."""
-        if isinstance(state, tuple) and len(state) == 2:
-            n, ptr = state
-            self.num_qubits = int(n)
-            self.state = ptr
-            self.circuit = QuantumComputation(self.num_qubits)
-            self.history.clear()
-            return
-        raise TypeError("Unsupported state for decision diagram backend")
+        """Initialise the backend from an existing ``(n, VectorDD)`` pair."""
 
+        if not (isinstance(state, tuple) and len(state) == 2):
+            raise TypeError("Unsupported state for decision diagram backend")
+        n, vec = state
+        self.num_qubits = int(n)
+        self.package = dd.DDPackage(self.num_qubits)
+        if isinstance(vec, dd.VectorDD):
+            self.package.inc_ref_vec(vec)
+            self.state = vec
+        else:  # stub environments provide integer handles; ignore and start from |0>
+            self.state = self.package.zero_state(self.num_qubits)
+            self.package.inc_ref_vec(self.state)
+        self.history.clear()
+
+    # ------------------------------------------------------------------
+    def _standard_operation(
+        self, name: str, qubits: Sequence[int], params: Sequence[float]
+    ) -> operations.Operation:
+        name_l = self._ALIASES.get(name.upper(), name.lower())
+        if name_l.startswith("c") and len(name_l) == 2:
+            # simple single-control gate like CX, CZ, CY
+            control = operations.Control(qubits[0])
+            target = qubits[1]
+            op_type = getattr(operations.OpType, name_l[1:])
+            return operations.StandardOperation({control}, target, op_type, list(params))
+        op_type = getattr(operations.OpType, name_l)
+        return operations.StandardOperation(list(qubits), op_type, list(params))
+
+    # ------------------------------------------------------------------
     def apply_gate(
         self,
         name: str,
@@ -53,19 +81,23 @@ class DecisionDiagramBackend(Backend):
         if self._benchmark_mode:
             self._benchmark_ops.append((name, tuple(qubits), params))
             return
-        if self.circuit is None:
+
+        if self.package is None or self.state is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
-        lname = self._ALIASES.get(name.upper(), name.lower())
-        func = getattr(self.circuit, lname, None)
-        if func is None:
-            raise NotImplementedError(f"Unsupported MQT DD gate {name}")
-        args = [float(v) for v in params.values()] if params else []
-        func(*args, *qubits)
+        if not isinstance(self.state, dd.VectorDD):
+            raise TypeError("Backend state is not a VectorDD")
+
+        op = self._standard_operation(name, qubits, list(params.values()) if params else [])
+        new_state = self.package.apply_unitary_operation(self.state, op)
+        self.package.inc_ref_vec(new_state)
+        self.package.dec_ref_vec(self.state)
+        self.state = new_state
         self.history.append(name.upper())
 
     # ------------------------------------------------------------------
     def run(self) -> None:
         """Apply any operations queued during benchmark preparation."""
+
         if not self._benchmark_ops:
             return
         ops = self._benchmark_ops
@@ -74,30 +106,21 @@ class DecisionDiagramBackend(Backend):
         for name, qubits, params in ops:
             self.apply_gate(name, qubits, params)
 
+    # ------------------------------------------------------------------
     def extract_ssd(self) -> SSD:
         self.run()
-        if self.circuit is None:
+        if self.package is None or self.state is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
-        if self.state is not None and not self.history:
-            state = self.state
-        else:
-            simulator = ddsim.CircuitSimulator(self.circuit)
-            self.state = simulator.get_constructed_dd()
-            state = self.state
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
-            state=(self.num_qubits, state),
+            state=(self.num_qubits, self.state),
         )
         return SSD([part])
 
     # ------------------------------------------------------------------
     def statevector(self) -> Sequence[complex]:
-        """Return a dense statevector for the DD backend.
-
-        The decision diagram package does not currently expose an efficient
-        statevector extraction method, hence this is left unimplemented.
-        """
         self.run()
         raise NotImplementedError("Statevector extraction not supported")
+
