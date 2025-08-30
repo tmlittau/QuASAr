@@ -14,7 +14,8 @@ from typing import Iterable, List, Callable
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from runner import BenchmarkRunner
-from backends import StatevectorAdapter
+from backends import BackendAdapter
+from quasar.backends import StatevectorBackend
 import circuits as circuit_lib
 
 
@@ -42,7 +43,7 @@ def resolve_circuit(name: str) -> Callable[[int], object]:
 
 
 def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repetitions: int) -> List[dict]:
-    backend = StatevectorAdapter()
+    backend = BackendAdapter(name="statevector", backend_cls=StatevectorBackend)
     results = []
     for n in qubits:
         circuit = circuit_fn(n)
