@@ -41,13 +41,18 @@ class _BaseAdapter:
         circuit: Union[
             Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
         ],
+        *,
+        return_state: bool = True,
     ) -> Any:
         """Execute ``circuit`` on the native backend.
 
         ``circuit`` may either be a :class:`Circuit` instance or the prepared
         ``(num_qubits, ops)`` tuple returned by :meth:`prepare`.  Passing a
         precompiled circuit allows benchmarks to measure only the actual
-        simulation time, excluding conversion costs.
+        simulation time, excluding conversion costs.  The ``return_state`` flag
+        controls whether the simulator's state representation is extracted and
+        returned or whether the backend instance is handed back to the caller
+        for later inspection.
         """
 
         if isinstance(circuit, Circuit):
@@ -59,6 +64,9 @@ class _BaseAdapter:
         backend.load(num_qubits)
         for name, qubits, params in ops:
             backend.apply_gate(name, qubits, params)
+
+        if not return_state:
+            return backend
 
         # Return whatever state representation the backend exposes.  The
         # return value is not interpreted by :class:`BenchmarkRunner` but may
@@ -85,6 +93,22 @@ class StimAdapter(_BaseAdapter):
     def __init__(self) -> None:
         super().__init__(name="stim", backend_cls=StimBackend)
 
+    def run(
+        self,
+        circuit: Union[
+            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
+        ],
+        *,
+        return_state: bool = True,
+    ) -> Any:
+        backend = super().run(circuit, return_state=False)
+        if not return_state:
+            return backend
+        try:
+            return backend.simulator.current_inverse_tableau()  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
 
 class MPSAdapter(_BaseAdapter):
     """Adapter executing circuits using the MPS simulator."""
@@ -98,6 +122,27 @@ class DecisionDiagramAdapter(_BaseAdapter):
 
     def __init__(self) -> None:
         super().__init__(name="mqt_dd", backend_cls=DecisionDiagramBackend)
+
+    def run(
+        self,
+        circuit: Union[
+            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
+        ],
+        *,
+        return_state: bool = True,
+    ) -> Any:
+        backend = super().run(circuit, return_state=False)
+        if not return_state:
+            return backend
+        try:
+            ssd = backend.extract_ssd()
+            part = next(iter(ssd.partitions), None)
+            state = getattr(part, "state", None)
+            if isinstance(state, tuple) and len(state) == 2:
+                return state[1]
+            return state
+        except Exception:
+            return None
 
 
 class _AerAdapter(_BaseAdapter):
@@ -114,6 +159,8 @@ class _AerAdapter(_BaseAdapter):
         circuit: Union[
             Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
         ],
+        *,
+        return_state: bool = True,
     ) -> Any:  # pragma: no cover - optional dependency
         if isinstance(circuit, Circuit):
             num_qubits, ops = self.prepare(circuit)
@@ -131,11 +178,19 @@ class _AerAdapter(_BaseAdapter):
             args = [float(v) for v in params.values()] if params else []
             func(*args, *qubits)
 
-        qc.save_statevector()
+        if self.method == "statevector":
+            qc.save_statevector()
+        else:
+            qc.save_matrix_product_state()  # type: ignore[attr-defined]
+
         sim = AerSimulator(method=self.method)
         result = sim.run(qc).result()
+        if not return_state:
+            return result
         try:
-            return result.get_statevector()
+            if self.method == "statevector":
+                return result.get_statevector()
+            return result.data(0)["matrix_product_state"]
         except Exception:
             return None
 
@@ -167,6 +222,8 @@ class MQTDDAdapter(_BaseAdapter):
         circuit: Union[
             Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
         ],
+        *,
+        return_state: bool = True,
     ) -> Any:  # pragma: no cover - optional dependency
         if isinstance(circuit, Circuit):
             num_qubits, ops = self.prepare(circuit)
@@ -186,6 +243,8 @@ class MQTDDAdapter(_BaseAdapter):
             func(*args, *qubits)
 
         simulator = ddsim.CircuitSimulator(qc)
+        if not return_state:
+            return simulator
         return simulator.get_constructed_dd()
 
 

@@ -36,33 +36,38 @@ class BenchmarkRunner:
     results: List[Dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------------
-    def _invoke(self, backend: Any, circuit: Any) -> Any:
+    def _invoke(self, backend: Any, circuit: Any, **kwargs: Any) -> Any:
         """Call ``backend`` with ``circuit``.
 
         ``backend`` may expose a ``run`` method or be directly callable.  Any
         return value is forwarded to the caller but also stored in the result
-        record for completeness.
+        record for completeness.  Additional keyword arguments are forwarded to
+        the backend invocation.  This allows benchmarks to control whether the
+        backend should return a state representation or merely perform the
+        simulation.
         """
 
         if hasattr(backend, "run"):
-            return backend.run(circuit)
+            return backend.run(circuit, **kwargs)
         if callable(backend):
-            return backend(circuit)
+            return backend(circuit, **kwargs)
         raise TypeError("backend must be callable or provide a 'run' method")
 
     # ------------------------------------------------------------------
-    def run(self, circuit: Any, backend: Any) -> Dict[str, Any]:
+    def run(self, circuit: Any, backend: Any, **kwargs: Any) -> Dict[str, Any]:
         """Execute ``circuit`` on ``backend`` and record the runtime.
 
         If ``backend`` provides a :meth:`prepare` method, it is invoked prior
-        to measurement so that only the actual simulation call is timed.
+        to measurement so that only the actual simulation call is timed.  Any
+        keyword arguments are forwarded to the backend's ``run`` method.
         """
+
         prepared = circuit
         if hasattr(backend, "prepare"):
             prepared = backend.prepare(circuit)
 
         start = time.perf_counter()
-        result = self._invoke(backend, prepared)
+        result = self._invoke(backend, prepared, **kwargs)
         elapsed = time.perf_counter() - start
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
