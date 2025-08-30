@@ -51,7 +51,8 @@ def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repeti
         for _ in range(repetitions):
             runner.run(circuit, backend, return_state=False)
         times = [r["run_time"] for r in runner.results]
-        memories = [r["run_memory"] for r in runner.results]
+        run_memories = [r["run_peak_memory"] for r in runner.results]
+        prepare_memories = [r["prepare_peak_memory"] for r in runner.results]
         record = {
             "circuit": circuit_fn.__name__,
             "qubits": n,
@@ -59,8 +60,14 @@ def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repeti
             "repetitions": repetitions,
             "avg_time": statistics.mean(times),
             "time_variance": statistics.pvariance(times) if repetitions > 1 else 0.0,
-            "avg_memory": statistics.mean(memories),
-            "memory_variance": statistics.pvariance(memories) if repetitions > 1 else 0.0,
+            "avg_prepare_peak_memory": statistics.mean(prepare_memories),
+            "prepare_peak_memory_variance": statistics.pvariance(prepare_memories)
+            if repetitions > 1
+            else 0.0,
+            "avg_run_peak_memory": statistics.mean(run_memories),
+            "run_peak_memory_variance": statistics.pvariance(run_memories)
+            if repetitions > 1
+            else 0.0,
         }
         results.append(record)
     return results
@@ -77,8 +84,10 @@ def save_results(results: List[dict], output: Path) -> None:
         "repetitions",
         "avg_time",
         "time_variance",
-        "avg_memory",
-        "memory_variance",
+        "avg_prepare_peak_memory",
+        "prepare_peak_memory_variance",
+        "avg_run_peak_memory",
+        "run_peak_memory_variance",
     ]
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="") as f:

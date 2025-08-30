@@ -59,10 +59,12 @@ class BenchmarkRunner:
         """Execute ``circuit`` on ``backend`` and record runtime and memory."""
 
         prepare_time = 0.0
-        prepare_memory = 0
+        prepare_peak_memory = 0
+        run_peak_memory = 0
+
+        tracemalloc.start()
 
         if hasattr(backend, "prepare_benchmark") and hasattr(backend, "run_benchmark"):
-            tracemalloc.start()
             start_prepare = time.perf_counter()
             if hasattr(backend, "load") and getattr(circuit, "num_qubits", None) is not None:
                 backend.load(circuit.num_qubits)
@@ -70,38 +72,35 @@ class BenchmarkRunner:
             for g in getattr(circuit, "gates", []):
                 backend.apply_gate(g.gate, g.qubits, g.params)
             prepare_time = time.perf_counter() - start_prepare
-            _, prepare_memory = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
+            _, prepare_peak_memory = tracemalloc.get_traced_memory()
+            tracemalloc.reset_peak()
 
-            tracemalloc.start()
             start_run = time.perf_counter()
             result = backend.run_benchmark(**kwargs)
             run_time = time.perf_counter() - start_run
-            _, run_memory = tracemalloc.get_traced_memory()
+            _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
         else:
             prepared = circuit
             if hasattr(backend, "prepare"):
-                tracemalloc.start()
                 start_prepare = time.perf_counter()
                 prepared = backend.prepare(circuit)
                 prepare_time = time.perf_counter() - start_prepare
-                _, prepare_memory = tracemalloc.get_traced_memory()
-                tracemalloc.stop()
+                _, prepare_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.reset_peak()
 
-            tracemalloc.start()
             start_run = time.perf_counter()
             result = self._invoke(backend, prepared, **kwargs)
             run_time = time.perf_counter() - start_run
-            _, run_memory = tracemalloc.get_traced_memory()
+            _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
 
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
             "prepare_time": prepare_time,
             "run_time": run_time,
-            "prepare_memory": prepare_memory,
-            "run_memory": run_memory,
+            "prepare_peak_memory": prepare_peak_memory,
+            "run_peak_memory": run_peak_memory,
             "result": result,
         }
         self.results.append(record)
@@ -122,26 +121,26 @@ class BenchmarkRunner:
         scheduler = getattr(engine, "scheduler", engine)
         planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
         prepare_time = 0.0
-        prepare_memory = 0
+        prepare_peak_memory = 0
+        run_peak_memory = 0
+        tracemalloc.start()
         if planner is not None:
-            tracemalloc.start()
             start_prepare = time.perf_counter()
             planner.plan(circuit)
             prepare_time = time.perf_counter() - start_prepare
-            _, prepare_memory = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
-        tracemalloc.start()
+            _, prepare_peak_memory = tracemalloc.get_traced_memory()
+            tracemalloc.reset_peak()
         start_run = time.perf_counter()
         result = scheduler.run(circuit)
         run_time = time.perf_counter() - start_run
-        _, run_memory = tracemalloc.get_traced_memory()
+        _, run_peak_memory = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         record = {
             "framework": "quasar",
             "prepare_time": prepare_time,
             "run_time": run_time,
-            "prepare_memory": prepare_memory,
-            "run_memory": run_memory,
+            "prepare_peak_memory": prepare_peak_memory,
+            "run_peak_memory": run_peak_memory,
             "result": result,
         }
         self.results.append(record)
@@ -152,7 +151,8 @@ class BenchmarkRunner:
         """Return collected results as a :class:`pandas.DataFrame` if available.
 
         The returned data includes separate ``prepare_time``/``run_time`` and
-        ``prepare_memory``/``run_memory`` columns for downstream analysis.
+        ``prepare_peak_memory``/``run_peak_memory`` columns for downstream
+        analysis.
         """
 
         if pd is None:
