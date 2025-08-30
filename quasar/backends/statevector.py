@@ -3,7 +3,7 @@ from __future__ import annotations
 """Statevector backend powered by Qiskit Aer."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Sequence
+from typing import Dict, Sequence, List, Tuple
 import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.circuit.library import U2Gate, UGate
@@ -23,6 +23,10 @@ class StatevectorBackend(Backend):
     circuit: QuantumCircuit | None = field(default=None, init=False)
     num_qubits: int = field(default=0, init=False)
     history: list[str] = field(default_factory=list, init=False)
+    _benchmark_mode: bool = field(default=False, init=False)
+    _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
+        default_factory=list, init=False
+    )
 
     # ------------------------------------------------------------------
     def load(self, num_qubits: int, **_: dict) -> None:
@@ -63,6 +67,9 @@ class StatevectorBackend(Backend):
         qubits: Sequence[int],
         params: Dict[str, float] | None = None,
     ) -> None:
+        if self._benchmark_mode:
+            self._benchmark_ops.append((name, tuple(qubits), params))
+            return
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = name.upper()
