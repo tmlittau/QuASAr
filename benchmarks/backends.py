@@ -29,7 +29,8 @@ class _BaseAdapter:
         list of operations where each operation is represented as
         ``(gate, qubits, params)``.  This step can be performed prior to
         invoking :meth:`run` so that conversion overhead is excluded from the
-        measured runtime.
+        measured runtime.  Any substantial translation work must happen here,
+        ensuring that ``run_time`` reflects only the actual gate execution.
         """
 
         ops = [(g.gate, g.qubits, g.params) for g in circuit.gates]
@@ -54,8 +55,9 @@ class _BaseAdapter:
         returned or whether the backend instance is handed back to the caller
         for later inspection.
         """
-
         if isinstance(circuit, Circuit):
+            # Fallback path: preparation happens inside ``run`` which means the
+            # translation cost will be included in ``run_time``.
             num_qubits, ops = self.prepare(circuit)
         else:
             num_qubits, ops = circuit
@@ -99,6 +101,9 @@ class StimAdapter(_BaseAdapter):
         import stim
 
         num_qubits, ops = super().prepare(circuit)
+        # Translate to Stim's bulk circuit representation outside the timed
+        # simulation.  Building this circuit can be expensive and therefore
+        # belongs to ``prepare_time``.
         stim_circuit = stim.Circuit()
         aliases = {k.upper(): v.upper() for k, v in StimBackend()._ALIASES.items()}
         for name, qubits, params in ops:
@@ -130,9 +135,14 @@ class StimAdapter(_BaseAdapter):
             num_qubits, stim_circuit = circuit
 
         sim = stim.TableauSimulator()
+        # Only the execution of the pre-built Stim circuit is considered part
+        # of the timed ``run`` phase.
         sim.do_circuit(stim_circuit)
 
         backend = self.backend_cls()
+        # ``backend.ingest`` merely converts the Stim simulator into the
+        # backend's native representation and is performed after the simulation
+        # has finished.
         backend.ingest(sim)
         if not return_state:
             return backend
@@ -163,6 +173,8 @@ class DecisionDiagramAdapter(_BaseAdapter):
         *,
         return_state: bool = True,
     ) -> Any:
+        # ``_BaseAdapter.run`` performs the actual simulation; any state
+        # extraction below therefore happens after the timed section.
         backend = super().run(circuit, return_state=False)
         if not return_state:
             return backend
@@ -186,22 +198,17 @@ class _AerAdapter(_BaseAdapter):
         super().__init__(name=name, backend_cls=None)
         self.method = method
 
-    def run(
-        self,
-        circuit: Union[
-            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
-        ],
-        *,
-        return_state: bool = True,
-    ) -> Any:  # pragma: no cover - optional dependency
-        if isinstance(circuit, Circuit):
-            num_qubits, ops = self.prepare(circuit)
-        else:
-            num_qubits, ops = circuit
+    def prepare(
+        self, circuit: Circuit
+    ) -> Tuple[int, Any]:  # pragma: no cover - optional dependency
+        """Translate ``circuit`` into a :class:`qiskit.QuantumCircuit`.
 
+        Compilation is performed here so that ``run_time`` only measures the
+        actual execution of the Aer simulator.
+        """
         from qiskit import QuantumCircuit
-        from qiskit_aer import AerSimulator
 
+        num_qubits, ops = super().prepare(circuit)
         qc = QuantumCircuit(num_qubits)
         for name, qubits, params in ops:
             func = getattr(qc, name.lower(), None)
@@ -215,7 +222,26 @@ class _AerAdapter(_BaseAdapter):
         else:
             qc.save_matrix_product_state()  # type: ignore[attr-defined]
 
+        return num_qubits, qc
+
+    def run(
+        self,
+        circuit: Union[Circuit, Tuple[int, Any]],
+        *,
+        return_state: bool = True,
+    ) -> Any:  # pragma: no cover - optional dependency
+        if isinstance(circuit, Circuit):
+            # Fallback: compilation will occur inside ``run`` and therefore
+            # contribute to ``run_time``.
+            num_qubits, qc = self.prepare(circuit)
+        else:
+            num_qubits, qc = circuit
+
+        from qiskit_aer import AerSimulator
+
         sim = AerSimulator(method=self.method)
+        # Only the simulator execution is timed; ``prepare`` performs the heavy
+        # QuantumCircuit construction.
         result = sim.run(qc).result()
         if not return_state:
             return result
@@ -249,22 +275,12 @@ class MQTDDAdapter(_BaseAdapter):
     def __init__(self) -> None:
         super().__init__(name="mqt_ddsim", backend_cls=None)
 
-    def run(
-        self,
-        circuit: Union[
-            Circuit, Tuple[int, Iterable[Tuple[str, Sequence[int], Dict[str, Any]]]]
-        ],
-        *,
-        return_state: bool = True,
-    ) -> Any:  # pragma: no cover - optional dependency
-        if isinstance(circuit, Circuit):
-            num_qubits, ops = self.prepare(circuit)
-        else:
-            num_qubits, ops = circuit
-
+    def prepare(
+        self, circuit: Circuit
+    ) -> Tuple[int, Any]:  # pragma: no cover - optional dependency
         from mqt.core.ir import QuantumComputation
-        import mqt.ddsim as ddsim
 
+        num_qubits, ops = super().prepare(circuit)
         qc = QuantumComputation(num_qubits)
         for name, qubits, params in ops:
             lname = self._ALIASES.get(name.upper(), name.lower())
@@ -273,7 +289,24 @@ class MQTDDAdapter(_BaseAdapter):
                 raise NotImplementedError(f"Unsupported MQT DD gate {name}")
             args = [float(v) for v in params.values()] if params else []
             func(*args, *qubits)
+        return num_qubits, qc
 
+    def run(
+        self,
+        circuit: Union[Circuit, Tuple[int, Any]],
+        *,
+        return_state: bool = True,
+    ) -> Any:  # pragma: no cover - optional dependency
+        if isinstance(circuit, Circuit):
+            # Fallback: compilation inside ``run`` counts towards ``run_time``.
+            num_qubits, qc = self.prepare(circuit)
+        else:
+            num_qubits, qc = circuit
+
+        import mqt.ddsim as ddsim
+
+        # Only the actual simulation is timed; ``prepare`` performed the heavy
+        # translation into ``QuantumComputation``.
         simulator = ddsim.CircuitSimulator(qc)
         if not return_state:
             return simulator
