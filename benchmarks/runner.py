@@ -19,6 +19,7 @@ Two entry points are exposed:
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 import time
+import tracemalloc
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
     import pandas as pd  # type: ignore
@@ -55,29 +56,38 @@ class BenchmarkRunner:
 
     # ------------------------------------------------------------------
     def run(self, circuit: Any, backend: Any, **kwargs: Any) -> Dict[str, Any]:
-        """Execute ``circuit`` on ``backend`` and record the runtime.
+        """Execute ``circuit`` on ``backend`` and record runtime and memory.
 
         If ``backend`` provides a :meth:`prepare` method, it is invoked prior
-        to measurement.  The time spent in this step is recorded separately so
-        that only the actual simulation call contributes to the ``run_time``
-        measurement.  Any keyword arguments are forwarded to the backend's
-        ``run`` method.
+        to measurement.  Both the time and peak memory used during this phase
+        are recorded separately so that only the actual simulation call
+        contributes to the ``run_time`` and ``run_memory`` measurements.  Any
+        keyword arguments are forwarded to the backend's ``run`` method.
         """
 
         prepared = circuit
         prepare_time = 0.0
+        prepare_memory = 0
         if hasattr(backend, "prepare"):
+            tracemalloc.start()
             start_prepare = time.perf_counter()
             prepared = backend.prepare(circuit)
             prepare_time = time.perf_counter() - start_prepare
+            _, prepare_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
 
+        tracemalloc.start()
         start_run = time.perf_counter()
         result = self._invoke(backend, prepared, **kwargs)
         run_time = time.perf_counter() - start_run
+        _, run_memory = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
             "prepare_time": prepare_time,
             "run_time": run_time,
+            "prepare_memory": prepare_memory,
+            "run_memory": run_memory,
             "result": result,
         }
         self.results.append(record)
@@ -88,26 +98,36 @@ class BenchmarkRunner:
         """Execute ``circuit`` using a QuASAr scheduler ``engine``.
 
         Planning is performed prior to measurement so that only the actual
-        :meth:`quasar.scheduler.Scheduler.run` invocation is timed.
-        ``engine`` may either be a :class:`~quasar.scheduler.Scheduler` or an
-        object providing ``scheduler`` and ``planner`` attributes (e.g.,
+        :meth:`quasar.scheduler.Scheduler.run` invocation is timed.  Both
+        phases are wrapped with :mod:`tracemalloc` to also capture peak memory
+        usage.  ``engine`` may either be a :class:`~quasar.scheduler.Scheduler`
+        or an object providing ``scheduler`` and ``planner`` attributes (e.g.,
         :class:`~quasar.simulation_engine.SimulationEngine`).
         """
 
         scheduler = getattr(engine, "scheduler", engine)
         planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
         prepare_time = 0.0
+        prepare_memory = 0
         if planner is not None:
+            tracemalloc.start()
             start_prepare = time.perf_counter()
             planner.plan(circuit)
             prepare_time = time.perf_counter() - start_prepare
+            _, prepare_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        tracemalloc.start()
         start_run = time.perf_counter()
         result = scheduler.run(circuit)
         run_time = time.perf_counter() - start_run
+        _, run_memory = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
         record = {
             "framework": "quasar",
             "prepare_time": prepare_time,
             "run_time": run_time,
+            "prepare_memory": prepare_memory,
+            "run_memory": run_memory,
             "result": result,
         }
         self.results.append(record)
@@ -117,8 +137,8 @@ class BenchmarkRunner:
     def dataframe(self) -> "pd.DataFrame | List[Dict[str, Any]]":
         """Return collected results as a :class:`pandas.DataFrame` if available.
 
-        The returned data includes separate ``prepare_time`` and ``run_time``
-        columns for downstream analysis.
+        The returned data includes separate ``prepare_time``/``run_time`` and
+        ``prepare_memory``/``run_memory`` columns for downstream analysis.
         """
 
         if pd is None:
