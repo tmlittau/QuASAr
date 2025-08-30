@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-"""Wrapper around the Stim tableau simulator."""
+r"""Wrapper around the Stim tableau simulator.
+
+This backend directly uses :class:`stim.TableauSimulator` instead of building a
+``stim.Circuit`` and calling :meth:`stim.Circuit.to_tableau`.  The circuit
+conversion method always assumes the qubits begin in the :math:`|0\dots0\rangle`
+state and exposes no way to supply an existing tableau.  By working with
+``TableauSimulator`` we can ingest arbitrary stabilizer states via
+``do_tableau`` and continue evolving them.  Until ``stim`` gains native support
+for starting ``Circuit.to_tableau`` from an initial tableau, this approach keeps
+the backend flexible without an extra conversion step.
+"""
 
 from dataclasses import dataclass, field
 from typing import Dict, Sequence, List, Tuple
