@@ -17,9 +17,18 @@ from .base import Backend
 
 @dataclass
 class MPSBackend(Backend):
-    """Backend wrapping the Aer ``matrix_product_state`` simulator."""
+    """Backend wrapping the Aer simulator.
+
+    Parameters
+    ----------
+    method:
+        Aer simulation method to use.  Defaults to
+        ``"matrix_product_state"``.  A :class:`ValueError` is raised if an
+        unsupported method is requested.
+    """
 
     backend: BackendType = BackendType.MPS
+    method: str = "matrix_product_state"
     circuit: QuantumCircuit | None = field(default=None, init=False)
     num_qubits: int = field(default=0, init=False)
     chi: int = field(default=16, init=False)
@@ -28,6 +37,13 @@ class MPSBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
+
+    def __post_init__(self) -> None:  # pragma: no cover - trivial
+        available = AerSimulator().available_methods()
+        if self.method not in available:
+            raise ValueError(
+                f"Unsupported Aer method '{self.method}'. Available: {available}"
+            )
 
     # ------------------------------------------------------------------
     def load(self, num_qubits: int, **kwargs: dict) -> None:
@@ -104,8 +120,9 @@ class MPSBackend(Backend):
     def _run(self) -> np.ndarray:
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
-        sim = AerSimulator(method="matrix_product_state")
-        sim.set_options(matrix_product_state_max_bond_dimension=self.chi)
+        sim = AerSimulator(method=self.method)
+        if self.method == "matrix_product_state":
+            sim.set_options(matrix_product_state_max_bond_dimension=self.chi)
         circuit = self.circuit.copy()
         circuit.save_statevector()
         result = sim.run(circuit).result()
@@ -127,3 +144,11 @@ class MPSBackend(Backend):
     def statevector(self) -> np.ndarray:
         """Return a dense statevector corresponding to the circuit."""
         return self._run()
+
+
+class AerMPSBackend(MPSBackend):
+    """Convenience backend using Aer with the ``matrix_product_state`` method."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("method", "matrix_product_state")
+        super().__init__(**kwargs)
