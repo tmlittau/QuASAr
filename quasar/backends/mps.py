@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-"""Matrix product state (MPS) simulator."""
+"""Matrix product state backend using Qiskit's MPS simulator."""
 
 from dataclasses import dataclass, field
 from typing import Dict, Sequence
 import numpy as np
+from qiskit import QuantumCircuit
+from qiskit.circuit.library import U2Gate, UGate
+from qiskit.quantum_info import Statevector
+from qiskit_aer import AerSimulator
 
 from ..ssd import SSD, SSDPartition
 from ..cost import Backend as BackendType
@@ -13,76 +17,34 @@ from .base import Backend
 
 @dataclass
 class MPSBackend(Backend):
-    """Lightweight MPS simulator for local circuits.
-
-    The implementation supports single-qubit gates and two-qubit gates on
-    neighbouring qubits.  Bond dimensions are truncated to ``chi`` during
-    two-qubit updates.
-    """
+    """Backend wrapping the Aer ``matrix_product_state`` simulator."""
 
     backend: BackendType = BackendType.MPS
-    tensors: list[np.ndarray] = field(default_factory=list, init=False)
+    circuit: QuantumCircuit | None = field(default=None, init=False)
     num_qubits: int = field(default=0, init=False)
     chi: int = field(default=16, init=False)
     history: list[str] = field(default_factory=list, init=False)
 
-    _GATES: Dict[str, np.ndarray] = field(default_factory=lambda: {
-        "I": np.eye(2, dtype=complex),
-        "ID": np.eye(2, dtype=complex),
-        "X": np.array([[0, 1], [1, 0]], dtype=complex),
-        "Y": np.array([[0, -1j], [1j, 0]], dtype=complex),
-        "Z": np.array([[1, 0], [0, -1]], dtype=complex),
-        "H": 1 / np.sqrt(2) * np.array([[1, 1], [1, -1]], dtype=complex),
-        "S": np.array([[1, 0], [0, 1j]], dtype=complex),
-        "SDG": np.array([[1, 0], [0, -1j]], dtype=complex),
-        "CX": np.array(
-            [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0]],
-            dtype=complex,
-        ),
-        "CZ": np.diag([1, 1, 1, -1]).astype(complex),
-        "SWAP": np.array(
-            [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]],
-            dtype=complex,
-        ),
-    }, init=False)
-
+    # ------------------------------------------------------------------
     def load(self, num_qubits: int, **kwargs: dict) -> None:
         self.num_qubits = num_qubits
         self.chi = int(kwargs.get("chi", 16))
-        self.tensors = [np.zeros((1, 2, 1), dtype=complex) for _ in range(num_qubits)]
-        for tensor in self.tensors:
-            tensor[0, 0, 0] = 1.0
+        self.circuit = QuantumCircuit(num_qubits)
         self.history.clear()
 
-    def ingest(self, state: Sequence[complex] | list[np.ndarray]) -> None:
-        """Initialise the MPS from a statevector or list of tensors."""
-        if isinstance(state, list):
-            self.tensors = [np.array(t, dtype=complex) for t in state]
-            self.num_qubits = len(self.tensors)
-            self.history.clear()
-            return
-
-        vec = np.asarray(state, dtype=complex)
-        dim = len(vec)
-        n = int(np.log2(dim))
-        if 2 ** n != dim:
+    def ingest(self, state: Sequence[complex] | Statevector) -> None:
+        if isinstance(state, Statevector):
+            data = state.data
+            n = int(np.log2(len(data)))
+        else:
+            data = np.asarray(state, dtype=complex)
+            n = int(np.log2(len(data)))
+        if 2**n != len(data):
             raise TypeError("Statevector length is not a power of two")
-
         self.num_qubits = n
-        self.tensors = []
-        psi = vec.reshape(1, dim)
-        chi_left = 1
-        for _ in range(n - 1):
-            psi = psi.reshape(chi_left * 2, -1)
-            u, s, vh = np.linalg.svd(psi, full_matrices=False)
-            chi = min(self.chi, len(s))
-            u = u[:, :chi]
-            s = s[:chi]
-            vh = vh[:chi, :]
-            self.tensors.append(u.reshape(chi_left, 2, chi))
-            psi = np.diag(s) @ vh
-            chi_left = chi
-        self.tensors.append(psi.reshape(chi_left, 2, 1))
+        self.circuit = QuantumCircuit(n)
+        be = data.reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
+        self.circuit.initialize(be, range(n))
         self.history.clear()
 
     # ------------------------------------------------------------------
@@ -95,99 +57,57 @@ class MPSBackend(Backend):
         values = list(params.values())
         return float(values[idx]) if idx < len(values) else 0.0
 
-    def _gate_matrix(self, name: str, params: Dict[str, float] | None) -> np.ndarray:
-        gate = self._GATES.get(name)
-        if gate is not None:
-            return gate
-
-        p0 = self._param(params, 0)
-        if name == "RX":
-            c = np.cos(p0 / 2)
-            s = np.sin(p0 / 2)
-            return np.array([[c, -1j * s], [-1j * s, c]], dtype=complex)
-        if name == "RY":
-            c = np.cos(p0 / 2)
-            s = np.sin(p0 / 2)
-            return np.array([[c, -s], [s, c]], dtype=complex)
-        if name == "RZ":
-            return np.diag([np.exp(-1j * p0 / 2), np.exp(1j * p0 / 2)]).astype(complex)
-        if name in {"P", "U1"}:
-            return np.diag([1.0, np.exp(1j * p0)]).astype(complex)
-        if name == "RZZ":
-            return np.diag(
-                [
-                    np.exp(-1j * p0 / 2),
-                    np.exp(1j * p0 / 2),
-                    np.exp(1j * p0 / 2),
-                    np.exp(-1j * p0 / 2),
-                ]
-            ).astype(complex)
-        if name == "U2":
-            p1 = self._param(params, 1)
-            return (1 / np.sqrt(2)) * np.array(
-                [
-                    [1.0, -np.exp(1j * p1)],
-                    [np.exp(1j * p0), np.exp(1j * (p0 + p1))],
-                ],
-                dtype=complex,
-            )
-        if name in {"U", "U3"}:
-            p1 = self._param(params, 1)
-            p2 = self._param(params, 2)
-            c = np.cos(p0 / 2)
-            s = np.sin(p0 / 2)
-            return np.array(
-                [
-                    [c, -np.exp(1j * p2) * s],
-                    [np.exp(1j * p1) * s, np.exp(1j * (p1 + p2)) * c],
-                ],
-                dtype=complex,
-            )
-        raise NotImplementedError(f"Unsupported gate {name}")
-
     def apply_gate(
         self,
         name: str,
         qubits: Sequence[int],
         params: Dict[str, float] | None = None,
     ) -> None:
+        if self.circuit is None:
+            raise RuntimeError("Backend not initialised; call 'load' first")
         lname = name.upper()
-        gate = self._gate_matrix(lname, params)
         self.history.append(lname)
-
-        if len(qubits) == 1:
-            i = qubits[0]
-            A = self.tensors[i]
-            self.tensors[i] = np.tensordot(gate, A, axes=(1, 1)).transpose(1, 0, 2)
-            return
-
-        if len(qubits) == 2:
-            q0, q1 = qubits
-            if abs(q0 - q1) != 1:
-                raise NotImplementedError("MPS backend supports only nearest-neighbour gates")
-            i = min(q0, q1)
-            j = i + 1
-            left = self.tensors[i]
-            right = self.tensors[j]
-            theta = np.tensordot(left, right, axes=(2, 0))  # l,2,2,r
-            theta = np.tensordot(gate.reshape(2, 2, 2, 2), theta, axes=([2, 3], [1, 2]))
-            theta = theta.transpose(2, 0, 1, 3)
-            l, _, _, r = theta.shape
-            theta = theta.reshape(l * 2, 2 * r)
-            u, s, vh = np.linalg.svd(theta, full_matrices=False)
-            chi = min(self.chi, len(s))
-            u = u[:, :chi]
-            s = s[:chi]
-            vh = vh[:chi, :]
-            self.tensors[i] = u.reshape(l, 2, chi)
-            self.tensors[j] = (np.diag(s) @ vh).reshape(chi, 2, r)
-            return
-
-        raise NotImplementedError("Gate arity beyond 2 is not supported")
+        if lname == "RX":
+            self.circuit.rx(self._param(params, 0), qubits[0])
+        elif lname == "RY":
+            self.circuit.ry(self._param(params, 0), qubits[0])
+        elif lname == "RZ":
+            self.circuit.rz(self._param(params, 0), qubits[0])
+        elif lname in {"P", "U1"}:
+            self.circuit.p(self._param(params, 0), qubits[0])
+        elif lname == "RZZ":
+            self.circuit.rzz(self._param(params, 0), qubits[0], qubits[1])
+        elif lname == "U2":
+            gate = U2Gate(self._param(params, 0), self._param(params, 1))
+            self.circuit.append(gate, [qubits[0]])
+        elif lname in {"U", "U3"}:
+            gate = UGate(
+                self._param(params, 0),
+                self._param(params, 1),
+                self._param(params, 2),
+            )
+            self.circuit.append(gate, [qubits[0]])
+        else:
+            method = getattr(self.circuit, lname.lower(), None)
+            if method is None:
+                raise NotImplementedError(f"Unsupported gate {name}")
+            method(*qubits)
 
     # ------------------------------------------------------------------
+    def _run(self) -> np.ndarray:
+        if self.circuit is None:
+            raise RuntimeError("Backend not initialised; call 'load' first")
+        sim = AerSimulator(method="matrix_product_state")
+        sim.set_options(matrix_product_state_max_bond_dimension=self.chi)
+        circuit = self.circuit.copy()
+        circuit.save_statevector()
+        result = sim.run(circuit).result()
+        vec = result.get_statevector()
+        n = self.num_qubits
+        return np.asarray(vec).reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
+
     def extract_ssd(self) -> SSD:
-        state = [t.copy() for t in self.tensors]
+        state = self._run()
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
@@ -198,10 +118,5 @@ class MPSBackend(Backend):
 
     # ------------------------------------------------------------------
     def statevector(self) -> np.ndarray:
-        """Return a dense statevector corresponding to the MPS."""
-        if not self.tensors:
-            raise RuntimeError("Backend not initialised; call 'load' first")
-        psi = self.tensors[0]
-        for tensor in self.tensors[1:]:
-            psi = np.tensordot(psi, tensor, axes=(2, 0))
-        return psi.reshape(-1).copy()
+        """Return a dense statevector corresponding to the circuit."""
+        return self._run()

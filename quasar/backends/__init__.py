@@ -1,9 +1,40 @@
 """Simulation backend adapters for QuASAr."""
 
 from .base import Backend
-from .statevector import StatevectorBackend
-from .mps import MPSBackend
 from ..cost import Backend as BackendType
+
+# Core backends -----------------------------------------------------------
+try:  # pragma: no cover - optional dependency
+    from .statevector import StatevectorBackend
+except ImportError as exc:  # pragma: no cover - executed when qiskit is missing
+    class StatevectorBackend(Backend):
+        """Stub when Qiskit Aer is not installed."""
+
+        backend: BackendType = BackendType.STATEVECTOR
+
+        def _unavailable(self, *_, **__):
+            raise ImportError(
+                "StatevectorBackend requires the 'qiskit-aer' package. "
+                "Install it to use this backend."
+            ) from exc
+
+        load = ingest = apply_gate = extract_ssd = statevector = _unavailable
+
+try:  # pragma: no cover - optional dependency
+    from .mps import MPSBackend
+except ImportError as exc:  # pragma: no cover - executed when qiskit is missing
+    class MPSBackend(Backend):
+        """Stub when Qiskit Aer is not installed."""
+
+        backend: BackendType = BackendType.MPS
+
+        def _unavailable(self, *_, **__):
+            raise ImportError(
+                "MPSBackend requires the 'qiskit-aer' package. "
+                "Install it to use this backend."
+            ) from exc
+
+        load = ingest = apply_gate = extract_ssd = statevector = _unavailable
 
 # Optional backends -------------------------------------------------------
 try:  # pragma: no cover - optional dependency

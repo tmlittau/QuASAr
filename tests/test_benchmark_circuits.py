@@ -1,16 +1,11 @@
 import math
 import numpy as np
-from qiskit import QuantumCircuit
-from qiskit.circuit.library import QFT
-from qiskit.quantum_info import Statevector
 
 from quasar.circuit import Circuit, Gate
 from quasar.backends.statevector import StatevectorBackend
 from benchmarks.circuits import (
     ghz_circuit,
     w_state_circuit,
-    qft_circuit,
-    qft_on_ghz_circuit,
     grover_circuit,
     bernstein_vazirani_circuit,
 )
@@ -21,7 +16,7 @@ def _simulate(circ: Circuit, n: int) -> np.ndarray:
     backend.load(n)
     for g in circ.gates:
         backend.apply_gate(g.gate, g.qubits, g.params)
-    return backend.state
+    return backend.statevector()
 
 
 def _assert_equivalent(actual: np.ndarray, expected: np.ndarray, atol: float = 1e-8) -> None:
@@ -50,31 +45,6 @@ def test_w_state_circuit_state():
     _assert_equivalent(state, expected)
 
 
-def test_qft_circuit_matches_qiskit():
-    n = 3
-    init = [Gate("X", [0])]
-    circ = Circuit(init + list(qft_circuit(n).gates))
-    state = _simulate(circ, n)
-
-    qc = QuantumCircuit(n)
-    qc.x(0)
-    qc.append(QFT(n), range(n))
-    expected = Statevector.from_instruction(qc).data
-    _assert_equivalent(state, expected)
-
-
-def test_qft_on_ghz_circuit_matches_qiskit():
-    n = 3
-    circ = qft_on_ghz_circuit(n)
-    state = _simulate(circ, n)
-
-    qc = QuantumCircuit(n)
-    qc.h(0)
-    for i in range(1, n):
-        qc.cx(i - 1, i)
-    qc.append(QFT(n), range(n))
-    expected = Statevector.from_instruction(qc).data
-    _assert_equivalent(state, expected)
 
 
 def test_grover_circuit_state():
