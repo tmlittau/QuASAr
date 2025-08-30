@@ -13,8 +13,8 @@ from .cost import Backend, Cost
 from .circuit import Circuit
 from .ssd import SSD, ConversionLayer, SSDPartition
 from .backends import (
-    StatevectorBackend,
-    MPSBackend,
+    StatevectorBackend as AerStatevectorBackend,
+    MPSBackend as AerMPSBackend,
     StimBackend,
     DecisionDiagramBackend,
 )
@@ -36,9 +36,13 @@ class Scheduler:
         self.planner = self.planner or Planner()
         self.conversion_engine = self.conversion_engine or ConversionEngine()
         if self.backends is None:
+            # Instantiate default simulation backends.  The dense
+            # representations use Qiskit Aer implementations while the
+            # other optional backends fall back to stub classes when their
+            # dependencies are missing.
             self.backends = {
-                Backend.STATEVECTOR: StatevectorBackend(),
-                Backend.MPS: MPSBackend(),
+                Backend.STATEVECTOR: AerStatevectorBackend(),
+                Backend.MPS: AerMPSBackend(),
                 Backend.TABLEAU: StimBackend(),
                 Backend.DECISION_DIAGRAM: DecisionDiagramBackend(),
             }
