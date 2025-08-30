@@ -49,6 +49,18 @@ argument to explicitly choose the simulation backend (e.g.,
 ``Backend.TABLEAU`` for Clifford circuits).  When omitted, the planner selects a
 backend automatically based on estimated cost.
 
+Dense backends are powered by Qiskit Aer and accept a ``method`` argument to
+select the underlying simulator implementation.  For example::
+
+    from quasar.backends import StatevectorBackend
+    backend = StatevectorBackend(method="density_matrix")
+
+Convenience classes :class:`AerStatevectorBackend` and :class:`AerMPSBackend`
+preconfigure the common ``statevector`` and ``matrix_product_state`` methods
+respectively.  Custom backend instances can be supplied to :class:`Scheduler`
+or :class:`SimulationEngine` via their ``backends`` argument to control the
+simulation method.
+
 ## Scalable benchmark circuits
 
 QuASAr can simulate parameterized circuits sourced from MQTBench and QASMBench.

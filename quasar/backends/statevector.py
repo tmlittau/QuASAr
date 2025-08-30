@@ -17,9 +17,17 @@ from .base import Backend
 
 @dataclass
 class StatevectorBackend(Backend):
-    """Backend that builds a ``QuantumCircuit`` and evaluates via Aer."""
+    """Backend that builds a ``QuantumCircuit`` and evaluates via Aer.
+
+    Parameters
+    ----------
+    method:
+        Aer simulation method to use.  The default is ``"statevector"``.  A
+        :class:`ValueError` is raised if an unsupported method is requested.
+    """
 
     backend: BackendType = BackendType.STATEVECTOR
+    method: str = "statevector"
     circuit: QuantumCircuit | None = field(default=None, init=False)
     num_qubits: int = field(default=0, init=False)
     history: list[str] = field(default_factory=list, init=False)
@@ -27,6 +35,13 @@ class StatevectorBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
+
+    def __post_init__(self) -> None:  # pragma: no cover - trivial
+        available = AerSimulator().available_methods()
+        if self.method not in available:
+            raise ValueError(
+                f"Unsupported Aer method '{self.method}'. Available: {available}"
+            )
 
     # ------------------------------------------------------------------
     def load(self, num_qubits: int, **_: dict) -> None:
@@ -104,7 +119,7 @@ class StatevectorBackend(Backend):
     def _run(self) -> np.ndarray:
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
-        sim = AerSimulator(method="statevector")
+        sim = AerSimulator(method=self.method)
         circuit = self.circuit.copy()
         circuit.save_statevector()
         result = sim.run(circuit).result()
@@ -127,3 +142,11 @@ class StatevectorBackend(Backend):
     def statevector(self) -> np.ndarray:
         """Return a dense statevector of the current simulator state."""
         return self._run()
+
+
+class AerStatevectorBackend(StatevectorBackend):
+    """Convenience backend using Aer with the ``statevector`` method."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("method", "statevector")
+        super().__init__(**kwargs)

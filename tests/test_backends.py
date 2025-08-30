@@ -27,6 +27,16 @@ def test_mps_backend():
     _exercise_backend(MPSBackend)
 
 
+def test_statevector_backend_rejects_unknown_method():
+    with pytest.raises(ValueError):
+        StatevectorBackend(method="bogus")
+
+
+def test_mps_backend_rejects_unknown_method():
+    with pytest.raises(ValueError):
+        MPSBackend(method="bogus")
+
+
 def test_stim_backend():
     _exercise_backend(StimBackend)
 

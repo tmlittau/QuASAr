@@ -5,7 +5,7 @@ from ..cost import Backend as BackendType
 
 # Core backends -----------------------------------------------------------
 try:  # pragma: no cover - optional dependency
-    from .statevector import StatevectorBackend
+    from .statevector import StatevectorBackend, AerStatevectorBackend
 except ImportError as exc:  # pragma: no cover - executed when qiskit is missing
     class StatevectorBackend(Backend):
         """Stub when Qiskit Aer is not installed."""
@@ -20,8 +20,11 @@ except ImportError as exc:  # pragma: no cover - executed when qiskit is missing
 
         load = ingest = apply_gate = extract_ssd = statevector = _unavailable
 
+    class AerStatevectorBackend(StatevectorBackend):
+        pass
+
 try:  # pragma: no cover - optional dependency
-    from .mps import MPSBackend
+    from .mps import MPSBackend, AerMPSBackend
 except ImportError as exc:  # pragma: no cover - executed when qiskit is missing
     class MPSBackend(Backend):
         """Stub when Qiskit Aer is not installed."""
@@ -35,6 +38,9 @@ except ImportError as exc:  # pragma: no cover - executed when qiskit is missing
             ) from exc
 
         load = ingest = apply_gate = extract_ssd = statevector = _unavailable
+
+    class AerMPSBackend(MPSBackend):
+        pass
 
 # Optional backends -------------------------------------------------------
 try:  # pragma: no cover - optional dependency
@@ -72,7 +78,9 @@ except ImportError as exc:  # pragma: no cover - executed when MQT libraries mis
 __all__ = [
     "Backend",
     "StatevectorBackend",
+    "AerStatevectorBackend",
     "MPSBackend",
+    "AerMPSBackend",
     "StimBackend",
     "DecisionDiagramBackend",
 ]

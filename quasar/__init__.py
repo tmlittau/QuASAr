@@ -11,7 +11,9 @@ from .calibration import run_calibration, save_coefficients
 from .backends import (
     Backend as SimulatorBackend,
     StatevectorBackend,
+    AerStatevectorBackend,
     MPSBackend,
+    AerMPSBackend,
     StimBackend,
     DecisionDiagramBackend,
 )
@@ -39,7 +41,9 @@ __all__ = [
     "save_coefficients",
     "SimulatorBackend",
     "StatevectorBackend",
+    "AerStatevectorBackend",
     "MPSBackend",
+    "AerMPSBackend",
     "StimBackend",
     "DecisionDiagramBackend",
     "CircuitAnalyzer",
