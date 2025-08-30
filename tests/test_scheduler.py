@@ -69,7 +69,7 @@ class PrimitiveTrackingEngine(ConversionEngine):
 
 
 class TwoStepPlanner(Planner):
-    def plan(self, circuit):  # type: ignore[override]
+    def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
         steps = [
             PlanStep(0, 5, Backend.TABLEAU),
             PlanStep(5, 6, Backend.MPS),
@@ -154,9 +154,9 @@ class CountingPlanner(Planner):
         super().__init__()
         self.calls = 0
 
-    def plan(self, circuit):
+    def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
         self.calls += 1
-        return super().plan(circuit)
+        return super().plan(circuit, backend=backend, **kwargs)
 
 
 def test_scheduler_reoptimises_when_requested():
@@ -221,7 +221,7 @@ class BridgeTrackingEngine(ConversionEngine):
 
 
 class BridgePlanner(Planner):
-    def plan(self, circuit):  # type: ignore[override]
+    def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
         steps = [
             PlanStep(0, 1, Backend.STATEVECTOR),
             PlanStep(1, 2, Backend.MPS),
@@ -307,7 +307,7 @@ class FailingOnceBackend(DummyBackend):
 
 
 class SVThenMPSPlanner(Planner):
-    def plan(self, circuit):  # type: ignore[override]
+    def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
         steps = [
             PlanStep(0, 1, Backend.STATEVECTOR),
             PlanStep(1, 2, Backend.MPS),
@@ -336,7 +336,7 @@ class AutoTwoStepPlanner(Planner):
         super().__init__(estimator=estimator)
         self.calls = 0
 
-    def plan(self, circuit):  # type: ignore[override]
+    def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
         self.calls += 1
         if not circuit.gates:
             steps = []

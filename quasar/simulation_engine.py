@@ -18,7 +18,7 @@ from .analyzer import CircuitAnalyzer, AnalysisResult
 from .planner import Planner, PlanResult
 from .scheduler import Scheduler
 from .ssd import SSD
-from .cost import CostEstimator
+from .cost import CostEstimator, Backend
 from quasar_convert import ConversionEngine
 
 
@@ -61,14 +61,20 @@ class SimulationEngine:
         self.memory_threshold = memory_threshold
 
     # ------------------------------------------------------------------
-    def simulate(self, circuit: Circuit, *, memory_threshold: float | None = None) -> SimulationResult:
+    def simulate(
+        self,
+        circuit: Circuit,
+        *,
+        memory_threshold: float | None = None,
+        backend: Backend | None = None,
+    ) -> SimulationResult:
         """Simulate ``circuit`` and return the final :class:`SSD` and metrics."""
 
         analyzer = CircuitAnalyzer(circuit, estimator=self.planner.estimator)
         analysis = analyzer.analyze()
         threshold = memory_threshold if memory_threshold is not None else self.memory_threshold
-        plan = self.planner.plan(circuit, max_memory=threshold)
-        ssd = self.scheduler.run(circuit)
+        plan = self.planner.plan(circuit, max_memory=threshold, backend=backend)
+        ssd = self.scheduler.run(circuit, backend=backend)
         return SimulationResult(ssd=ssd, analysis=analysis, plan=plan)
 
 

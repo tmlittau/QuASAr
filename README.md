@@ -32,10 +32,10 @@ Running a circuit with :class:`quasar.SimulationEngine` returns a
 raw data:
 
 ```python
-from quasar import Circuit, SimulationEngine
+from quasar import Circuit, SimulationEngine, Backend
 
 engine = SimulationEngine()
-result = engine.simulate(Circuit([{"gate": "H", "qubits": [0]}]))
+result = engine.simulate(Circuit([{"gate": "H", "qubits": [0]}]), backend=Backend.STATEVECTOR)
 for part in result.ssd.partitions:
     state = result.ssd.extract_state(part)
     print(part.backend, type(state))
@@ -43,6 +43,11 @@ for part in result.ssd.partitions:
 
 Depending on the backend, ``state`` may be a dense NumPy vector, a list of MPS
 tensors, a ``stim.Tableau`` or a decision diagram node.
+
+The :func:`SimulationEngine.simulate` method accepts an optional ``backend``
+argument to explicitly choose the simulation backend (e.g.,
+``Backend.TABLEAU`` for Clifford circuits).  When omitted, the planner selects a
+backend automatically based on estimated cost.
 
 ## Scalable benchmark circuits
 

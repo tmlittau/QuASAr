@@ -214,7 +214,7 @@ class Planner:
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
         # times during scheduling.
-        self.cache: Dict[Hashable, PlanResult] = {}
+        self.cache: Dict[tuple[Hashable, Backend | None], PlanResult] = {}
         self.cache_hits = 0
 
     # ------------------------------------------------------------------
@@ -226,8 +226,14 @@ class Planner:
         target_backend: Optional[Backend] = None,
         batch_size: int = 1,
         max_memory: float | None = None,
+        forced_backend: Backend | None = None,
     ) -> PlanResult:
-        """Internal DP routine supporting batching and pruning."""
+        """Internal DP routine supporting batching and pruning.
+
+        When ``forced_backend`` is provided only that backend is considered
+        during planning.  A ``ValueError`` is raised if the backend cannot
+        simulate a segment of the circuit.
+        """
 
         n = len(gates)
         if n == 0:
@@ -265,6 +271,12 @@ class Planner:
                 num_qubits = len(qubits)
                 num_gates = i - j
                 backends = _supported_backends(segment)
+                if forced_backend is not None:
+                    if forced_backend not in backends:
+                        raise ValueError(
+                            f"Backend {forced_backend} unsupported for given circuit segment"
+                        )
+                    backends = [forced_backend]
                 candidates: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
                     cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
@@ -326,19 +338,30 @@ class Planner:
             fp.append((g.gate, tuple(g.qubits), params))
         return tuple(fp)
 
-    def cache_lookup(self, gates: List["Gate"]) -> Optional[PlanResult]:
-        """Return a cached plan for ``gates`` if available."""
+    def cache_lookup(self, gates: List["Gate"], backend: Backend | None = None) -> Optional[PlanResult]:
+        """Return a cached plan for ``gates`` if available.
 
-        key = self._fingerprint(gates)
+        Parameters
+        ----------
+        gates:
+            Sequence of gates to plan.
+        backend:
+            Optional backend restriction.  The cache key incorporates the
+            backend so that plans for different backends do not collide.
+        """
+
+        key = (self._fingerprint(gates), backend)
         result = self.cache.get(key)
         if result is not None:
             self.cache_hits += 1
         return result
 
-    def cache_insert(self, gates: List["Gate"], result: PlanResult) -> None:
+    def cache_insert(
+        self, gates: List["Gate"], result: PlanResult, backend: Backend | None = None
+    ) -> None:
         """Insert ``result`` into the planning cache."""
 
-        key = self._fingerprint(gates)
+        key = (self._fingerprint(gates), backend)
         self.cache[key] = result
 
     def _single_backend(self, gates: List["Gate"], max_memory: float | None) -> Tuple[Backend, Cost]:
@@ -367,6 +390,7 @@ class Planner:
         *,
         use_cache: bool = True,
         max_memory: float | None = None,
+        backend: Backend | None = None,
     ) -> PlanResult:
         """Compute the optimal contiguous partition plan using optional
         coarse and refinement passes.
@@ -381,20 +405,39 @@ class Planner:
         threshold = max_memory if max_memory is not None else self.max_memory
 
         if use_cache:
-            cached = self.cache_lookup(gates)
+            cached = self.cache_lookup(gates, backend)
             if cached is not None:
                 return cached
 
+        if backend is not None:
+            supported = _supported_backends(gates)
+            if backend not in supported:
+                raise ValueError(f"Backend {backend} unsupported for given circuit")
+            qubits = {q for g in gates for q in g.qubits}
+            num_qubits = len(qubits)
+            num_gates = len(gates)
+            cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+            if threshold is not None and cost.memory > threshold:
+                raise ValueError("Requested backend exceeds memory threshold")
+            part = Partitioner()
+            groups = part.parallel_groups(gates)
+            parallel = tuple(g[0] for g in groups) if groups else ()
+            step = PlanStep(start=0, end=len(gates), backend=backend, parallel=parallel)
+            result = PlanResult(table=[], final_backend=backend, gates=gates, explicit_steps=[step])
+            if use_cache:
+                self.cache_insert(gates, result, backend)
+            return result
+
         if threshold is not None and gates:
-            backend, cost = self._single_backend(gates, threshold)
+            backend_choice, cost = self._single_backend(gates, threshold)
             if cost.memory <= threshold:
                 part = Partitioner()
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
-                step = PlanStep(start=0, end=len(gates), backend=backend, parallel=parallel)
-                result = PlanResult(table=[], final_backend=backend, gates=gates, explicit_steps=[step])
+                step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
+                result = PlanResult(table=[], final_backend=backend_choice, gates=gates, explicit_steps=[step])
                 if use_cache:
-                    self.cache_insert(gates, result)
+                    self.cache_insert(gates, result, backend_choice)
                 return result
 
         # First perform a coarse plan using the configured batch size.

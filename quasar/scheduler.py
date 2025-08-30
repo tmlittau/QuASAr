@@ -48,7 +48,13 @@ class Scheduler:
             }
 
     # ------------------------------------------------------------------
-    def run(self, circuit: Circuit, monitor: CostHook | None = None) -> SSD:
+    def run(
+        self,
+        circuit: Circuit,
+        monitor: CostHook | None = None,
+        *,
+        backend: Backend | None = None,
+    ) -> SSD:
         """Execute ``circuit`` according to a planner-derived schedule.
 
         Parameters
@@ -66,9 +72,17 @@ class Scheduler:
             executed.
         """
 
-        plan = self.planner.cache_lookup(circuit.gates)
+        if backend is not None:
+            sim = type(self.backends[backend])()
+            sim.load(circuit.num_qubits)
+            for gate in circuit.gates:
+                sim.apply_gate(gate.gate, gate.qubits, gate.params)
+            ssd = sim.extract_ssd()
+            return ssd if ssd is not None else circuit.ssd
+
+        plan = self.planner.cache_lookup(circuit.gates, backend)
         if plan is None:
-            plan = self.planner.plan(circuit)
+            plan = self.planner.plan(circuit, backend=backend)
         steps: List[PlanStep] = list(plan.steps)
 
         sims: Dict[tuple, object] = {}
@@ -119,12 +133,12 @@ class Scheduler:
                     continue
 
             if key not in sims:
-                backend = type(self.backends[target])()
-                backend.load(circuit.num_qubits)
-                sims[key] = backend
-            backend = sims[key]
+                sim_obj = type(self.backends[target])()
+                sim_obj.load(circuit.num_qubits)
+                sims[key] = sim_obj
+            sim_obj = sims[key]
 
-            if backend is not current_sim:
+            if sim_obj is not current_sim:
                 if current_sim is not None:
                     current_ssd = current_sim.extract_ssd()
                     layer = next(
@@ -163,7 +177,7 @@ class Scheduler:
                     try:
                         if primitive == "B2B":
                             try:
-                                backend.ingest(current_ssd)
+                                sim_obj.ingest(current_ssd)
                             except Exception:
                                 if target == Backend.TABLEAU:
                                     rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
@@ -171,14 +185,14 @@ class Scheduler:
                                     rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
                                 else:
                                     rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
-                                backend.ingest(rep)
+                                sim_obj.ingest(rep)
                         elif primitive == "LW":
                             state = current_sim.statevector()
                             rep = self.conversion_engine.extract_local_window(state, boundary)
-                            backend.ingest(rep)
+                            sim_obj.ingest(rep)
                         elif primitive == "ST":
                             rep = self.conversion_engine.build_bridge_tensor(conv_ssd, conv_ssd)
-                            backend.ingest(rep)
+                            sim_obj.ingest(rep)
                         else:
                             if target == Backend.TABLEAU:
                                 rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
@@ -186,9 +200,9 @@ class Scheduler:
                                 rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
                             else:
                                 rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
-                            backend.ingest(rep)
+                            sim_obj.ingest(rep)
                     except Exception:
-                        backend.load(circuit.num_qubits)
+                        sim_obj.load(circuit.num_qubits)
                     circuit.ssd.conversions.append(
                         ConversionLayer(
                             boundary=tuple(boundary),
@@ -200,7 +214,7 @@ class Scheduler:
                             cost=Cost(time=cost_val, memory=0.0),
                         )
                     )
-                current_sim = backend
+                current_sim = sim_obj
                 current_backend = target
                 for k in list(sims.keys()):
                     if k[0] == qubits and k != key:
@@ -258,9 +272,9 @@ class Scheduler:
                 trigger_replan = True
             if trigger_replan:
                 remaining = Circuit(circuit.gates[step.end :])
-                replanned = self.planner.cache_lookup(remaining.gates)
+                replanned = self.planner.cache_lookup(remaining.gates, backend)
                 if replanned is None:
-                    replanned = self.planner.plan(remaining)
+                    replanned = self.planner.plan(remaining, backend=backend)
                 offset = step.end
                 new_steps = [
                     PlanStep(s.start + offset, s.end + offset, s.backend, parallel=s.parallel)
