@@ -82,7 +82,19 @@ class StimBackend(Backend):
         func(*qubits)
         self.history.append(name.upper())
 
+    # ------------------------------------------------------------------
+    def run(self) -> None:
+        """Apply any operations queued during benchmark preparation."""
+        if not self._benchmark_ops:
+            return
+        ops = self._benchmark_ops
+        self._benchmark_ops = []
+        self._benchmark_mode = False
+        for name, qubits, params in ops:
+            self.apply_gate(name, qubits, params)
+
     def extract_ssd(self) -> SSD:
+        self.run()
         tableau = None
         if self.simulator is not None:
             try:
@@ -100,6 +112,7 @@ class StimBackend(Backend):
     # ------------------------------------------------------------------
     def statevector(self) -> Sequence[complex]:
         """Return a dense statevector for the current tableau state."""
+        self.run()
         if self.simulator is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         # Stim returns a numpy array of complex amplitudes

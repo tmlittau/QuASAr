@@ -63,7 +63,19 @@ class DecisionDiagramBackend(Backend):
         func(*args, *qubits)
         self.history.append(name.upper())
 
+    # ------------------------------------------------------------------
+    def run(self) -> None:
+        """Apply any operations queued during benchmark preparation."""
+        if not self._benchmark_ops:
+            return
+        ops = self._benchmark_ops
+        self._benchmark_ops = []
+        self._benchmark_mode = False
+        for name, qubits, params in ops:
+            self.apply_gate(name, qubits, params)
+
     def extract_ssd(self) -> SSD:
+        self.run()
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         if self.state is not None and not self.history:
@@ -87,4 +99,5 @@ class DecisionDiagramBackend(Backend):
         The decision diagram package does not currently expose an efficient
         statevector extraction method, hence this is left unimplemented.
         """
+        self.run()
         raise NotImplementedError("Statevector extraction not supported")
