@@ -51,6 +51,7 @@ def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repeti
         for _ in range(repetitions):
             runner.run(circuit, backend, return_state=False)
         times = [r["run_time"] for r in runner.results]
+        total_times = [r["total_time"] for r in runner.results]
         run_memories = [r["run_peak_memory"] for r in runner.results]
         prepare_memories = [r["prepare_peak_memory"] for r in runner.results]
         record = {
@@ -60,6 +61,8 @@ def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repeti
             "repetitions": repetitions,
             "avg_time": statistics.mean(times),
             "time_variance": statistics.pvariance(times) if repetitions > 1 else 0.0,
+            "avg_total_time": statistics.mean(total_times),
+            "total_time_variance": statistics.pvariance(total_times) if repetitions > 1 else 0.0,
             "avg_prepare_peak_memory": statistics.mean(prepare_memories),
             "prepare_peak_memory_variance": statistics.pvariance(prepare_memories)
             if repetitions > 1
@@ -84,6 +87,8 @@ def save_results(results: List[dict], output: Path) -> None:
         "repetitions",
         "avg_time",
         "time_variance",
+        "avg_total_time",
+        "total_time_variance",
         "avg_prepare_peak_memory",
         "prepare_peak_memory_variance",
         "avg_run_peak_memory",
