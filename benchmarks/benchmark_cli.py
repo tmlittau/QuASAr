@@ -51,13 +51,16 @@ def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repeti
         for _ in range(repetitions):
             runner.run(circuit, backend, return_state=False)
         times = [r["run_time"] for r in runner.results]
+        memories = [r["run_memory"] for r in runner.results]
         record = {
             "circuit": circuit_fn.__name__,
             "qubits": n,
             "framework": backend.name,
             "repetitions": repetitions,
             "avg_time": statistics.mean(times),
-            "variance": statistics.pvariance(times) if repetitions > 1 else 0.0,
+            "time_variance": statistics.pvariance(times) if repetitions > 1 else 0.0,
+            "avg_memory": statistics.mean(memories),
+            "memory_variance": statistics.pvariance(memories) if repetitions > 1 else 0.0,
         }
         results.append(record)
     return results
@@ -67,7 +70,16 @@ def save_results(results: List[dict], output: Path) -> None:
     base = output.with_suffix("")
     csv_path = base.with_suffix(".csv")
     json_path = base.with_suffix(".json")
-    fields = ["circuit", "qubits", "framework", "repetitions", "avg_time", "variance"]
+    fields = [
+        "circuit",
+        "qubits",
+        "framework",
+        "repetitions",
+        "avg_time",
+        "time_variance",
+        "avg_memory",
+        "memory_variance",
+    ]
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
