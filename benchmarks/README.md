@@ -48,11 +48,11 @@ CLI can discover it automatically.  The existing functions, such as
 ## Adding backends
 
 Backend adapters live in [backends.py](backends.py).  Subclass
-`_BaseAdapter` and provide a `name` along with the underlying backend
+`BackendAdapter` and provide a `name` along with the underlying backend
 class:
 
 ```python
-class MyBackendAdapter(_BaseAdapter):
+class MyBackendAdapter(BackendAdapter):
     def __init__(self) -> None:
         super().__init__(name="my_backend", backend_cls=MyBackend)
 ```
