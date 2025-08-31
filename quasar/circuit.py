@@ -35,7 +35,9 @@ class Circuit:
 
     def __init__(self, gates: Iterable[Dict[str, Any] | Gate]):
         self.gates: List[Gate] = [g if isinstance(g, Gate) else Gate(**g) for g in gates]
-        self.num_qubits = self._infer_qubit_count()
+        self._num_gates = len(self.gates)
+        self._num_qubits = self._infer_qubit_count()
+        self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
         self.cost_estimates = self._estimate_costs()
 
@@ -104,6 +106,19 @@ class Circuit:
         max_q = max(qubit_indices)
         return max_q - min_q + 1
 
+    def _compute_depth(self) -> int:
+        """Compute the circuit depth in a single pass over gates."""
+        qubit_levels: Dict[int, int] = {}
+        depth = 0
+        for gate in self.gates:
+            start = max((qubit_levels.get(q, 0) for q in gate.qubits), default=0)
+            level = start + 1
+            for q in gate.qubits:
+                qubit_levels[q] = level
+            if level > depth:
+                depth = level
+        return depth
+
     def _create_ssd(self) -> SSD:
         """Construct the initial subsystem descriptor."""
         return Partitioner().partition(self)
@@ -116,3 +131,21 @@ class Circuit:
         analyzer = CircuitAnalyzer(self)
         estimates = analyzer.resource_estimates()
         return {backend.name.lower(): cost for backend, cost in estimates.items()}
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+    @property
+    def depth(self) -> int:
+        """Total circuit depth."""
+        return self._depth
+
+    @property
+    def num_gates(self) -> int:
+        """Number of gates in the circuit."""
+        return self._num_gates
+
+    @property
+    def num_qubits(self) -> int:
+        """Number of qubits spanned by the circuit."""
+        return self._num_qubits
