@@ -121,6 +121,9 @@ def test_scheduler_triggers_conversion():
     scheduler = Scheduler(
         conversion_engine=engine,
         planner=Planner(quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None),
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
     )
     circuit = build_switch_circuit()
     plan = scheduler.planner.plan(circuit)
@@ -134,6 +137,9 @@ def test_scheduler_uses_non_dense_primitive():
         conversion_engine=engine,
         planner=TwoStepPlanner(),
         backends={Backend.TABLEAU: StimBackend(), Backend.MPS: DummyBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
     )
     circuit = build_switch_circuit_rz()
     scheduler.run(circuit)
@@ -152,6 +158,49 @@ def test_scheduler_returns_final_ssd():
     assert result.partitions[0].history == ("H", "X")
 
 
+def test_scheduler_quick_path_skips_planner_and_engine():
+    class TableauCountingBackend:
+        backend = Backend.TABLEAU
+        load_calls = 0
+        apply_calls = 0
+
+        def load(self, n):  # pragma: no cover - trivial
+            type(self).load_calls += 1
+
+        def apply_gate(self, gate, qubits, params):  # pragma: no cover - trivial
+            type(self).apply_calls += 1
+
+        def extract_ssd(self):  # pragma: no cover - trivial
+            return SSD([])
+
+    class StatevectorCountingBackend:
+        backend = Backend.STATEVECTOR
+        load_calls = 0
+        apply_calls = 0
+
+        def load(self, n):  # pragma: no cover - trivial
+            type(self).load_calls += 1
+
+        def apply_gate(self, gate, qubits, params):  # pragma: no cover - trivial
+            type(self).apply_calls += 1
+
+        def extract_ssd(self):  # pragma: no cover - trivial
+            return SSD([])
+
+    scheduler = Scheduler(
+        backends={
+            Backend.TABLEAU: TableauCountingBackend(),
+            Backend.STATEVECTOR: StatevectorCountingBackend(),
+        }
+    )
+    circuit = Circuit([{"gate": "H", "qubits": [0]}])
+    scheduler.run(circuit)
+    assert TableauCountingBackend.load_calls == 1
+    assert StatevectorCountingBackend.load_calls == 0
+    assert scheduler.planner is None
+    assert scheduler.conversion_engine is None
+
+
 class CountingPlanner(Planner):
     def __init__(self):
         super().__init__()
@@ -164,7 +213,13 @@ class CountingPlanner(Planner):
 
 def test_scheduler_reoptimises_when_requested():
     planner = CountingPlanner()
-    scheduler = Scheduler(planner=planner, conversion_engine=CountingConversionEngine())
+    scheduler = Scheduler(
+        planner=planner,
+        conversion_engine=CountingConversionEngine(),
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
     circuit = build_switch_circuit()
 
     triggered = {"done": False}
@@ -206,6 +261,9 @@ def test_parallel_execution_on_independent_subcircuits():
             Backend.DECISION_DIAGRAM: SleepBackend(),
         },
         planner=Planner(),
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
     )
     start = time.time()
     scheduler.run(circuit)
@@ -244,6 +302,9 @@ def test_cross_backend_gate_uses_bridge_tensor():
         conversion_engine=engine,
         planner=BridgePlanner(),
         backends={Backend.STATEVECTOR: StatevectorBackend(), Backend.MPS: DummyBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
     )
     result = scheduler.run(circuit)
     assert engine.bridge_calls == 1
@@ -324,6 +385,9 @@ def test_conversion_fallback_path():
         conversion_engine=engine,
         planner=SVThenMPSPlanner(),
         backends={Backend.STATEVECTOR: StatevectorBackend(), Backend.MPS: FailingOnceBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
     )
     circuit = Circuit([
         {"gate": "H", "qubits": [0]},
@@ -361,6 +425,9 @@ def test_scheduler_auto_reoptimises_on_cost_mismatch():
         planner=planner,
         conversion_engine=CountingConversionEngine(),
         backends={Backend.STATEVECTOR: SleepBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
     )
     circuit = Circuit([
         {"gate": "H", "qubits": [0]},
