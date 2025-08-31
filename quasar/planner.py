@@ -205,11 +205,40 @@ class Planner:
         top_k: int = 4,
         batch_size: int = 1,
         max_memory: float | None = None,
+        quick_max_qubits: int | None = 25,
+        quick_max_gates: int | None = 200,
+        quick_max_depth: int | None = 50,
     ):
+        """Create a new planner instance.
+
+        Parameters
+        ----------
+        estimator:
+            Optional cost estimator instance.
+        top_k:
+            Number of candidate backends to retain per DP cell.
+        batch_size:
+            Gate count granularity during the initial coarse planning pass.
+        max_memory:
+            Global memory limit in bytes for simulation estimates.
+        quick_max_qubits:
+            If not ``None`` and the circuit spans at most this many qubits,
+            a direct single-backend estimate is used.  Defaults to ``25``.
+        quick_max_gates:
+            If not ``None`` and the circuit contains at most this many gates,
+            a direct single-backend estimate is used.  Defaults to ``200``.
+        quick_max_depth:
+            If not ``None`` and the circuit depth does not exceed this value,
+            a direct single-backend estimate is used.  Defaults to ``50``.
+        """
+
         self.estimator = estimator or CostEstimator()
         self.top_k = top_k
         self.batch_size = batch_size
         self.max_memory = max_memory
+        self.quick_max_qubits = quick_max_qubits
+        self.quick_max_gates = quick_max_gates
+        self.quick_max_depth = quick_max_depth
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -409,13 +438,14 @@ class Planner:
             if cached is not None:
                 return cached
 
+        num_qubits = circuit.num_qubits
+        num_gates = circuit.num_gates
+        depth = circuit.depth
+
         if backend is not None:
             supported = _supported_backends(gates)
             if backend not in supported:
                 raise ValueError(f"Backend {backend} unsupported for given circuit")
-            qubits = {q for g in gates for q in g.qubits}
-            num_qubits = len(qubits)
-            num_gates = len(gates)
             cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
             if threshold is not None and cost.memory > threshold:
                 raise ValueError("Requested backend exceeds memory threshold")
@@ -427,6 +457,28 @@ class Planner:
             if use_cache:
                 self.cache_insert(gates, result, backend)
             return result
+
+        quick = True
+        if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
+            quick = False
+        if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
+            quick = False
+        if self.quick_max_depth is not None and depth > self.quick_max_depth:
+            quick = False
+        if quick and any(
+            t is not None
+            for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
+        ):
+            backend_choice, cost = self._single_backend(gates, threshold)
+            if threshold is None or cost.memory <= threshold:
+                part = Partitioner()
+                groups = part.parallel_groups(gates)
+                parallel = tuple(g[0] for g in groups) if groups else ()
+                step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
+                result = PlanResult(table=[], final_backend=backend_choice, gates=gates, explicit_steps=[step])
+                if use_cache:
+                    self.cache_insert(gates, result, backend_choice)
+                return result
 
         if threshold is not None and gates:
             backend_choice, cost = self._single_backend(gates, threshold)

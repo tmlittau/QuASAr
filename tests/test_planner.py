@@ -30,7 +30,7 @@ def test_split_and_recover():
         "ingest_sv": 0.0,
         "dd_gate": 10.0,
     }
-    planner = Planner(CostEstimator(coeff))
+    planner = Planner(CostEstimator(coeff), quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None)
     result = planner.plan(circ)
     steps = result.steps
     assert [(s.start, s.end, s.backend) for s in steps] == [
