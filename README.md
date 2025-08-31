@@ -78,6 +78,11 @@ The same parameters can be passed directly to :class:`Planner` and
 :class:`Scheduler` constructors to override the defaults on a per-instance
 basis, allowing runtime tuning without relying on environment variables.
 
+The default quick-path limits are tuned using
+``benchmarks/quick_analysis_benchmark.py`` and currently favour circuits of
+approximately 12 qubits, 240 gates and depth 60, offering substantial
+speedups for small problems.
+
 ## Scalable benchmark circuits
 
 QuASAr can simulate parameterized circuits sourced from MQTBench and QASMBench.
