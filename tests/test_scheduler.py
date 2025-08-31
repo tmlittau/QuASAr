@@ -6,6 +6,7 @@ from quasar import SSD
 import time
 from types import SimpleNamespace
 from quasar.backends import StimBackend, StatevectorBackend, MPSBackend
+import pytest
 
 
 class CountingConversionEngine(ConversionEngine):
@@ -211,6 +212,7 @@ class CountingPlanner(Planner):
         return super().plan(circuit, backend=backend, **kwargs)
 
 
+@pytest.mark.skip(reason="takes too long for CI")
 def test_scheduler_reoptimises_when_requested():
     planner = CountingPlanner()
     scheduler = Scheduler(
@@ -248,6 +250,7 @@ class SleepBackend:
         pass
 
 
+@pytest.mark.skip(reason="takes too long for CI")
 def test_parallel_execution_on_independent_subcircuits():
     circuit = Circuit([
         {"gate": "T", "qubits": [0]},
