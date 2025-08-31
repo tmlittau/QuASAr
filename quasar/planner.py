@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
 from .partitioner import CLIFFORD_GATES, Partitioner
+from . import config
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -205,9 +206,10 @@ class Planner:
         top_k: int = 4,
         batch_size: int = 1,
         max_memory: float | None = None,
-        quick_max_qubits: int | None = 25,
-        quick_max_gates: int | None = 200,
-        quick_max_depth: int | None = 50,
+        quick_max_qubits: int | None = config.DEFAULT.quick_max_qubits,
+        quick_max_gates: int | None = config.DEFAULT.quick_max_gates,
+        quick_max_depth: int | None = config.DEFAULT.quick_max_depth,
+        backend_order: Optional[List[Backend]] = None,
     ):
         """Create a new planner instance.
 
@@ -223,13 +225,19 @@ class Planner:
             Global memory limit in bytes for simulation estimates.
         quick_max_qubits:
             If not ``None`` and the circuit spans at most this many qubits,
-            a direct single-backend estimate is used.  Defaults to ``25``.
+            a direct single-backend estimate is used.  Defaults to
+            ``config.DEFAULT.quick_max_qubits``.
         quick_max_gates:
             If not ``None`` and the circuit contains at most this many gates,
-            a direct single-backend estimate is used.  Defaults to ``200``.
+            a direct single-backend estimate is used.  Defaults to
+            ``config.DEFAULT.quick_max_gates``.
         quick_max_depth:
             If not ``None`` and the circuit depth does not exceed this value,
-            a direct single-backend estimate is used.  Defaults to ``50``.
+            a direct single-backend estimate is used.  Defaults to
+            ``config.DEFAULT.quick_max_depth``.
+        backend_order:
+            Optional ordering of :class:`Backend` values to prefer when costs
+            are equal.  Defaults to the configuration's preferred order.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -239,12 +247,23 @@ class Planner:
         self.quick_max_qubits = quick_max_qubits
         self.quick_max_gates = quick_max_gates
         self.quick_max_depth = quick_max_depth
+        self.backend_order = list(backend_order) if backend_order is not None else list(config.DEFAULT.preferred_backend_order)
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
         # times during scheduling.
         self.cache: Dict[tuple[Hashable, Backend | None], PlanResult] = {}
         self.cache_hits = 0
+
+    # ------------------------------------------------------------------
+    def _backend_rank(self, backend: Backend) -> int:
+        try:
+            return self.backend_order.index(backend)
+        except ValueError:
+            return len(self.backend_order)
+
+    def _order_backends(self, backends: List[Backend]) -> List[Backend]:
+        return sorted(backends, key=self._backend_rank)
 
     # ------------------------------------------------------------------
     def _dp(
@@ -299,7 +318,7 @@ class Planner:
                 qubits = {q for g in segment for q in g.qubits}
                 num_qubits = len(qubits)
                 num_gates = i - j
-                backends = _supported_backends(segment)
+                backends = self._order_backends(_supported_backends(segment))
                 if forced_backend is not None:
                     if forced_backend not in backends:
                         raise ValueError(
@@ -399,7 +418,7 @@ class Planner:
         qubits = {q for g in gates for q in g.qubits}
         num_qubits = len(qubits)
         num_gates = len(gates)
-        backends = _supported_backends(gates)
+        backends = self._order_backends(_supported_backends(gates))
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:
             cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Execution scheduler for QuASAr."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 import time
@@ -10,6 +10,7 @@ import tracemalloc
 
 from .planner import Planner, PlanStep, _supported_backends, _simulation_cost
 from .cost import Backend, Cost, CostEstimator
+from . import config
 from .circuit import Circuit
 from .ssd import SSD, ConversionLayer, SSDPartition
 from .backends import (
@@ -31,9 +32,12 @@ class Scheduler:
     planner: Planner | None = None
     conversion_engine: ConversionEngine | None = None
     backends: Dict[Backend, object] | None = None
-    quick_max_qubits: int | None = 25
-    quick_max_gates: int | None = 200
-    quick_max_depth: int | None = 50
+    quick_max_qubits: int | None = config.DEFAULT.quick_max_qubits
+    quick_max_gates: int | None = config.DEFAULT.quick_max_gates
+    quick_max_depth: int | None = config.DEFAULT.quick_max_depth
+    backend_order: List[Backend] = field(
+        default_factory=lambda: list(config.DEFAULT.preferred_backend_order)
+    )
 
     def __post_init__(self) -> None:
         if self.backends is None:
@@ -48,6 +52,15 @@ class Scheduler:
                 Backend.TABLEAU: StimBackend(),
                 Backend.DECISION_DIAGRAM: DecisionDiagramBackend(),
             }
+
+    def _backend_rank(self, backend: Backend) -> int:
+        try:
+            return self.backend_order.index(backend)
+        except ValueError:
+            return len(self.backend_order)
+
+    def _order_backends(self, backends: List[Backend]) -> List[Backend]:
+        return sorted(backends, key=self._backend_rank)
 
     # ------------------------------------------------------------------
     def run(
@@ -99,7 +112,7 @@ class Scheduler:
         ):
             estimator = CostEstimator()
             candidates: List[tuple[Backend, Cost]] = []
-            for b in _supported_backends(circuit.gates):
+            for b in self._order_backends(_supported_backends(circuit.gates)):
                 cost = _simulation_cost(estimator, b, num_qubits, num_gates)
                 candidates.append((b, cost))
             backend_choice = min(
@@ -117,6 +130,7 @@ class Scheduler:
                 quick_max_qubits=self.quick_max_qubits,
                 quick_max_gates=self.quick_max_gates,
                 quick_max_depth=self.quick_max_depth,
+                backend_order=self.backend_order,
             )
         if self.conversion_engine is None:
             self.conversion_engine = ConversionEngine()
