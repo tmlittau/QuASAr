@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
 
-from .planner import Planner, PlanStep
-from .cost import Backend, Cost
+from .planner import Planner, PlanStep, _supported_backends, _simulation_cost
+from .cost import Backend, Cost, CostEstimator
 from .circuit import Circuit
 from .ssd import SSD, ConversionLayer, SSDPartition
 from .backends import (
@@ -31,10 +31,11 @@ class Scheduler:
     planner: Planner | None = None
     conversion_engine: ConversionEngine | None = None
     backends: Dict[Backend, object] | None = None
+    quick_max_qubits: int | None = 25
+    quick_max_gates: int | None = 200
+    quick_max_depth: int | None = 50
 
     def __post_init__(self) -> None:
-        self.planner = self.planner or Planner()
-        self.conversion_engine = self.conversion_engine or ConversionEngine()
         if self.backends is None:
             # Instantiate default simulation backends.  The dense
             # representations use Qiskit Aer implementations; callers may
@@ -80,6 +81,45 @@ class Scheduler:
                 sim.apply_gate(gate.gate, gate.qubits, gate.params)
             ssd = sim.extract_ssd()
             return ssd if ssd is not None else circuit.ssd
+
+        # Quick path: directly pick best single backend without planner
+        quick = True
+        num_qubits = circuit.num_qubits
+        num_gates = len(circuit.gates)
+        depth = circuit.depth
+        if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
+            quick = False
+        if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
+            quick = False
+        if self.quick_max_depth is not None and depth > self.quick_max_depth:
+            quick = False
+        if quick and any(
+            t is not None
+            for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
+        ):
+            estimator = CostEstimator()
+            candidates: List[tuple[Backend, Cost]] = []
+            for b in _supported_backends(circuit.gates):
+                cost = _simulation_cost(estimator, b, num_qubits, num_gates)
+                candidates.append((b, cost))
+            backend_choice = min(
+                candidates, key=lambda kv: (kv[1].time, kv[1].memory)
+            )[0]
+            sim = type(self.backends[backend_choice])()
+            sim.load(num_qubits)
+            for gate in circuit.gates:
+                sim.apply_gate(gate.gate, gate.qubits, gate.params)
+            ssd = sim.extract_ssd()
+            return ssd if ssd is not None else circuit.ssd
+
+        if self.planner is None:
+            self.planner = Planner(
+                quick_max_qubits=self.quick_max_qubits,
+                quick_max_gates=self.quick_max_gates,
+                quick_max_depth=self.quick_max_depth,
+            )
+        if self.conversion_engine is None:
+            self.conversion_engine = ConversionEngine()
 
         plan = self.planner.cache_lookup(circuit.gates, backend)
         if plan is None:
