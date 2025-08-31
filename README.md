@@ -48,6 +48,10 @@ The :func:`SimulationEngine.simulate` method accepts an optional ``backend``
 argument to explicitly choose the simulation backend (e.g.,
 ``Backend.TABLEAU`` for Clifford circuits).  When omitted, the planner selects a
 backend automatically based on estimated cost.
+If the circuit is small enough to satisfy the quick-path thresholds
+described below, this selection degenerates to running the whole circuit on
+a single backend.  Skipping partitioning and scheduling avoids overhead and
+speeds up tiny workloads.
 
 Dense backends are powered by Qiskit Aer and accept a ``method`` argument to
 select the underlying simulator implementation.  For example::
@@ -82,6 +86,49 @@ The default quick-path limits are tuned using
 ``benchmarks/quick_analysis_benchmark.py`` and currently favour circuits of
 approximately 12 qubits, 240 gates and depth 60, offering substantial
 speedups for small problems.
+
+### Automatic single-backend selection
+
+When a circuit's size falls below *all* ``QUASAR_QUICK_MAX_*`` thresholds,
+the planner skips dynamic programming and schedules the entire circuit on
+the cheapest backend in the configured preference order.  These thresholds
+can be tuned via the environment variables above or by supplying
+``quick_max_qubits``, ``quick_max_gates`` and ``quick_max_depth`` to
+:class:`Planner` or :class:`Scheduler`.
+
+```python
+import time
+from quasar import Circuit, SimulationEngine, Planner
+
+circ = Circuit([
+    {"gate": "H", "qubits": [0]},
+    {"gate": "CX", "qubits": [0, 1]},
+])
+
+engine = SimulationEngine()
+start = time.perf_counter()
+engine.simulate(circ)  # quick path uses a single backend
+print(f"quick path: {time.perf_counter() - start:.3f}s")
+
+planner = Planner(quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None)
+engine = SimulationEngine(planner=planner)
+start = time.perf_counter()
+engine.simulate(circ)  # full planner is slower on tiny circuits
+print(f"full planning: {time.perf_counter() - start:.3f}s")
+```
+
+The difference is small but measurable: the quick path avoids planning
+entirely and generally selects a dense simulator for such tiny circuits.
+
+### Benchmarking considerations
+
+Quick-path execution hides planning overhead and may select a backend that
+does not scale to larger problems.  When collecting benchmark numbers or
+comparing backend performance, disable this feature by setting the
+``QUASAR_QUICK_MAX_QUBITS``, ``QUASAR_QUICK_MAX_GATES`` and
+``QUASAR_QUICK_MAX_DEPTH`` variables to ``None`` (or passing ``None`` to the
+corresponding constructor arguments).  This forces the planner to consider
+all backends, yielding more representative results.
 
 ## Scalable benchmark circuits
 
