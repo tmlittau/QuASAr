@@ -61,6 +61,23 @@ respectively.  Custom backend instances can be supplied to :class:`Scheduler`
 or :class:`SimulationEngine` via their ``backends`` argument to control the
 simulation method.
 
+## Configuration
+
+QuASAr exposes a small set of tunables that influence planning heuristics.  The
+default values are defined in ``quasar/config.py`` and may be overridden either
+programmatically or via environment variables at import time:
+
+* ``QUASAR_QUICK_MAX_QUBITS`` – maximum number of qubits for the quick-path
+  estimate.  Set to ``None`` to disable.
+* ``QUASAR_QUICK_MAX_GATES`` – maximum gate count for quick-path planning.
+* ``QUASAR_QUICK_MAX_DEPTH`` – maximum circuit depth for quick-path planning.
+* ``QUASAR_BACKEND_ORDER`` – comma-separated preference list of backends
+  (e.g. ``"MPS,STATEVECTOR"``).
+
+The same parameters can be passed directly to :class:`Planner` and
+:class:`Scheduler` constructors to override the defaults on a per-instance
+basis, allowing runtime tuning without relying on environment variables.
+
 ## Scalable benchmark circuits
 
 QuASAr can simulate parameterized circuits sourced from MQTBench and QASMBench.
