@@ -60,14 +60,22 @@ def test_batch_pruning_speed_and_quality():
     circuit = _build_circuit(40)
 
     start = time.perf_counter()
-    base = Planner(top_k=4, batch_size=1).plan(circuit)
+    base = Planner(top_k=4, batch_size=1, quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None).plan(circuit)
     t_base = time.perf_counter() - start
-    cost_base = _plan_cost(Planner(top_k=4, batch_size=1), circuit, base.steps).time
+    cost_base = _plan_cost(
+        Planner(top_k=4, batch_size=1, quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None),
+        circuit,
+        base.steps,
+    ).time
 
     start = time.perf_counter()
-    fast = Planner(top_k=1, batch_size=5).plan(circuit)
+    fast = Planner(top_k=1, batch_size=5, quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None).plan(circuit)
     t_fast = time.perf_counter() - start
-    cost_fast = _plan_cost(Planner(top_k=1, batch_size=5), circuit, fast.steps).time
+    cost_fast = _plan_cost(
+        Planner(top_k=1, batch_size=5, quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None),
+        circuit,
+        fast.steps,
+    ).time
 
     assert t_fast < t_base
     assert cost_fast <= cost_base * 1.2

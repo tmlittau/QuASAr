@@ -1,5 +1,5 @@
-from quasar import Circuit, Scheduler, Planner
-from quasar.planner import PlanStep
+from quasar import Circuit, Scheduler
+from quasar.planner import PlanStep, Planner
 from quasar_convert import ConversionEngine
 from quasar.cost import Backend, CostEstimator
 from quasar import SSD
@@ -118,7 +118,10 @@ def build_switch_circuit_rz():
 
 def test_scheduler_triggers_conversion():
     engine = CountingConversionEngine()
-    scheduler = Scheduler(conversion_engine=engine)
+    scheduler = Scheduler(
+        conversion_engine=engine,
+        planner=Planner(quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None),
+    )
     circuit = build_switch_circuit()
     plan = scheduler.planner.plan(circuit)
     scheduler.run(circuit)
