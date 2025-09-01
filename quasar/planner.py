@@ -210,6 +210,7 @@ class Planner:
         quick_max_gates: int | None = config.DEFAULT.quick_max_gates,
         quick_max_depth: int | None = config.DEFAULT.quick_max_depth,
         backend_order: Optional[List[Backend]] = None,
+        conversion_cost_multiplier: float = 1.0,
     ):
         """Create a new planner instance.
 
@@ -238,6 +239,10 @@ class Planner:
         backend_order:
             Optional ordering of :class:`Backend` values to prefer when costs
             are equal.  Defaults to the configuration's preferred order.
+        conversion_cost_multiplier:
+            Factor applied to conversion time estimates.  Values greater than
+            one discourage backend switches while values below one encourage
+            them.  Defaults to ``1.0``.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -248,6 +253,7 @@ class Planner:
         self.quick_max_gates = quick_max_gates
         self.quick_max_depth = quick_max_depth
         self.backend_order = list(backend_order) if backend_order is not None else list(config.DEFAULT.preferred_backend_order)
+        self.conversion_cost_multiplier = conversion_cost_multiplier
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -351,7 +357,10 @@ class Planner:
                                     rank=rank,
                                     frontier=frontier,
                                 )
-                                conv_cost = conv_est.cost
+                                conv_cost = Cost(
+                                    time=conv_est.cost.time * self.conversion_cost_multiplier,
+                                    memory=conv_est.cost.memory,
+                                )
                                 if max_memory is not None and conv_cost.memory > max_memory:
                                     continue
                         total_cost = _add_cost(_add_cost(prev_entry.cost, conv_cost), sim_cost)

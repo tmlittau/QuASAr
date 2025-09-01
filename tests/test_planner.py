@@ -66,3 +66,41 @@ def test_planner_respects_caps():
     steps = result.steps
     assert len(steps) == 1
     assert steps[0].backend == Backend.STATEVECTOR
+
+
+def test_conversion_cost_multiplier_discourages_switch():
+    gates = [
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "T", "qubits": [0]},
+    ]
+    circ = Circuit.from_dict(gates)
+    coeff = {
+        "sv_gate": 1.0,
+        "tab_gate": 0.1,
+        "b2b_svd": 0.0,
+        "b2b_copy": 0.0,
+        "ingest_sv": 0.375,
+    }
+    est = CostEstimator(coeff)
+    base = Planner(
+        est,
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
+    steps = base.plan(circ).steps
+    assert [(s.start, s.end, s.backend) for s in steps] == [
+        (0, 2, Backend.TABLEAU),
+        (2, 3, Backend.STATEVECTOR),
+    ]
+    penalized = Planner(
+        est,
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+        conversion_cost_multiplier=5.0,
+    )
+    steps2 = penalized.plan(circ).steps
+    assert len(steps2) == 1
+    assert (steps2[0].start, steps2[0].end) == (0, 3)
