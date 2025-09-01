@@ -91,3 +91,11 @@ est.update_coefficients(coeff)
 
 Persist updated coefficients with `est.to_file("coeff.json")` and load
 them in future runs via `CostEstimator.from_file`.
+
+## Results and parameters
+
+Each benchmarking notebook concludes with a cell that records the exact
+parameters used during execution. The cell saves these parameters and any
+available raw results as JSON files in [`benchmarks/results/`](results/).
+These artifacts accompany generated plots and can be referenced in reports
+or appendices for reproducibility.
