@@ -379,3 +379,69 @@ def two_local_circuit(
     qc = qc.assign_parameters(params)
     qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
     return Circuit.from_qiskit(qc)
+
+
+def clifford_ec_circuit() -> Circuit:
+    """Three-qubit bit-flip error-correction circuit using Clifford gates."""
+    qc = QuantumCircuit(5, 2)
+    # Encode logical qubit into three data qubits
+    qc.h(0)
+    qc.cx(0, 1)
+    qc.cx(0, 2)
+    # Syndrome extraction with two ancilla qubits
+    qc.cx(0, 3)
+    qc.cx(1, 3)
+    qc.cx(1, 4)
+    qc.cx(2, 4)
+    qc.measure(3, 0)
+    qc.measure(4, 1)
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "h"])
+    return Circuit.from_qiskit(qc)
+
+
+def ripple_add_circuit(num_bits: int = 4) -> Circuit:
+    """Ripple-carry adder for two ``num_bits``-bit registers."""
+    adder = VBERippleCarryAdder(num_bits)
+    qc = QuantumCircuit(adder.num_qubits)
+    qc.append(adder, range(adder.num_qubits))
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"], optimization_level=0)
+    return Circuit.from_qiskit(qc)
+
+
+def vqe_chain_circuit(num_qubits: int = 6, depth: int = 2) -> Circuit:
+    """Parameterized VQE ansatz with linear entanglement chain."""
+    qc = EfficientSU2(num_qubits, reps=depth, entanglement="linear")
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x", "ry", "rz"])
+    return Circuit.from_qiskit(qc)
+
+
+def random_hybrid_circuit(num_qubits: int = 6, depth: int = 10, seed: int | None = None) -> Circuit:
+    """Random circuit mixing Clifford and non-Clifford gates."""
+    rng = np.random.default_rng(seed)
+    qc = QuantumCircuit(num_qubits)
+    for _ in range(depth):
+        for q in range(num_qubits):
+            gate = rng.choice(["h", "s"])
+            getattr(qc, gate)(q)
+        a, b = rng.choice(num_qubits, 2, replace=False)
+        if rng.random() < 0.5:
+            qc.cx(int(a), int(b))
+        else:
+            qc.cz(int(a), int(b))
+        qc.t(int(rng.integers(num_qubits)))
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "cz", "h", "s", "t"])
+    return Circuit.from_qiskit(qc)
+
+
+def recur_subroutine_circuit(num_qubits: int = 4, depth: int = 3) -> Circuit:
+    """Circuit invoking a repeated subroutine across layers."""
+    sub = QuantumCircuit(num_qubits, name="sub")
+    for i in range(num_qubits - 1):
+        sub.cx(i, i + 1)
+    sub.h(range(num_qubits))
+    inst = sub.to_instruction()
+    qc = QuantumCircuit(num_qubits)
+    for _ in range(depth):
+        qc.append(inst, range(num_qubits))
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
+    return Circuit.from_qiskit(qc)
