@@ -119,6 +119,13 @@ class ConversionEngine {
     // normalised statevector.  The returned vector has dimension ``2^n`` where
     // ``n`` is inferred from the edge's variable index.
     std::vector<std::complex<double>> dd_to_statevector(const dd::vEdge& edge) const;
+
+    // Factor the amplitudes represented by a decision diagram edge into a
+    // matrix product state.  The returned chain stores each tensor as a flat
+    // vector with dimensions ``(left, 2, right)``.  When ``chi`` is non-zero the
+    // intermediate bond dimensions are truncated to ``chi``.
+    std::vector<std::vector<std::complex<double>>> dd_to_mps(const dd::vEdge& edge,
+                                                            std::size_t chi = 0) const;
 #endif
 
 #ifdef QUASAR_USE_STIM

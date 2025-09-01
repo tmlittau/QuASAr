@@ -30,5 +30,34 @@ class OptionalBackendTests(unittest.TestCase):
         else:
             self.skipTest('MQT DD support not built')
 
+    def test_dd_to_mps_conversion(self):
+        eng = qc.ConversionEngine()
+        if hasattr(eng, 'convert_boundary_to_dd') and hasattr(eng, 'dd_to_mps'):
+            ssd = qc.SSD()
+            ssd.boundary_qubits = [0, 1]
+            ssd.top_s = 2
+            edge = eng.convert_boundary_to_dd(ssd)
+            tensors = eng.dd_to_mps(*edge)
+
+            # Reconstruct the state from the returned MPS tensors.
+            import numpy as np
+            vec = np.array([[1.0 + 0.0j]])
+            left = 1
+            for t in tensors:
+                arr = np.asarray(t, dtype=complex).reshape(left, 2, -1)
+                vec = np.tensordot(vec, arr, axes=(1, 0)).reshape(-1, arr.shape[2])
+                left = arr.shape[2]
+            rec = vec.reshape(-1)
+
+            # Expected state from the Python MPS backend (zero state).
+            from quasar.backends import MPSBackend
+
+            mps = MPSBackend()
+            mps.load(2)
+            expected = mps.statevector()
+            np.testing.assert_allclose(rec, expected)
+        else:
+            self.skipTest('MQT DD support not built')
+
 if __name__ == '__main__':
     unittest.main()
