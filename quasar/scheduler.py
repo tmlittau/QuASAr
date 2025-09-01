@@ -41,6 +41,8 @@ class Scheduler:
     parallel_backends: List[Backend] = field(
         default_factory=lambda: list(config.DEFAULT.parallel_backends)
     )
+    # Fractional tolerance before triggering a replan due to cost mismatch
+    replan_tolerance: float = 0.05
 
     def __post_init__(self) -> None:
         if self.backends is None:
@@ -201,9 +203,11 @@ class Scheduler:
                     updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
                 if updates:
                     est.update_coefficients(updates)
+                    # Recompute the estimate with the updated coefficients
+                    est_cost = self._estimate_cost(target, num_q, len(segment))
 
                 trigger_replan = False
-                if observed.time > est_cost.time:
+                if observed.time > est_cost.time * (1 + self.replan_tolerance):
                     trigger_replan = True
                 if monitor and monitor(step, observed, est_cost):
                     trigger_replan = True
@@ -373,9 +377,11 @@ class Scheduler:
                 updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
             if updates:
                 est.update_coefficients(updates)
+                # Refresh the estimated cost with updated coefficients
+                est_cost = self._estimate_cost(target, len(qubits), len(segment))
 
             trigger_replan = False
-            if observed.time > est_cost.time:
+            if observed.time > est_cost.time * (1 + self.replan_tolerance):
                 trigger_replan = True
             if monitor and monitor(step, observed, est_cost):
                 trigger_replan = True
