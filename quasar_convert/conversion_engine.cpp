@@ -5,6 +5,8 @@
 #include <set>
 #include <complex>
 #include <vector>
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 
 namespace quasar {
 
@@ -18,11 +20,14 @@ std::pair<double, double> ConversionEngine::estimate_cost(std::size_t fragment_s
                                                           Backend backend) const {
     // Very small toy cost model used by the tests.  The time cost scales
     // quadratically with the fragment size while the memory cost grows with
-    // ``n log n``.  Different backends apply light weight modifiers so that the
-    // numbers vary in a predictable manner without requiring a detailed
-    // performance model.
+    // ``n log n``.  In addition, state vector to stabilizer conversion can fall
+    // back to the ``vecs2pauli`` routine which, according to the QuASAr thesis,
+    // has a theoretical worst-case runtime of ``O(n * 2^n)``.  We model this
+    // additional exponential effort as part of the time cost.  Different
+    // backends apply light weight modifiers so that the numbers vary in a
+    // predictable manner without requiring a detailed performance model.
     double n = static_cast<double>(fragment_size);
-    double time_cost = n * n;
+    double time_cost = n * n + n * std::pow(2.0, n);
     double memory_cost = n * std::log2(n + 1.0);
     if (backend == Backend::DecisionDiagram) {
         time_cost *= 1.2;
@@ -257,6 +262,27 @@ std::optional<StimTableau> ConversionEngine::learn_stabilizer(
     try {
         return StimTableau::from_state_vector(state);
     } catch (...) {
+        // Attempt to reconstruct stabilizers using the Python ``vecs2pauli``
+        // package.  This bridge converts the returned generator strings into a
+        // Stim tableau.  Any failure silently drops through to the lightweight
+        // analytic checks below.
+        try {
+            pybind11::gil_scoped_acquire gil;
+            pybind11::module v2p = pybind11::module::import("vecs2pauli");
+            pybind11::module stim = pybind11::module::import("stim");
+            pybind11::array_t<std::complex<double>> arr(state.size(), state.data());
+            pybind11::object gens = v2p.attr("get_stabilizers")(arr);
+            if (!gens.is_none()) {
+                pybind11::list paulis;
+                for (auto item : gens) {
+                    paulis.append(stim.attr("PauliString")(item));
+                }
+                pybind11::object tab = stim.attr("Tableau").attr("from_stabilizers")(paulis);
+                return tab.cast<StimTableau>();
+            }
+        } catch (...) {
+            // Ignore and fall through to analytic heuristics.
+        }
         // Fall back to a handful of analytically recognisable states.  These
         // checks are deliberately conservative – if the state does not clearly
         // match a known stabilizer form we return ``nullopt`` instead of

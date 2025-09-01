@@ -171,11 +171,14 @@ except Exception:  # pragma: no cover - exercised when extension missing
 
         # Core behaviour with caching ----------------------------------
         def estimate_cost(self, fragment_size: int, backend: Backend) -> Tuple[float, float]:
-            time_cost = float(fragment_size)
-            mem_cost = fragment_size * 0.1
+            """Mimic the native cost model with an exponential stabilizer term."""
+            n = float(fragment_size)
+            time_cost = n * n + n * (2.0 ** n)
+            mem_cost = n * math.log2(n + 1.0)
             if backend == Backend.DecisionDiagram:
                 time_cost *= 1.5
-            return time_cost, mem_cost
+                mem_cost *= 0.8
+            return float(time_cost), float(mem_cost)
 
         def _extract_ssd_impl(self, qubits: List[int], s: int) -> SSD:
             n = len(qubits)
@@ -300,26 +303,29 @@ except Exception:  # pragma: no cover - exercised when extension missing
         def learn_stabilizer(self, state: List[complex]):
             if not state:
                 return None
+            class Tableau:
+                def __init__(self, n: int):
+                    self.num_qubits = n
             try:
                 import stim
-
-                return stim.Tableau.from_state_vector(state)
+                tab = stim.Tableau.from_state_vector(state_vector=state)
+                return Tableau(len(tab))
             except Exception:
-                pass
+                try:
+                    import numpy as np
+                    import vecs2pauli
+                    tab = stim.Tableau.from_stabilizers(
+                        [stim.PauliString(g) for g in vecs2pauli.get_stabilizers(np.array(state, dtype=complex))]
+                    )
+                    return Tableau(len(tab))
+                except Exception:
+                    pass
             dim = len(state)
             n = int(math.log2(dim))
             if abs(state[0] - 1) < 1e-9 and all(abs(a) < 1e-9 for a in state[1:]):
-                class Tableau:
-                    def __init__(self, n: int):
-                        self.num_qubits = n
-
                 return Tableau(n)
             target = 1 / math.sqrt(dim)
             if all(abs(abs(a) - target) < 1e-9 for a in state):
-                class Tableau:
-                    def __init__(self, n: int):
-                        self.num_qubits = n
-
                 return Tableau(n)
             return None
 

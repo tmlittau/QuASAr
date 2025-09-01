@@ -1,4 +1,6 @@
 import unittest
+from unittest import mock
+import numpy as np
 import quasar_convert as qc
 
 class PrimitiveHelperTests(unittest.TestCase):
@@ -44,6 +46,20 @@ class PrimitiveHelperTests(unittest.TestCase):
         if hasattr(self.eng, 'learn_stabilizer'):
             state = [0.5+0j, 0.5+0j, 0.5+0j, 0.5+0j]
             tab = self.eng.learn_stabilizer(state)
+            self.assertIsNotNone(tab)
+            self.assertEqual(tab.num_qubits, 2)
+        else:
+            self.skipTest('Stim support not built')
+
+    def test_vecs2pauli_fallback(self):
+        if hasattr(self.eng, 'learn_stabilizer'):
+            state = [1/np.sqrt(2), 0, 0, 1/np.sqrt(2)]
+            try:
+                import stim
+            except Exception:
+                self.skipTest('Stim not available')
+            with mock.patch('stim.Tableau.from_state_vector', side_effect=ValueError):
+                tab = self.eng.learn_stabilizer(state)
             self.assertIsNotNone(tab)
             self.assertEqual(tab.num_qubits, 2)
         else:
