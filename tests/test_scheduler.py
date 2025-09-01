@@ -241,7 +241,7 @@ class SleepBackend:
         pass
 
     def apply_gate(self, gate, qubits, params):
-        time.sleep(0.2)
+        time.sleep(0.05)
 
     def extract_ssd(self):  # pragma: no cover - not used
         return None
@@ -250,7 +250,6 @@ class SleepBackend:
         pass
 
 
-@pytest.mark.skip(reason="takes too long for CI")
 def test_parallel_execution_on_independent_subcircuits():
     circuit = Circuit([
         {"gate": "T", "qubits": [0]},
@@ -258,20 +257,32 @@ def test_parallel_execution_on_independent_subcircuits():
         {"gate": "H", "qubits": [0]},
         {"gate": "H", "qubits": [1]},
     ])
-    scheduler = Scheduler(
-        backends={
-            Backend.STATEVECTOR: SleepBackend(),
-            Backend.DECISION_DIAGRAM: SleepBackend(),
-        },
+    scheduler_p = Scheduler(
+        backends={Backend.DECISION_DIAGRAM: SleepBackend()},
         planner=Planner(),
         quick_max_qubits=None,
         quick_max_gates=None,
         quick_max_depth=None,
+        parallel_backends=[Backend.DECISION_DIAGRAM],
     )
     start = time.time()
-    scheduler.run(circuit)
-    duration = time.time() - start
-    assert duration < 0.7
+    scheduler_p.run(circuit)
+    parallel_duration = time.time() - start
+
+    scheduler_s = Scheduler(
+        backends={Backend.DECISION_DIAGRAM: SleepBackend()},
+        planner=Planner(),
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+        parallel_backends=[],
+    )
+    start = time.time()
+    scheduler_s.run(circuit)
+    serial_duration = time.time() - start
+
+    assert serial_duration > parallel_duration
+    assert serial_duration - parallel_duration > 0.05
 
 
 class BridgeTrackingEngine(ConversionEngine):

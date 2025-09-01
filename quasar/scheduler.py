@@ -38,6 +38,9 @@ class Scheduler:
     backend_order: List[Backend] = field(
         default_factory=lambda: list(config.DEFAULT.preferred_backend_order)
     )
+    parallel_backends: List[Backend] = field(
+        default_factory=lambda: list(config.DEFAULT.parallel_backends)
+    )
 
     def __post_init__(self) -> None:
         if self.backends is None:
@@ -147,8 +150,74 @@ class Scheduler:
         while i < len(steps):
             step = steps[i]
             target = step.backend
-
             segment = circuit.gates[step.start : step.end]
+
+            if step.parallel and len(step.parallel) > 1 and target in self.parallel_backends:
+                groups: List[List] = [[] for _ in step.parallel]
+                mapping = {q: idx for idx, grp in enumerate(step.parallel) for q in grp}
+                for gate in segment:
+                    grp = mapping[gate.qubits[0]]
+                    groups[grp].append(gate)
+                jobs: List[tuple[object, List]] = []
+                for grp, glist in zip(step.parallel, groups):
+                    qset = frozenset(grp)
+                    key_p = (qset, target)
+                    if key_p not in sims:
+                        sim_p = type(self.backends[target])()
+                        sim_p.load(circuit.num_qubits)
+                        sims[key_p] = sim_p
+                    jobs.append((sims[key_p], glist))
+
+                num_q = len({q for grp in step.parallel for q in grp})
+                est_cost = self._estimate_cost(target, num_q, len(segment))
+                tracemalloc.start()
+                start_time = time.perf_counter()
+
+                def run_group(job):
+                    sim, glist = job
+                    for g in glist:
+                        sim.apply_gate(g.gate, g.qubits, g.params)
+
+                with ThreadPoolExecutor() as executor:
+                    executor.map(run_group, jobs)
+
+                elapsed = time.perf_counter() - start_time
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                observed = Cost(time=elapsed, memory=float(peak))
+
+                coeff = {
+                    Backend.STATEVECTOR: ("sv_gate", "sv_mem"),
+                    Backend.MPS: ("mps_gate", "mps_mem"),
+                    Backend.TABLEAU: ("tab_gate", "tab_mem"),
+                    Backend.DECISION_DIAGRAM: ("dd_gate", "dd_mem"),
+                }[target]
+                updates: Dict[str, float] = {}
+                est = self.planner.estimator
+                gate_key, mem_key = coeff
+                if est_cost.time > 0:
+                    updates[gate_key] = est.coeff[gate_key] * observed.time / est_cost.time
+                if est_cost.memory > 0 and observed.memory > 0:
+                    updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                if updates:
+                    est.update_coefficients(updates)
+
+                trigger_replan = False
+                if observed.time > est_cost.time:
+                    trigger_replan = True
+                if monitor and monitor(step, observed, est_cost):
+                    trigger_replan = True
+                if trigger_replan:
+                    remaining = Circuit(circuit.gates[step.end :])
+                    replanned = self.planner.cache_lookup(remaining.gates, backend)
+                    if replanned is None:
+                        replanned = self.planner.plan(remaining, backend=backend)
+                    steps[i + 1 :] = list(replanned.steps) + steps[i + 1 :]
+                current_sim = None
+                current_backend = None
+                i += 1
+                continue
+
             qubits = frozenset(q for g in segment for q in g.qubits)
             key = (qubits, target)
 
@@ -280,23 +349,8 @@ class Scheduler:
             tracemalloc.start()
             start_time = time.perf_counter()
 
-            if step.parallel and len(step.parallel) > 1:
-                groups: List[List] = [[] for _ in step.parallel]
-                mapping = {q: idx for idx, grp in enumerate(step.parallel) for q in grp}
-
-                for gate in segment:
-                    grp = mapping[gate.qubits[0]]
-                    groups[grp].append(gate)
-
-                def run_group(glist):
-                    for g in glist:
-                        current_sim.apply_gate(g.gate, g.qubits, g.params)
-
-                with ThreadPoolExecutor() as executor:
-                    executor.map(run_group, groups)
-            else:
-                for gate in segment:
-                    current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+            for gate in segment:
+                current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
 
             elapsed = time.perf_counter() - start_time
             _, peak = tracemalloc.get_traced_memory()
