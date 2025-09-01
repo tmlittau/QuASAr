@@ -116,6 +116,12 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.dd_to_statevector(*args, **kwargs)
 
+        if hasattr(_CEngine, "dd_to_mps"):
+
+            def dd_to_mps(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.dd_to_mps(*args, **kwargs)
+
         if hasattr(_CEngine, "learn_stabilizer"):
 
             def learn_stabilizer(self, *args, **kwargs):  # type: ignore[override]

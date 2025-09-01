@@ -92,6 +92,17 @@ PYBIND11_MODULE(_conversion_engine, m) {
             (void)n;  // number of qubits is implicit in the edge
             return eng.dd_to_statevector(edge);
         })
+        .def("dd_to_mps",
+             [](quasar::ConversionEngine& eng, std::size_t n, std::uintptr_t ptr, std::size_t chi) {
+                 // Reconstruct the decision diagram edge from the opaque handle
+                 // and factor it into a chain of MPS tensors.
+                 dd::vEdge edge{reinterpret_cast<dd::vNode*>(ptr), dd::Complex::one};
+                 (void)n;  // number of qubits is implicit in the edge
+                 return eng.dd_to_mps(edge, chi);
+             },
+             py::arg("n"),
+             py::arg("ptr"),
+             py::arg("chi") = 0)
 #endif
         ;
 }
