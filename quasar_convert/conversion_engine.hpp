@@ -114,6 +114,11 @@ class ConversionEngine {
     // The decision diagram package exposes `vEdge` at the namespace level,
     // so we use it directly instead of the previous `Package<>::vEdge` alias.
     dd::vEdge convert_boundary_to_dd(const SSD& ssd) const;
+
+    // Export the amplitudes represented by a decision diagram edge as a
+    // normalised statevector.  The returned vector has dimension ``2^n`` where
+    // ``n`` is inferred from the edge's variable index.
+    std::vector<std::complex<double>> dd_to_statevector(const dd::vEdge& edge) const;
 #endif
 
 #ifdef QUASAR_USE_STIM
