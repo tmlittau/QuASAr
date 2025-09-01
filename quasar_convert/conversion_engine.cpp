@@ -265,6 +265,26 @@ dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
     // versions without introducing a direct dependency on an internal typedef.
     return dd_pkg->makeZeroState(ssd.boundary_qubits.size());
 }
+
+std::vector<std::complex<double>>
+ConversionEngine::dd_to_statevector(const dd::vEdge& edge) const {
+    // Use the decision diagram package to export the amplitudes represented by
+    // ``edge``.  ``getVector`` returns a flat vector ordered with qubit 0 as the
+    // least significant bit.  Normalise the result to guard against numerical
+    // imprecision in the underlying DD representation.
+    auto vec = dd_pkg->getVector(edge);
+    double norm = 0.0;
+    for (const auto& amp : vec) {
+        norm += std::norm(amp);
+    }
+    norm = std::sqrt(norm);
+    if (norm > 0.0) {
+        for (auto& amp : vec) {
+            amp /= norm;
+        }
+    }
+    return vec;
+}
 #endif
 
 #ifdef QUASAR_USE_STIM

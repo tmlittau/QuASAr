@@ -110,6 +110,12 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.convert_boundary_to_dd(*args, **kwargs)
 
+        if hasattr(_CEngine, "dd_to_statevector"):
+
+            def dd_to_statevector(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.dd_to_statevector(*args, **kwargs)
+
         if hasattr(_CEngine, "learn_stabilizer"):
 
             def learn_stabilizer(self, *args, **kwargs):  # type: ignore[override]

@@ -85,6 +85,13 @@ PYBIND11_MODULE(_conversion_engine, m) {
             std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(edge.p);
             return py::make_tuple(ssd.boundary_qubits.size(), ptr);
         })
+        .def("dd_to_statevector", [](quasar::ConversionEngine& eng, std::size_t n, std::uintptr_t ptr) {
+            // Reconstruct the decision diagram edge from the opaque handle and
+            // export its amplitudes as a statevector.
+            dd::vEdge edge{reinterpret_cast<dd::vNode*>(ptr), dd::Complex::one};
+            (void)n;  // number of qubits is implicit in the edge
+            return eng.dd_to_statevector(edge);
+        })
 #endif
         ;
 }
