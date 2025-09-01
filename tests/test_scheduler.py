@@ -1,7 +1,7 @@
 from quasar import Circuit, Scheduler
 from quasar.planner import PlanStep, Planner
 from quasar_convert import ConversionEngine
-from quasar.cost import Backend, CostEstimator
+from quasar.cost import Backend, Cost, CostEstimator
 from quasar import SSD
 import time
 from types import SimpleNamespace
@@ -449,3 +449,97 @@ def test_scheduler_auto_reoptimises_on_cost_mismatch():
     ])
     scheduler.run(circuit)
     assert planner.calls >= 2
+
+
+def test_monitor_can_force_replan():
+    class StepPlanner(Planner):
+        def __init__(self):
+            super().__init__(quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None)
+            self.calls = 0
+
+        def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
+            self.calls += 1
+            n = len(circuit.gates)
+            steps = [PlanStep(i, i + 1, Backend.STATEVECTOR) for i in range(n)]
+            return SimpleNamespace(steps=steps)
+
+    class SlowBackend:
+        backend = Backend.STATEVECTOR
+
+        def load(self, n):  # pragma: no cover - trivial
+            pass
+
+        def apply_gate(self, gate, qubits, params):  # pragma: no cover - trivial
+            time.sleep(0.001)
+
+        def extract_ssd(self):  # pragma: no cover - trivial
+            return SSD([])
+
+    planner = StepPlanner()
+    scheduler = Scheduler(
+        planner=planner,
+        backends={Backend.STATEVECTOR: SlowBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
+
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "X", "qubits": [0]},
+    ])
+
+    def monitor(step, observed, estimated):
+        return step.start == 0
+
+    scheduler.run(circuit, monitor=monitor)
+    assert planner.calls == 2
+
+
+def test_cost_noise_does_not_loop_replanning():
+    class SingleStepPlanner(Planner):
+        def __init__(self):
+            super().__init__(quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None)
+            self.calls = 0
+
+        def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
+            self.calls += 1
+            n = len(circuit.gates)
+            steps = [] if n == 0 else [PlanStep(0, n, Backend.STATEVECTOR)]
+            return SimpleNamespace(steps=steps)
+
+    class SlowBackend:
+        backend = Backend.STATEVECTOR
+
+        def load(self, n):  # pragma: no cover - trivial
+            pass
+
+        def apply_gate(self, gate, qubits, params):
+            time.sleep(0.001)
+
+        def extract_ssd(self):  # pragma: no cover - trivial
+            return SSD([])
+
+    class UnderEstimator(CostEstimator):
+        def statevector(self, n, m):  # type: ignore[override]
+            # Slightly underestimate time so observed cost is within tolerance
+            base = super().statevector(n, m)
+            return Cost(time=base.time * 0.99, memory=base.memory)
+
+    planner = SingleStepPlanner()
+    scheduler = Scheduler(
+        planner=planner,
+        backends={Backend.STATEVECTOR: SlowBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
+    scheduler.planner.estimator = UnderEstimator()
+
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+    ])
+
+    scheduler.run(circuit)
+    # Should plan only once despite cost mismatch within tolerance
+    assert planner.calls == 1
