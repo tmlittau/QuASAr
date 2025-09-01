@@ -33,6 +33,11 @@ def _order_from_env(name: str, default: List[Backend]) -> List[Backend]:
     return order or list(default)
 
 
+def _backends_from_env(name: str, default: List[Backend]) -> List[Backend]:
+    """Return a list of backends parsed from the comma-separated env var."""
+    return _order_from_env(name, default)
+
+
 @dataclass
 class Config:
     """Runtime configuration defaults for QuASAr.
@@ -48,6 +53,12 @@ class Config:
         default_factory=lambda: _order_from_env(
             "QUASAR_BACKEND_ORDER",
             [Backend.MPS, Backend.DECISION_DIAGRAM, Backend.STATEVECTOR, Backend.TABLEAU],
+        )
+    )
+    parallel_backends: List[Backend] = field(
+        default_factory=lambda: _backends_from_env(
+            "QUASAR_PARALLEL_BACKENDS",
+            [Backend.STATEVECTOR, Backend.MPS],
         )
     )
 
