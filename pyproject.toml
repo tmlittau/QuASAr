@@ -9,6 +9,8 @@ description = "QuASAr simulation utilities"
 requires-python = ">=3.8"
 dependencies = [
     "numpy",
+    "scipy",
+    "statsmodels",
     "mqt-core==3.2.1",
     "mqt.ddsim==2.0.0",
     "qiskit==2.1.2",
