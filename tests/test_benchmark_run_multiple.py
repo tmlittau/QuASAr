@@ -1,4 +1,5 @@
 import math
+import time
 from unittest.mock import patch
 
 from benchmarks.runner import BenchmarkRunner
@@ -30,3 +31,26 @@ def test_run_multiple_aggregates_statistics():
     assert record["repetitions"] == 3
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
+
+
+class SleepBackend:
+    name = "sleep"
+
+    def __init__(self, durations):
+        self.durations = durations
+
+    def run(self, circuit, **_):
+        t = self.durations.pop(0)
+        time.sleep(t)
+        return None
+
+
+def test_run_multiple_timeout_records_failure():
+    runner = BenchmarkRunner()
+    backend = SleepBackend([0.01, 0.2])
+    record = runner.run_multiple(
+        None, backend, repetitions=2, run_timeout=0.05
+    )
+    assert record["repetitions"] == 1
+    assert "failed_runs" in record and len(record["failed_runs"]) == 1
+    assert "timed out" in record["failed_runs"][0]

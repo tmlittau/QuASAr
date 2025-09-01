@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List
 import time
 import tracemalloc
 import statistics
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
     import pandas as pd  # type: ignore
@@ -116,6 +117,7 @@ class BenchmarkRunner:
         *,
         repetitions: int = 1,
         timeout: float | None = None,
+        run_timeout: float | None = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Execute ``run`` repeatedly and return aggregate statistics.
@@ -129,6 +131,10 @@ class BenchmarkRunner:
         timeout : float | None, optional
             Maximum total time in seconds to spend on executions.  When set, no
             further repetitions are started once the timeout is exceeded.
+        run_timeout : float | None, optional
+            Maximum time in seconds to allow for each individual ``run`` call.
+            When a run exceeds this limit, it is recorded as failed and the
+            next repetition is started.
         **kwargs : Any
             Additional keyword arguments forwarded to :meth:`run`.
 
@@ -148,12 +154,29 @@ class BenchmarkRunner:
             "run_peak_memory",
         ]
         records: List[Dict[str, Any]] = []
-        start = time.perf_counter()
-        for _ in range(repetitions):
+        failures: List[str] = []
+
+        def _run_once() -> Dict[str, Any]:
             rec = self.run(circuit, backend, **kwargs)
             # ``run`` already appends to ``self.results``; remove the individual
             # entry so only aggregated statistics remain.
             self.results.pop()
+            return rec
+
+        start = time.perf_counter()
+        for i in range(repetitions):
+            if run_timeout is not None:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_run_once)
+                    try:
+                        rec = future.result(timeout=run_timeout)
+                    except TimeoutError:
+                        failures.append(
+                            f"run {i + 1} timed out after {run_timeout} seconds"
+                        )
+                        continue
+            else:
+                rec = _run_once()
             records.append(rec)
             if timeout is not None and (time.perf_counter() - start) > timeout:
                 break
@@ -165,6 +188,8 @@ class BenchmarkRunner:
             "framework": getattr(backend, "name", backend.__class__.__name__),
             "repetitions": len(records),
         }
+        if failures:
+            summary["failed_runs"] = failures
         for m in metrics:
             values = [r[m] for r in records]
             summary[f"{m}_mean"] = statistics.fmean(values)
