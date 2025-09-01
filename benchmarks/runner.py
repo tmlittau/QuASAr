@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List
 import time
 import tracemalloc
 import statistics
+import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
@@ -60,42 +61,69 @@ class BenchmarkRunner:
     def run(self, circuit: Any, backend: Any, **kwargs: Any) -> Dict[str, Any]:
         """Execute ``circuit`` on ``backend`` and record runtime and memory."""
 
+        logger = logging.getLogger(__name__)
+
         prepare_time = 0.0
         prepare_peak_memory = 0
         run_peak_memory = 0
+        run_time = 0.0
+        result: Any = None
 
         tracemalloc.start()
 
-        if hasattr(backend, "prepare_benchmark") and hasattr(backend, "run_benchmark"):
-            start_prepare = time.perf_counter()
-            if hasattr(backend, "load") and getattr(circuit, "num_qubits", None) is not None:
-                backend.load(circuit.num_qubits)
-            backend.prepare_benchmark(circuit)
-            for g in getattr(circuit, "gates", []):
-                backend.apply_gate(g.gate, g.qubits, g.params)
-            prepare_time = time.perf_counter() - start_prepare
-            _, prepare_peak_memory = tracemalloc.get_traced_memory()
-            tracemalloc.reset_peak()
-
-            start_run = time.perf_counter()
-            result = backend.run_benchmark(**kwargs)
-            run_time = time.perf_counter() - start_run
-            _, run_peak_memory = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
-        else:
-            prepared = circuit
-            if hasattr(backend, "prepare"):
+        try:
+            if hasattr(backend, "prepare_benchmark") and hasattr(backend, "run_benchmark"):
                 start_prepare = time.perf_counter()
-                prepared = backend.prepare(circuit)
+                if hasattr(backend, "load") and getattr(circuit, "num_qubits", None) is not None:
+                    backend.load(circuit.num_qubits)
+                backend.prepare_benchmark(circuit)
+                for g in getattr(circuit, "gates", []):
+                    backend.apply_gate(g.gate, g.qubits, g.params)
                 prepare_time = time.perf_counter() - start_prepare
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()
 
-            start_run = time.perf_counter()
-            result = self._invoke(backend, prepared, **kwargs)
-            run_time = time.perf_counter() - start_run
+                start_run = time.perf_counter()
+                result = backend.run_benchmark(**kwargs)
+                run_time = time.perf_counter() - start_run
+                _, run_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+            else:
+                prepared = circuit
+                if hasattr(backend, "prepare"):
+                    start_prepare = time.perf_counter()
+                    prepared = backend.prepare(circuit)
+                    prepare_time = time.perf_counter() - start_prepare
+                    _, prepare_peak_memory = tracemalloc.get_traced_memory()
+                    tracemalloc.reset_peak()
+
+                start_run = time.perf_counter()
+                result = self._invoke(backend, prepared, **kwargs)
+                run_time = time.perf_counter() - start_run
+                _, run_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+        except Exception as exc:  # pragma: no cover - exercised in tests
             _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
+            logger.exception(
+                "Error running circuit %s on backend %s: %s",
+                getattr(circuit, "name", str(circuit)),
+                getattr(backend, "name", backend.__class__.__name__),
+                exc,
+            )
+            record = {
+                "framework": getattr(backend, "name", backend.__class__.__name__),
+                "prepare_time": prepare_time,
+                "run_time": run_time,
+                "total_time": prepare_time + run_time,
+                "prepare_peak_memory": prepare_peak_memory,
+                "run_peak_memory": run_peak_memory,
+                "result": result,
+                "failed": True,
+                "error": str(exc),
+            }
+            self.results.append(record)
+            return record
 
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
@@ -105,6 +133,7 @@ class BenchmarkRunner:
             "prepare_peak_memory": prepare_peak_memory,
             "run_peak_memory": run_peak_memory,
             "result": result,
+            "failed": False,
         }
         self.results.append(record)
         return record
@@ -175,8 +204,22 @@ class BenchmarkRunner:
                             f"run {i + 1} timed out after {run_timeout} seconds"
                         )
                         continue
+                    except Exception as exc:  # pragma: no cover - safety net
+                        failures.append(f"run {i + 1} failed: {exc}")
+                        continue
             else:
-                rec = _run_once()
+                try:
+                    rec = _run_once()
+                except Exception as exc:  # pragma: no cover - safety net
+                    failures.append(f"run {i + 1} failed: {exc}")
+                    continue
+
+            if rec.get("failed"):
+                failures.append(
+                    f"run {i + 1} failed: {rec.get('error', 'unknown error')}"
+                )
+                continue
+
             records.append(rec)
             if timeout is not None and (time.perf_counter() - start) > timeout:
                 break
@@ -190,6 +233,9 @@ class BenchmarkRunner:
         }
         if failures:
             summary["failed_runs"] = failures
+            summary["comment"] = (
+                f"{len(failures)} run(s) failed and were excluded from statistics"
+            )
         for m in metrics:
             values = [r[m] for r in records]
             summary[f"{m}_mean"] = statistics.fmean(values)
