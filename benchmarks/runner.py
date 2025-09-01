@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 import time
 import tracemalloc
+import statistics
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
     import pandas as pd  # type: ignore
@@ -106,6 +107,73 @@ class BenchmarkRunner:
         }
         self.results.append(record)
         return record
+
+    # ------------------------------------------------------------------
+    def run_multiple(
+        self,
+        circuit: Any,
+        backend: Any,
+        *,
+        repetitions: int = 1,
+        timeout: float | None = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Execute ``run`` repeatedly and return aggregate statistics.
+
+        Parameters
+        ----------
+        circuit, backend : Any
+            Passed through to :meth:`run`.
+        repetitions : int, optional
+            Number of times to execute ``run``. Defaults to ``1``.
+        timeout : float | None, optional
+            Maximum total time in seconds to spend on executions.  When set, no
+            further repetitions are started once the timeout is exceeded.
+        **kwargs : Any
+            Additional keyword arguments forwarded to :meth:`run`.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Mapping containing mean and standard deviation for each recorded
+            metric.  Individual run results are not retained in
+            :attr:`results` – only the aggregated statistics are stored.
+        """
+
+        metrics = [
+            "prepare_time",
+            "run_time",
+            "total_time",
+            "prepare_peak_memory",
+            "run_peak_memory",
+        ]
+        records: List[Dict[str, Any]] = []
+        start = time.perf_counter()
+        for _ in range(repetitions):
+            rec = self.run(circuit, backend, **kwargs)
+            # ``run`` already appends to ``self.results``; remove the individual
+            # entry so only aggregated statistics remain.
+            self.results.pop()
+            records.append(rec)
+            if timeout is not None and (time.perf_counter() - start) > timeout:
+                break
+
+        if not records:
+            raise RuntimeError("no runs executed")
+
+        summary: Dict[str, Any] = {
+            "framework": getattr(backend, "name", backend.__class__.__name__),
+            "repetitions": len(records),
+        }
+        for m in metrics:
+            values = [r[m] for r in records]
+            summary[f"{m}_mean"] = statistics.fmean(values)
+            summary[f"{m}_std"] = (
+                statistics.pstdev(values) if len(values) > 1 else 0.0
+            )
+
+        self.results.append(summary)
+        return summary
 
     # ------------------------------------------------------------------
     def run_quasar(self, circuit: Any, engine: Any) -> Dict[str, Any]:
