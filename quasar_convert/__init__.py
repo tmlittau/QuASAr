@@ -16,6 +16,7 @@ try:  # pragma: no cover - exercised when the extension is available
         Backend,
         Primitive,
         ConversionResult,
+        StnTensor,
         ConversionEngine as _CEngine,
     )
 
@@ -91,6 +92,12 @@ try:  # pragma: no cover - exercised when the extension is available
             self._ensure_impl()
             return self._impl.convert_boundary_to_statevector(*args, **kwargs)
 
+        if hasattr(_CEngine, "convert_boundary_to_stn"):
+
+            def convert_boundary_to_stn(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.convert_boundary_to_stn(*args, **kwargs)
+
         if hasattr(_CEngine, "convert_boundary_to_tableau"):
 
             def convert_boundary_to_tableau(self, *args, **kwargs):  # type: ignore[override]
@@ -114,6 +121,7 @@ try:  # pragma: no cover - exercised when the extension is available
         "Backend",
         "Primitive",
         "ConversionResult",
+        "StnTensor",
         "ConversionEngine",
     ]
 except Exception:  # pragma: no cover - exercised when extension missing
@@ -143,6 +151,11 @@ except Exception:  # pragma: no cover - exercised when extension missing
         primitive: Primitive
         cost: float
         fidelity: float
+
+    @dataclass
+    class StnTensor:
+        amplitudes: List[complex]
+        tableau: object | None = None
 
     class ConversionEngine:
         def __init__(self, cache_limit: int | None = None) -> None:
@@ -284,8 +297,24 @@ except Exception:  # pragma: no cover - exercised when extension missing
             dim = 1 << len(ssd.boundary_qubits or [])
             state = [0j] * dim
             if dim:
-                state[0] = 1.0 + 0j
+                norm = 1.0 / math.sqrt(dim)
+                phases = [1.0 + 0j] * len(ssd.boundary_qubits or [])
+                vecs = ssd.vectors or []
+                if vecs:
+                    for i, val in enumerate(vecs[0][: len(phases)]):
+                        phases[i] = (-1.0 + 0j) if val < 0 else (1.0 + 0j)
+                for idx in range(dim):
+                    amp = 1.0 + 0j
+                    for bit in range(len(phases)):
+                        if idx >> bit & 1:
+                            amp *= phases[bit]
+                    state[idx] = amp * norm
             return state
+
+        def convert_boundary_to_stn(self, ssd: SSD) -> StnTensor:
+            state = self.convert_boundary_to_statevector(ssd)
+            tab = self.learn_stabilizer(state)
+            return StnTensor(amplitudes=state, tableau=tab)
 
         def convert_boundary_to_tableau(self, ssd: SSD):
             class Tableau:
@@ -328,6 +357,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
         "Backend",
         "Primitive",
         "ConversionResult",
+        "StnTensor",
         "ConversionEngine",
     ]
 

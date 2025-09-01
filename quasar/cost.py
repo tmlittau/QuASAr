@@ -5,16 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import json
+import math
 from pathlib import Path
 from typing import Dict, Optional
 
 
 @dataclass
 class Cost:
-    """Simple container for time and memory cost estimates."""
+    """Simple container for time, memory and complexity estimates."""
 
     time: float
     memory: float
+    log_depth: float = 0.0
 
 
 class Backend(Enum):
@@ -106,23 +108,27 @@ class CostEstimator:
         amp = 2 ** num_qubits
         time = self.coeff["sv_gate"] * num_gates * amp
         memory = self.coeff["sv_mem"] * amp
-        return Cost(time=time, memory=memory)
+        depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
+        return Cost(time=time, memory=memory, log_depth=depth)
 
     def tableau(self, num_qubits: int, num_gates: int) -> Cost:
         quad = num_qubits ** 2
         time = self.coeff["tab_gate"] * num_gates * quad
         memory = self.coeff["tab_mem"] * quad
-        return Cost(time=time, memory=memory)
+        depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
+        return Cost(time=time, memory=memory, log_depth=depth)
 
     def mps(self, num_qubits: int, num_gates: int, chi: int) -> Cost:
         time = self.coeff["mps_gate"] * num_gates * num_qubits * (chi ** 3)
         memory = self.coeff["mps_mem"] * num_qubits * (chi ** 2)
-        return Cost(time=time, memory=memory)
+        depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
+        return Cost(time=time, memory=memory, log_depth=depth)
 
     def decision_diagram(self, num_gates: int, frontier: int) -> Cost:
         time = self.coeff["dd_gate"] * num_gates * frontier
         memory = self.coeff["dd_mem"] * frontier
-        return Cost(time=time, memory=memory)
+        depth = math.log2(frontier) if frontier > 0 else 0.0
+        return Cost(time=time, memory=memory, log_depth=depth)
 
     # Conversion cost estimation -------------------------------------
 
@@ -198,7 +204,10 @@ class CostEstimator:
         }
 
         primitive, (time, memory) = min(candidates.items(), key=lambda kv: kv[1][0])
-        return ConversionEstimate(primitive=primitive, cost=Cost(time=time, memory=memory))
+        depth = math.log2(rank) if rank > 0 else 0.0
+        return ConversionEstimate(
+            primitive=primitive, cost=Cost(time=time, memory=memory, log_depth=depth)
+        )
 
 
 __all__ = [

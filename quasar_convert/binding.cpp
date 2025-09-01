@@ -51,6 +51,14 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def_readonly("cost", &quasar::ConversionResult::cost)
         .def_readonly("fidelity", &quasar::ConversionResult::fidelity);
 
+    py::class_<quasar::StnTensor>(m, "StnTensor")
+        .def(py::init<>())
+        .def_readwrite("amplitudes", &quasar::StnTensor::amplitudes)
+#ifdef QUASAR_USE_STIM
+        .def_readwrite("tableau", &quasar::StnTensor::tableau)
+#endif
+        ;
+
     py::class_<quasar::ConversionEngine>(m, "ConversionEngine")
         .def(py::init<>())
         .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
@@ -60,6 +68,7 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("convert", &quasar::ConversionEngine::convert)
         .def("build_bridge_tensor", &quasar::ConversionEngine::build_bridge_tensor)
         .def("convert_boundary_to_statevector", &quasar::ConversionEngine::convert_boundary_to_statevector)
+        .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
