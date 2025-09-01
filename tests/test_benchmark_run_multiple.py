@@ -54,3 +54,39 @@ def test_run_multiple_timeout_records_failure():
     assert record["repetitions"] == 1
     assert "failed_runs" in record and len(record["failed_runs"]) == 1
     assert "timed out" in record["failed_runs"][0]
+    assert "comment" in record and "excluded" in record["comment"]
+
+
+class FlakyBackend:
+    name = "flaky"
+
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, circuit, **_):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("boom")
+        return None
+
+
+def test_run_multiple_skips_failed_runs():
+    runner = BenchmarkRunner()
+    backend = FlakyBackend()
+    side_effect = [
+        0.0,  # start of run_multiple
+        # run 1 (fails)
+        0.0,
+        # run 2
+        1.0, 2.0,
+        # run 3
+        2.0, 5.0,
+    ]
+    with patch("benchmarks.runner.time.perf_counter", side_effect=side_effect):
+        record = runner.run_multiple(None, backend, repetitions=3)
+    assert record["repetitions"] == 2
+    assert "failed_runs" in record and len(record["failed_runs"]) == 1
+    assert "failed" in record["failed_runs"][0]
+    assert "comment" in record and "excluded" in record["comment"]
+    assert record["run_time_mean"] == 2.0
+    assert record["run_time_std"] == 1.0
