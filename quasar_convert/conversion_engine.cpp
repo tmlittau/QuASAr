@@ -219,12 +219,41 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
 }
 
 std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevector(const SSD& ssd) const {
-    const std::size_t dim = 1ULL << ssd.boundary_qubits.size();
+    const std::size_t n = ssd.boundary_qubits.size();
+    const std::size_t dim = 1ULL << n;
     std::vector<std::complex<double>> state(dim, {0.0, 0.0});
-    if (dim > 0) {
-        state[0] = {1.0, 0.0};
+    if (!dim) {
+        return state;
+    }
+    const double norm = 1.0 / std::sqrt(static_cast<double>(dim));
+    std::vector<std::complex<double>> phases(n, {1.0, 0.0});
+    if (!ssd.vectors.empty()) {
+        const auto& vec = ssd.vectors[0];
+        for (std::size_t i = 0; i < n && i < vec.size(); ++i) {
+            if (vec[i] < 0) {
+                phases[i] = {-1.0, 0.0};
+            }
+        }
+    }
+    for (std::size_t idx = 0; idx < dim; ++idx) {
+        std::complex<double> amp{1.0, 0.0};
+        for (std::size_t bit = 0; bit < n; ++bit) {
+            if ((idx >> bit) & 1ULL) {
+                amp *= phases[bit];
+            }
+        }
+        state[idx] = amp * norm;
     }
     return state;
+}
+
+StnTensor ConversionEngine::convert_boundary_to_stn(const SSD& ssd) const {
+    StnTensor tensor;
+    tensor.amplitudes = convert_boundary_to_statevector(ssd);
+#ifdef QUASAR_USE_STIM
+    tensor.tableau = learn_stabilizer(tensor.amplitudes);
+#endif
+    return tensor;
 }
 
 #ifdef QUASAR_USE_MQT
@@ -309,6 +338,43 @@ std::optional<StimTableau> ConversionEngine::learn_stabilizer(
         }
     }
     if (uniform_state) {
+        return StimTableau(n);
+    }
+
+    // Check for phase-factorable stabilizer states where each qubit contributes
+    // an independent {±1, ±i} phase.  Such states correspond to products of
+    // single-qubit Clifford operations applied to |+>^{\otimes n}.
+    bool factorable = true;
+    std::vector<std::complex<double>> qubit_phase(n, {1.0, 0.0});
+    for (std::size_t bit = 0; bit < n && factorable; ++bit) {
+        std::complex<double> amp0 = state[0];
+        std::complex<double> amp1 = state[1ULL << bit];
+        if (std::abs(std::abs(amp0) - target_mag) > 1e-9 ||
+            std::abs(std::abs(amp1) - target_mag) > 1e-9) {
+            factorable = false;
+            break;
+        }
+        std::complex<double> rel = amp1 / amp0;
+        if (!phase_ok(rel)) {
+            factorable = false;
+            break;
+        }
+        qubit_phase[bit] = rel;
+    }
+    if (factorable) {
+        for (std::size_t idx = 0; idx < dim && factorable; ++idx) {
+            std::complex<double> expected = state[0];
+            for (std::size_t bit = 0; bit < n; ++bit) {
+                if ((idx >> bit) & 1ULL) {
+                    expected *= qubit_phase[bit];
+                }
+            }
+            if (std::abs(state[idx] - expected) > 1e-9) {
+                factorable = false;
+            }
+        }
+    }
+    if (factorable) {
         return StimTableau(n);
     }
 

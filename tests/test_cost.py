@@ -8,6 +8,8 @@ def test_statevector_scaling():
     large = est.statevector(num_qubits=4, num_gates=1)
     assert large.time == 2 * small.time
     assert large.memory == 2 * small.memory
+    assert small.log_depth == math.log2(3)
+    assert large.log_depth == math.log2(4)
 
 
 def test_tableau_quadratic():
@@ -31,6 +33,8 @@ def test_decision_diagram_linear():
     c2 = est.decision_diagram(num_gates=10, frontier=10)
     assert c2.time == 2 * c1.time
     assert c2.memory == 2 * c1.memory
+    assert c1.log_depth == math.log2(5)
+    assert c2.log_depth == math.log2(10)
 
 
 def test_conversion_primitive_selection():
@@ -54,6 +58,8 @@ def test_conversion_primitive_selection():
     )
     assert large.primitive == "LW"
     assert large.cost.time > small.cost.time
+    assert small.cost.log_depth == math.log2(2)
+    assert large.cost.log_depth == math.log2(16)
 
 
 def test_conversion_caps():

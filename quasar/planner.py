@@ -135,7 +135,11 @@ def _add_cost(a: Cost, b: Cost) -> Cost:
     dominated by the larger of the two contributions.
     """
 
-    return Cost(time=a.time + b.time, memory=max(a.memory, b.memory))
+    return Cost(
+        time=a.time + b.time,
+        memory=max(a.memory, b.memory),
+        log_depth=max(a.log_depth, b.log_depth),
+    )
 
 
 def _better(a: Cost, b: Cost) -> bool:

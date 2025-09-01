@@ -21,6 +21,17 @@ namespace quasar {
 using StimTableau = stim::Tableau<stim::MAX_BITWORD_WIDTH>;
 #endif
 
+// Minimal stabilizer tensor used by the STN prototype.  The tensor stores a
+// dense amplitude vector along with an optional stabilizer tableau when Stim is
+// available.  Downstream routines can use the tableau to perform log-depth
+// contractions without materialising a dense representation.
+struct StnTensor {
+    std::vector<std::complex<double>> amplitudes;
+#ifdef QUASAR_USE_STIM
+    std::optional<StimTableau> tableau;
+#endif
+};
+
 struct SSD {
     std::vector<uint32_t> boundary_qubits;  // indices of qubits on the boundary
     std::size_t top_s;                      // number of Schmidt vectors kept
@@ -89,10 +100,15 @@ class ConversionEngine {
     ConversionResult convert(const SSD& ssd) const;
 
     // Provide a concrete statevector representation for the boundary qubits.
-    // The returned vector represents the |0...0> state of size equal to the
-    // number of boundary qubits.  This acts as a minimal placeholder allowing
-    // Python backends to ingest a dense representation during conversion.
+    // A phase-factorable stabilizer state is synthesised from the leading
+    // boundary directions so that downstream components can reinterpret the
+    // vector as an STN tensor.  The dense representation is always returned.
     std::vector<std::complex<double>> convert_boundary_to_statevector(const SSD& ssd) const;
+
+    // Build a stabilizer tensor network component from the given boundary.
+    // The amplitude vector is always populated while the optional tableau is
+    // provided when the boundary admits a stabilizer description.
+    StnTensor convert_boundary_to_stn(const SSD& ssd) const;
 
 #ifdef QUASAR_USE_MQT
     // The decision diagram package exposes `vEdge` at the namespace level,
