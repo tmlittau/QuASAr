@@ -5,6 +5,7 @@
 #include <set>
 #include <complex>
 #include <vector>
+#include <random>
 
 namespace quasar {
 
@@ -383,6 +384,24 @@ ConversionEngine::dd_to_mps(const dd::vEdge& edge, std::size_t chi) const {
 #endif
 
 #ifdef QUASAR_USE_STIM
+std::vector<std::complex<double>>
+ConversionEngine::tableau_to_statevector(const StimTableau& tableau) const {
+    // Use Stim's TableauSimulator to produce the state vector corresponding to
+    // ``tableau`` applied to the |0...0> state.  The simulator requires the
+    // inverse tableau as its internal state.  Convert the returned
+    // ``std::complex<float>`` amplitudes into ``std::complex<double>`` for
+    // consistency with the rest of the engine.
+    stim::TableauSimulator<stim::MAX_BITWORD_WIDTH> sim(std::mt19937_64{0},
+                                                       tableau.num_qubits);
+    sim.inv_state = tableau.inverse(false);
+    auto vec_f = sim.to_state_vector(true);
+    std::vector<std::complex<double>> vec(vec_f.size());
+    for (size_t i = 0; i < vec_f.size(); ++i) {
+        vec[i] = static_cast<std::complex<double>>(vec_f[i]);
+    }
+    return vec;
+}
+
 StimTableau ConversionEngine::convert_boundary_to_tableau(const SSD& ssd) const {
     // Return an identity tableau of the requested size.
     return StimTableau(ssd.boundary_qubits.size());
@@ -399,7 +418,12 @@ std::optional<StimTableau> ConversionEngine::learn_stabilizer(
         return std::nullopt;
     }
     try {
-        return StimTableau::from_state_vector(state);
+        // Stim's C++ API does not expose ``Tableau::from_state_vector`` directly.
+        // Convert the stabilizer state vector into a circuit and then into a
+        // tableau to mirror the Python ``Tableau.from_state_vector`` utility.
+        std::vector<std::complex<float>> v(state.begin(), state.end());
+        auto circuit = stim::stabilizer_state_vector_to_circuit(v, true);
+        return stim::circuit_to_tableau<stim::MAX_BITWORD_WIDTH>(circuit, false, false, false);
     } catch (...) {
         // Fall back to a handful of analytically recognisable states.  These
         // checks are deliberately conservative – if the state does not clearly

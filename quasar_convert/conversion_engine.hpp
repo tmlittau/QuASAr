@@ -130,6 +130,9 @@ class ConversionEngine {
 
 #ifdef QUASAR_USE_STIM
     StimTableau convert_boundary_to_tableau(const SSD& ssd) const;
+    // Convert a stabilizer tableau into a dense statevector.  The returned
+    // vector has dimension ``2^n`` with qubit 0 as the least significant bit.
+    std::vector<std::complex<double>> tableau_to_statevector(const StimTableau& tableau) const;
     std::optional<StimTableau> try_build_tableau(const std::vector<std::complex<double>>& state) const;
     // Attempt to learn a stabilizer tableau from an arbitrary state vector.
     // Simple analytic checks recognise computational basis states and uniform

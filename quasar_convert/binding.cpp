@@ -3,6 +3,7 @@
 #include <pybind11/complex.h>
 
 #include <cstdint>
+#include <string>
 
 #include "conversion_engine.hpp"
 
@@ -33,7 +34,14 @@ PYBIND11_MODULE(_conversion_engine, m) {
 #ifdef QUASAR_USE_STIM
     py::class_<quasar::StimTableau>(m, "StimTableau")
         .def(py::init<size_t>())
-        .def_readwrite("num_qubits", &quasar::StimTableau::num_qubits);
+        .def_readwrite("num_qubits", &quasar::StimTableau::num_qubits)
+        .def_static(
+            "from_circuit",
+            [](const std::string &text) {
+                stim::Circuit c(text);
+                return stim::circuit_to_tableau<stim::MAX_BITWORD_WIDTH>(c, false, false, false);
+            },
+            py::arg("circuit"));
 #endif
 
     py::enum_<quasar::Backend>(m, "Backend")
@@ -71,6 +79,7 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
+        .def("tableau_to_statevector", &quasar::ConversionEngine::tableau_to_statevector)
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
         .def("learn_stabilizer", &quasar::ConversionEngine::learn_stabilizer)
 #endif
