@@ -17,6 +17,7 @@ try:  # pragma: no cover - exercised when the extension is available
         Primitive,
         ConversionResult,
         StnTensor,
+        MPS,
         StimTableau,
         ConversionEngine as _CEngine,
     )
@@ -99,6 +100,12 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.convert_boundary_to_stn(*args, **kwargs)
 
+        if hasattr(_CEngine, "mps_to_statevector"):
+
+            def mps_to_statevector(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.mps_to_statevector(*args, **kwargs)
+
         if hasattr(_CEngine, "convert_boundary_to_tableau"):
 
             def convert_boundary_to_tableau(self, *args, **kwargs):  # type: ignore[override]
@@ -153,6 +160,7 @@ try:  # pragma: no cover - exercised when the extension is available
         "Primitive",
         "ConversionResult",
         "StnTensor",
+        "MPS",
         "StimTableau",
         "ConversionEngine",
     ]
@@ -188,6 +196,11 @@ except Exception:  # pragma: no cover - exercised when extension missing
     class StnTensor:
         amplitudes: List[complex]
         tableau: object | None = None
+
+    @dataclass
+    class MPS:
+        tensors: List[List[complex]] | None = None
+        bond_dims: List[int] | None = None
 
     class ConversionEngine:
         def __init__(self, cache_limit: int | None = None) -> None:
@@ -275,6 +288,43 @@ except Exception:  # pragma: no cover - exercised when extension missing
                 self._bridge_cache[key] = self._build_bridge_tensor_impl(left, right)
                 self._trim_cache(self._bridge_cache)
             return self._bridge_cache[key]
+
+        def mps_to_statevector(self, mps: MPS) -> List[complex]:
+            tensors = mps.tensors or []
+            if not tensors:
+                return []
+            bonds = mps.bond_dims or []
+            n = len(tensors)
+            if len(bonds) != n + 1:
+                bonds = [1]
+                for t in tensors:
+                    right = len(t) // (bonds[-1] * 2)
+                    bonds.append(right)
+            first = bonds[1]
+            current = [0j] * (2 * first)
+            t0 = tensors[0]
+            for p in range(2):
+                for r in range(first):
+                    current[p * first + r] = t0[p * first + r]
+            left_dim = 2
+            for q in range(1, n):
+                chi = bonds[q]
+                next_chi = bonds[q + 1]
+                tensor = tensors[q]
+                next_state = [0j] * (left_dim * 2 * next_chi)
+                for i in range(left_dim):
+                    for k in range(chi):
+                        coeff = current[i * chi + k]
+                        if coeff == 0j:
+                            continue
+                        for p in range(2):
+                            for r in range(next_chi):
+                                idx = (i * 2 + p) * next_chi + r
+                                next_state[idx] += coeff * tensor[(k * 2 + p) * next_chi + r]
+                current = next_state
+                left_dim *= 2
+            final = bonds[n]
+            return [current[i * final] for i in range(left_dim)]
 
         # Optional helpers ---------------------------------------------
         def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
@@ -390,6 +440,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
         "Primitive",
         "ConversionResult",
         "StnTensor",
+        "MPS",
         "ConversionEngine",
     ]
 

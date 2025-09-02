@@ -32,6 +32,15 @@ struct StnTensor {
 #endif
 };
 
+// Simple matrix product state container.  Each tensor is stored as a flat
+// vector with dimensions ``(left, 2, right)``.  The ``bond_dims`` entry lists
+// the intermediate bond dimensions so that the dense state can be reconstructed
+// without re-inferring the sizes from the flattened tensors.
+struct MPS {
+    std::vector<std::vector<std::complex<double>>> tensors;
+    std::vector<std::size_t> bond_dims;
+};
+
 struct SSD {
     std::vector<uint32_t> boundary_qubits;  // indices of qubits on the boundary
     std::size_t top_s;                      // number of Schmidt vectors kept
@@ -109,6 +118,13 @@ class ConversionEngine {
     // The amplitude vector is always populated while the optional tableau is
     // provided when the boundary admits a stabilizer description.
     StnTensor convert_boundary_to_stn(const SSD& ssd) const;
+
+    // Contract a matrix product state into a dense statevector.  Each tensor is
+    // stored as a flat vector with dimensions ``(left, 2, right)`` and the
+    // optional ``bond_dims`` list contains the bond dimensions along the chain
+    // with length ``n + 1`` for ``n`` tensors.  When ``bond_dims`` is empty the
+    // dimensions are inferred from the tensor sizes.
+    std::vector<std::complex<double>> mps_to_statevector(const MPS& mps) const;
 
 #ifdef QUASAR_USE_MQT
     // The decision diagram package exposes `vEdge` at the namespace level,
