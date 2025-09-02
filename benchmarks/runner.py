@@ -32,6 +32,8 @@ except Exception:  # pragma: no cover - pandas is optional
 # Type for objects that expose a ``run`` method
 RunCallable = Callable[[Any], Any]
 
+from quasar.cost import Backend
+
 
 @dataclass
 class BenchmarkRunner:
@@ -247,7 +249,9 @@ class BenchmarkRunner:
         return summary
 
     # ------------------------------------------------------------------
-    def run_quasar(self, circuit: Any, engine: Any) -> Dict[str, Any]:
+    def run_quasar(
+        self, circuit: Any, engine: Any, *, backend: Backend | None = None
+    ) -> Dict[str, Any]:
         """Execute ``circuit`` using a QuASAr scheduler ``engine``.
 
         Planning is performed prior to measurement so that only the actual
@@ -255,7 +259,9 @@ class BenchmarkRunner:
         phases are wrapped with :mod:`tracemalloc` to also capture peak memory
         usage.  ``engine`` may either be a :class:`~quasar.scheduler.Scheduler`
         or an object providing ``scheduler`` and ``planner`` attributes (e.g.,
-        :class:`~quasar.simulation_engine.SimulationEngine`).
+        :class:`~quasar.simulation_engine.SimulationEngine`).  The optional
+        ``backend`` argument forces both planning and execution to use a
+        specific backend rather than selecting one automatically.
         """
 
         scheduler = getattr(engine, "scheduler", engine)
@@ -270,13 +276,13 @@ class BenchmarkRunner:
         try:
             if planner is not None:
                 start_prepare = time.perf_counter()
-                planner.plan(circuit)
+                planner.plan(circuit, backend=backend)
                 prepare_time = time.perf_counter() - start_prepare
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()
 
             start_run = time.perf_counter()
-            result = scheduler.run(circuit)
+            result = scheduler.run(circuit, backend=backend)
             try:
                 result.extract_state(0)
             except Exception:
@@ -320,11 +326,16 @@ class BenchmarkRunner:
         circuit: Any,
         engine: Any,
         *,
+        backend: Backend | None = None,
         repetitions: int = 1,
         timeout: float | None = None,
         run_timeout: float | None = None,
     ) -> Dict[str, Any]:
-        """Execute :meth:`run_quasar` repeatedly and aggregate statistics."""
+        """Execute :meth:`run_quasar` repeatedly and aggregate statistics.
+
+        When ``backend`` is provided it is forwarded to each
+        :meth:`run_quasar` invocation to force a specific backend.
+        """
 
         metrics = [
             "prepare_time",
@@ -337,7 +348,7 @@ class BenchmarkRunner:
         failures: List[str] = []
 
         def _run_once() -> Dict[str, Any]:
-            rec = self.run_quasar(circuit, engine)
+            rec = self.run_quasar(circuit, engine, backend=backend)
             self.results.pop()
             return rec
 

@@ -29,7 +29,7 @@ def test_run_records_memory():
 
 
 class DummyPlanner:
-    def plan(self, circuit):
+    def plan(self, circuit, *, backend=None):
         self._data = [0] * 10000
 
 
@@ -37,7 +37,7 @@ class DummyScheduler:
     def __init__(self):
         self.planner = DummyPlanner()
 
-    def run(self, circuit):
+    def run(self, circuit, *, backend=None):
         self._data = [0] * 10000
         return "done"
 
