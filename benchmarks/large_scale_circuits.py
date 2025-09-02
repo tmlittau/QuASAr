@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from qiskit import QuantumCircuit, transpile
 from qiskit.circuit.library import VBERippleCarryAdder, CDKMRippleCarryAdder
+import networkx as nx
 
 from quasar.circuit import Circuit
 
@@ -226,4 +227,42 @@ def grover_with_oracle_circuit(
         qc.h(range(n_qubits))
 
     qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t"])
+    return Circuit.from_qiskit(qc)
+
+
+def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:
+    """Construct a deep QAOA circuit for an input graph.
+
+    The circuit alternates between problem-Hamiltonian layers composed of
+    :class:`~qiskit.circuit.library.RZZGate` interactions for each edge in the
+    ``graph`` and mixing layers of single-qubit :class:`~qiskit.circuit.library.RXGate`
+    rotations.  The number of alternations is controlled by ``p_layers`` and is
+    independent of the graph size.
+
+    Parameters
+    ----------
+    graph:
+        Input graph defining the problem interactions.
+    p_layers:
+        Number of problem/mixing layer pairs to apply.
+
+    Returns
+    -------
+    Circuit
+        The assembled circuit ready for benchmarking.
+    """
+
+    if graph.number_of_nodes() == 0 or p_layers <= 0:
+        return Circuit([])
+
+    n_qubits = graph.number_of_nodes()
+    qc = QuantumCircuit(n_qubits)
+
+    for _ in range(p_layers):
+        for u, v in graph.edges():
+            qc.rzz(0.5, u, v)
+        for q in range(n_qubits):
+            qc.rx(0.5, q)
+
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "rx", "rzz"])
     return Circuit.from_qiskit(qc)
