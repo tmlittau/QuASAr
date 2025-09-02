@@ -278,25 +278,48 @@ class BenchmarkRunner:
 
         tracemalloc.start()
         try:
-            if planner is not None:
+            backend_choice = None
+            select_backend = getattr(scheduler, "select_backend", None)
+            if callable(select_backend):
+                backend_choice = select_backend(circuit, backend=backend)
+
+            if backend_choice is not None:
                 start_prepare = time.perf_counter()
-                planner.plan(circuit, backend=backend)
+                sim = type(scheduler.backends[backend_choice])()
+                sim.load(circuit.num_qubits)
+                for g in getattr(circuit, "gates", []):
+                    sim.apply_gate(g.gate, g.qubits, g.params)
                 prepare_time = time.perf_counter() - start_prepare
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()
 
-            start_run = time.perf_counter()
-            result = scheduler.run(circuit, backend=backend)
-            if hasattr(result, "partitions") and getattr(result, "partitions"):
-                backend_choice = result.partitions[0].backend
+                start_run = time.perf_counter()
+                result = sim.extract_ssd()
+                result = result if result is not None else getattr(circuit, "ssd", None)
                 backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
-            try:
-                result.extract_state(0)
-            except Exception:
-                pass
-            run_time = time.perf_counter() - start_run
-            _, run_peak_memory = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
+                run_time = time.perf_counter() - start_run
+                _, run_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+            else:
+                if planner is not None:
+                    start_prepare = time.perf_counter()
+                    planner.plan(circuit, backend=backend)
+                    prepare_time = time.perf_counter() - start_prepare
+                    _, prepare_peak_memory = tracemalloc.get_traced_memory()
+                    tracemalloc.reset_peak()
+
+                start_run = time.perf_counter()
+                result = scheduler.run(circuit, backend=backend)
+                if hasattr(result, "partitions") and getattr(result, "partitions"):
+                    backend_obj = result.partitions[0].backend
+                    backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
+                try:
+                    result.extract_state(0)
+                except Exception:
+                    pass
+                run_time = time.perf_counter() - start_run
+                _, run_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
         except Exception as exc:  # pragma: no cover - exercised in tests
             _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()

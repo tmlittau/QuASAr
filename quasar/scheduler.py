@@ -68,6 +68,53 @@ class Scheduler:
         return sorted(backends, key=self._backend_rank)
 
     # ------------------------------------------------------------------
+    def select_backend(
+        self, circuit: Circuit, *, backend: Backend | None = None
+    ) -> Backend | None:
+        """Return the backend ``run`` would use for ``circuit``.
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to simulate.
+        backend:
+            Optional override selecting a specific backend.  When provided the
+            returned value will always be this backend.
+
+        Returns
+        -------
+        Backend | None
+            The backend chosen for direct execution without planning or
+            ``None`` if the scheduler would perform full planning.
+        """
+
+        if backend is not None:
+            return backend
+
+        quick = True
+        num_qubits = circuit.num_qubits
+        num_gates = len(circuit.gates)
+        depth = circuit.depth
+        if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
+            quick = False
+        if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
+            quick = False
+        if self.quick_max_depth is not None and depth > self.quick_max_depth:
+            quick = False
+        if quick and any(
+            t is not None
+            for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
+        ):
+            estimator = CostEstimator()
+            candidates: List[tuple[Backend, Cost]] = []
+            for b in self._order_backends(_supported_backends(circuit.gates)):
+                cost = _simulation_cost(estimator, b, num_qubits, num_gates)
+                candidates.append((b, cost))
+            return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))[0]
+
+        return None
+
+    # ------------------------------------------------------------------
     def run(
         self,
         circuit: Circuit,
@@ -92,39 +139,10 @@ class Scheduler:
             executed.
         """
 
-        if backend is not None:
-            sim = type(self.backends[backend])()
-            sim.load(circuit.num_qubits)
-            for gate in circuit.gates:
-                sim.apply_gate(gate.gate, gate.qubits, gate.params)
-            ssd = sim.extract_ssd()
-            return ssd if ssd is not None else circuit.ssd
-
-        # Quick path: directly pick best single backend without planner
-        quick = True
-        num_qubits = circuit.num_qubits
-        num_gates = len(circuit.gates)
-        depth = circuit.depth
-        if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
-            quick = False
-        if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
-            quick = False
-        if self.quick_max_depth is not None and depth > self.quick_max_depth:
-            quick = False
-        if quick and any(
-            t is not None
-            for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
-        ):
-            estimator = CostEstimator()
-            candidates: List[tuple[Backend, Cost]] = []
-            for b in self._order_backends(_supported_backends(circuit.gates)):
-                cost = _simulation_cost(estimator, b, num_qubits, num_gates)
-                candidates.append((b, cost))
-            backend_choice = min(
-                candidates, key=lambda kv: (kv[1].time, kv[1].memory)
-            )[0]
+        backend_choice = self.select_backend(circuit, backend=backend)
+        if backend_choice is not None:
             sim = type(self.backends[backend_choice])()
-            sim.load(num_qubits)
+            sim.load(circuit.num_qubits)
             for gate in circuit.gates:
                 sim.apply_gate(gate.gate, gate.qubits, gate.params)
             ssd = sim.extract_ssd()
