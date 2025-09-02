@@ -112,7 +112,9 @@ class DummyScheduler:
 
     def run(self, circuit, *, backend=None):
         self.run_calls.append(backend)
-        return SSD([SSDPartition(subsystems=((0,),))])
+        return SSD([
+            SSDPartition(subsystems=((0,),), backend=backend or Backend.STATEVECTOR)
+        ])
 
 
 def test_run_quasar_multiple_aggregates_statistics():
@@ -138,6 +140,7 @@ def test_run_quasar_multiple_aggregates_statistics():
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
     assert scheduler.plan_calls == [Backend.TABLEAU] * 3
     assert scheduler.run_calls == [Backend.TABLEAU] * 3
+    assert record["backend"] == Backend.TABLEAU.name
 
 
 class PlannerErrorScheduler:
@@ -149,7 +152,9 @@ class PlannerErrorScheduler:
         self.planner = Planner()
 
     def run(self, circuit, *, backend=None):
-        return SSD([SSDPartition(subsystems=((0,),))])
+        return SSD([
+            SSDPartition(subsystems=((0,),), backend=backend or Backend.STATEVECTOR)
+        ])
 
 
 def test_run_quasar_returns_failure_record_on_planner_error():
@@ -158,6 +163,7 @@ def test_run_quasar_returns_failure_record_on_planner_error():
     record = runner.run_quasar(None, scheduler)
     assert record["failed"] is True
     assert "plan boom" in record["error"]
+    assert record["backend"] is None
 
 
 class RunErrorScheduler:
@@ -178,6 +184,7 @@ def test_run_quasar_returns_failure_record_on_run_error():
     record = runner.run_quasar(None, scheduler)
     assert record["failed"] is True
     assert "run boom" in record["error"]
+    assert record["backend"] is None
 
 
 def test_run_quasar_multiple_raises_runtime_error_with_failures():

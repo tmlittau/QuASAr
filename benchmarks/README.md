@@ -35,6 +35,8 @@ phases as well as their sum:
   compilation that happens before execution.
 - **run_time** – execution of the prepared circuit on the backend.
 - **total_time** – combined runtime of both phases.
+- For QuASAr runs, **backend** – the simulator backend selected by the
+  scheduler.
 
 Adapters are expected to perform heavy translation work in the preparation
 phase so that `run_time` reflects only the actual simulation cost.
