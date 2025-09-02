@@ -262,6 +262,9 @@ class BenchmarkRunner:
         :class:`~quasar.simulation_engine.SimulationEngine`).  The optional
         ``backend`` argument forces both planning and execution to use a
         specific backend rather than selecting one automatically.
+
+        The returned record contains a ``backend`` field indicating the
+        backend chosen by the scheduler.
         """
 
         scheduler = getattr(engine, "scheduler", engine)
@@ -271,6 +274,7 @@ class BenchmarkRunner:
         run_peak_memory = 0
         run_time = 0.0
         result: Any | None = None
+        backend_choice_name: str | None = None
 
         tracemalloc.start()
         try:
@@ -283,6 +287,9 @@ class BenchmarkRunner:
 
             start_run = time.perf_counter()
             result = scheduler.run(circuit, backend=backend)
+            if hasattr(result, "partitions") and getattr(result, "partitions"):
+                backend_choice = result.partitions[0].backend
+                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
             try:
                 result.extract_state(0)
             except Exception:
@@ -303,6 +310,7 @@ class BenchmarkRunner:
                 "result": result,
                 "failed": True,
                 "error": str(exc),
+                "backend": backend_choice_name,
             }
             self.results.append(record)
             return record
@@ -316,6 +324,7 @@ class BenchmarkRunner:
             "run_peak_memory": run_peak_memory,
             "result": result,
             "failed": False,
+            "backend": backend_choice_name,
         }
         self.results.append(record)
         return record
@@ -334,7 +343,8 @@ class BenchmarkRunner:
         """Execute :meth:`run_quasar` repeatedly and aggregate statistics.
 
         When ``backend`` is provided it is forwarded to each
-        :meth:`run_quasar` invocation to force a specific backend.
+        :meth:`run_quasar` invocation to force a specific backend.  The
+        summary record includes the chosen ``backend``.
         """
 
         metrics = [
@@ -390,6 +400,7 @@ class BenchmarkRunner:
         summary: Dict[str, Any] = {
             "framework": "quasar",
             "repetitions": len(records),
+            "backend": records[0].get("backend"),
         }
         if failures:
             summary["failed_runs"] = failures

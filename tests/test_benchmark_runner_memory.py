@@ -47,3 +47,4 @@ def test_run_quasar_records_memory():
     record = runner.run_quasar(None, DummyScheduler())
     assert record["prepare_peak_memory"] > 0
     assert record["run_peak_memory"] > 0
+    assert "backend" in record and record["backend"] is None
