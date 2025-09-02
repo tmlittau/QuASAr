@@ -292,97 +292,8 @@ ConversionEngine::dd_to_statevector(const dd::vEdge& edge) const {
 
 std::vector<std::vector<std::complex<double>>>
 ConversionEngine::dd_to_mps(const dd::vEdge& edge, std::size_t chi) const {
-    // Start from the dense statevector representation and perform a simple
-    // left-to-right QR factorisation.  Each step yields an isometry reshaped
-    // into a rank-3 tensor ``(left, physical, right)``.  When ``chi`` is
-    // specified the intermediate bond dimensions are truncated to at most
-    // ``chi``.
     auto state = dd_to_statevector(edge);
-    const std::size_t dim = state.size();
-    if (dim == 0) {
-        return {};
-    }
-    const std::size_t n = static_cast<std::size_t>(std::log2(dim));
-
-    std::vector<std::vector<std::complex<double>>> tensors;
-    std::vector<std::complex<double>> current = std::move(state);
-    std::size_t left_dim = 1;
-
-    for (std::size_t qubit = 0; qubit < n; ++qubit) {
-        const std::size_t cols = 1ULL << (n - qubit - 1);
-        const std::size_t rows = left_dim * 2;
-
-        // Rank after truncation.
-        std::size_t rank = std::min(rows, cols);
-        if (chi != 0) {
-            rank = std::min(rank, chi);
-        }
-
-        std::vector<std::complex<double>> Q(rows * rank, {0.0, 0.0});
-        std::vector<std::complex<double>> R(rank * cols, {0.0, 0.0});
-
-        // Classical Gram-Schmidt orthogonalisation on the column space.
-        for (std::size_t k = 0; k < rank; ++k) {
-            // Copy k-th column of the working matrix into Q.
-            for (std::size_t r = 0; r < rows; ++r) {
-                Q[r * rank + k] = current[r * cols + k];
-            }
-            // Orthogonalise against previous columns.
-            for (std::size_t j = 0; j < k; ++j) {
-                std::complex<double> dot = {0.0, 0.0};
-                for (std::size_t r = 0; r < rows; ++r) {
-                    dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
-                }
-                for (std::size_t r = 0; r < rows; ++r) {
-                    Q[r * rank + k] -= dot * Q[r * rank + j];
-                }
-                R[j * cols + k] = dot;
-            }
-            // Normalise the new column.
-            double norm = 0.0;
-            for (std::size_t r = 0; r < rows; ++r) {
-                norm += std::norm(Q[r * rank + k]);
-            }
-            norm = std::sqrt(norm);
-            if (norm > 0.0) {
-                for (std::size_t r = 0; r < rows; ++r) {
-                    Q[r * rank + k] /= norm;
-                }
-            }
-            R[k * cols + k] = norm;
-
-            // Update remaining columns of the working matrix and compute
-            // the corresponding ``R`` entries.
-            for (std::size_t c = k + 1; c < cols; ++c) {
-                std::complex<double> dot = {0.0, 0.0};
-                for (std::size_t r = 0; r < rows; ++r) {
-                    dot += std::conj(Q[r * rank + k]) * current[r * cols + c];
-                }
-                R[k * cols + c] = dot;
-                for (std::size_t r = 0; r < rows; ++r) {
-                    current[r * cols + c] -= dot * Q[r * rank + k];
-                }
-            }
-        }
-
-        // Reshape Q into a rank-3 tensor ``(left_dim, 2, rank)`` and append to
-        // the MPS chain.
-        std::vector<std::complex<double>> tensor(left_dim * 2 * rank);
-        for (std::size_t l = 0; l < left_dim; ++l) {
-            for (std::size_t p = 0; p < 2; ++p) {
-                for (std::size_t r = 0; r < rank; ++r) {
-                    tensor[(l * 2 + p) * rank + r] = Q[(l * 2 + p) * rank + r];
-                }
-            }
-        }
-        tensors.push_back(std::move(tensor));
-
-        // Prepare the matrix for the next iteration using the accumulated R.
-        current.assign(R.begin(), R.begin() + rank * cols);
-        left_dim = rank;
-    }
-
-    return tensors;
+    return statevector_to_mps(state, chi);
 }
 #endif
 
@@ -420,11 +331,102 @@ ConversionEngine::tableau_to_statevector(const StimTableau& tableau) const {
     return vec;
 }
 
+std::vector<std::vector<std::complex<double>>>
+ConversionEngine::tableau_to_mps(const StimTableau& tableau, std::size_t chi) const {
+    auto state = tableau_to_statevector(tableau);
+    return statevector_to_mps(state, chi);
+}
+
 StimTableau ConversionEngine::convert_boundary_to_tableau(const SSD& ssd) const {
     // Return an identity tableau of the requested size.
     return StimTableau(ssd.boundary_qubits.size());
 }
+#endif
 
+std::vector<std::vector<std::complex<double>>>
+ConversionEngine::statevector_to_mps(const std::vector<std::complex<double>>& state,
+                                    std::size_t chi) const {
+    // Perform a left-to-right QR sweep to factor ``state`` into an MPS with
+    // optional bond-dimension truncation.  The routine scales as
+    // ``O(n*chi^3)`` where ``chi`` is the maximum retained bond dimension.
+    const std::size_t dim = state.size();
+    if (dim == 0) {
+        return {};
+    }
+    const std::size_t n = static_cast<std::size_t>(std::log2(dim));
+
+    std::vector<std::vector<std::complex<double>>> tensors;
+    std::vector<std::complex<double>> current = state;
+    std::size_t left_dim = 1;
+
+    for (std::size_t qubit = 0; qubit < n; ++qubit) {
+        const std::size_t cols = 1ULL << (n - qubit - 1);
+        const std::size_t rows = left_dim * 2;
+
+        std::size_t rank = std::min(rows, cols);
+        if (chi != 0) {
+            rank = std::min(rank, chi);
+        }
+
+        std::vector<std::complex<double>> Q(rows * rank, {0.0, 0.0});
+        std::vector<std::complex<double>> R(rank * cols, {0.0, 0.0});
+
+        for (std::size_t k = 0; k < rank; ++k) {
+            for (std::size_t r = 0; r < rows; ++r) {
+                Q[r * rank + k] = current[r * cols + k];
+            }
+            for (std::size_t j = 0; j < k; ++j) {
+                std::complex<double> dot = {0.0, 0.0};
+                for (std::size_t r = 0; r < rows; ++r) {
+                    dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                }
+                for (std::size_t r = 0; r < rows; ++r) {
+                    Q[r * rank + k] -= dot * Q[r * rank + j];
+                }
+                R[j * cols + k] = dot;
+            }
+            double norm = 0.0;
+            for (std::size_t r = 0; r < rows; ++r) {
+                norm += std::norm(Q[r * rank + k]);
+            }
+            norm = std::sqrt(norm);
+            if (norm > 0.0) {
+                for (std::size_t r = 0; r < rows; ++r) {
+                    Q[r * rank + k] /= norm;
+                }
+            }
+            R[k * cols + k] = norm;
+
+            for (std::size_t c = k + 1; c < cols; ++c) {
+                std::complex<double> dot = {0.0, 0.0};
+                for (std::size_t r = 0; r < rows; ++r) {
+                    dot += std::conj(Q[r * rank + k]) * current[r * cols + c];
+                }
+                R[k * cols + c] = dot;
+                for (std::size_t r = 0; r < rows; ++r) {
+                    current[r * cols + c] -= dot * Q[r * rank + k];
+                }
+            }
+        }
+
+        std::vector<std::complex<double>> tensor(left_dim * 2 * rank);
+        for (std::size_t l = 0; l < left_dim; ++l) {
+            for (std::size_t p = 0; p < 2; ++p) {
+                for (std::size_t r = 0; r < rank; ++r) {
+                    tensor[(l * 2 + p) * rank + r] = Q[(l * 2 + p) * rank + r];
+                }
+            }
+        }
+        tensors.push_back(std::move(tensor));
+
+        current.assign(R.begin(), R.begin() + rank * cols);
+        left_dim = rank;
+    }
+
+    return tensors;
+}
+
+#ifdef QUASAR_USE_STIM
 std::optional<StimTableau> ConversionEngine::try_build_tableau(
     const std::vector<std::complex<double>>& state) const {
     return learn_stabilizer(state);
@@ -537,7 +539,7 @@ std::optional<StimTableau> ConversionEngine::learn_stabilizer(
 
     return std::nullopt;
 }
-#endif
+#endif  // QUASAR_USE_STIM
 
 } // namespace quasar
 

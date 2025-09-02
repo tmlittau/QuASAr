@@ -80,6 +80,10 @@ PYBIND11_MODULE(_conversion_engine, m) {
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("tableau_to_statevector", &quasar::ConversionEngine::tableau_to_statevector)
+        .def("tableau_to_mps",
+             &quasar::ConversionEngine::tableau_to_mps,
+             py::arg("tableau"),
+             py::arg("chi") = 0)
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
         .def("learn_stabilizer", &quasar::ConversionEngine::learn_stabilizer)
 #endif
