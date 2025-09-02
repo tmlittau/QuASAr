@@ -19,8 +19,8 @@
 - Add tests for new features or bug fixes.
 
 ## Benchmarking Notes
-- When benchmarking, disable quick‑path heuristics (`QUASAR_QUICK_MAX_QUBITS`, `QUASAR_QUICK_MAX_GATES`, `QUASAR_QUICK_MAX_DEPTH`) or set them via `Planner`/`Scheduler` to `None` for fair comparisons.
-- Explicitly pass a `Backend` when comparing against other simulators so both run on the same method, and record the selected backend in results.
+- When benchmarking, enable quick‑path heuristics (`QUASAR_QUICK_MAX_QUBITS`, `QUASAR_QUICK_MAX_GATES`, `QUASAR_QUICK_MAX_DEPTH`) for QuASAr to really investigate QuASAr's capabilities.
+- Explicitly pass a `Backend` to QuASAr when comparing against single-method simulators, instead of creating extra Adapters. QuASAr should always provide the option to manually pick the simulator anyway.
 - Benchmarks and example notebooks live under `benchmarks/`; raw results are stored in `benchmarks/results/`.
 
 ## Paper Insights
