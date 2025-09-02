@@ -11,6 +11,7 @@ dependencies = [
     "numpy",
     "scipy",
     "statsmodels",
+    "matplotlib",
     "mqt-core==3.2.1",
     "mqt.ddsim==2.0.0",
     "qiskit==2.1.2",
