@@ -272,6 +272,10 @@ class BenchmarkRunner:
             tracemalloc.reset_peak()
         start_run = time.perf_counter()
         result = scheduler.run(circuit)
+        try:
+            result.extract_state(0)
+        except Exception:
+            pass
         run_time = time.perf_counter() - start_run
         _, run_peak_memory = tracemalloc.get_traced_memory()
         tracemalloc.stop()
@@ -286,6 +290,87 @@ class BenchmarkRunner:
         }
         self.results.append(record)
         return record
+
+    # ------------------------------------------------------------------
+    def run_quasar_multiple(
+        self,
+        circuit: Any,
+        engine: Any,
+        *,
+        repetitions: int = 1,
+        timeout: float | None = None,
+        run_timeout: float | None = None,
+    ) -> Dict[str, Any]:
+        """Execute :meth:`run_quasar` repeatedly and aggregate statistics."""
+
+        metrics = [
+            "prepare_time",
+            "run_time",
+            "total_time",
+            "prepare_peak_memory",
+            "run_peak_memory",
+        ]
+        records: List[Dict[str, Any]] = []
+        failures: List[str] = []
+
+        def _run_once() -> Dict[str, Any]:
+            rec = self.run_quasar(circuit, engine)
+            self.results.pop()
+            return rec
+
+        start = time.perf_counter()
+        for i in range(repetitions):
+            if run_timeout is not None:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_run_once)
+                    try:
+                        rec = future.result(timeout=run_timeout)
+                    except TimeoutError:
+                        failures.append(
+                            f"run {i + 1} timed out after {run_timeout} seconds"
+                        )
+                        continue
+                    except Exception as exc:  # pragma: no cover - safety net
+                        failures.append(f"run {i + 1} failed: {exc}")
+                        continue
+            else:
+                try:
+                    rec = _run_once()
+                except Exception as exc:  # pragma: no cover - safety net
+                    failures.append(f"run {i + 1} failed: {exc}")
+                    continue
+
+            if rec.get("failed"):
+                failures.append(
+                    f"run {i + 1} failed: {rec.get('error', 'unknown error')}"
+                )
+                continue
+
+            records.append(rec)
+            if timeout is not None and (time.perf_counter() - start) > timeout:
+                break
+
+        if not records:
+            raise RuntimeError("no runs executed")
+
+        summary: Dict[str, Any] = {
+            "framework": "quasar",
+            "repetitions": len(records),
+        }
+        if failures:
+            summary["failed_runs"] = failures
+            summary["comment"] = (
+                f"{len(failures)} run(s) failed and were excluded from statistics"
+            )
+        for m in metrics:
+            values = [r[m] for r in records]
+            summary[f"{m}_mean"] = statistics.fmean(values)
+            summary[f"{m}_std"] = (
+                statistics.pstdev(values) if len(values) > 1 else 0.0
+            )
+
+        self.results.append(summary)
+        return summary
 
     # ------------------------------------------------------------------
     def dataframe(self) -> "pd.DataFrame | List[Dict[str, Any]]":
