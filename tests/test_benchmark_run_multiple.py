@@ -2,6 +2,8 @@ import math
 import time
 from unittest.mock import patch
 
+import pytest
+
 from benchmarks.runner import BenchmarkRunner
 from quasar.ssd import SSD, SSDPartition
 
@@ -124,3 +126,51 @@ def test_run_quasar_multiple_aggregates_statistics():
     assert record["repetitions"] == 3
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
+
+
+class PlannerErrorScheduler:
+    def __init__(self):
+        class Planner:
+            def plan(self, circuit):
+                raise RuntimeError("plan boom")
+
+        self.planner = Planner()
+
+    def run(self, circuit):
+        return SSD([SSDPartition(subsystems=((0,),))])
+
+
+def test_run_quasar_returns_failure_record_on_planner_error():
+    runner = BenchmarkRunner()
+    scheduler = PlannerErrorScheduler()
+    record = runner.run_quasar(None, scheduler)
+    assert record["failed"] is True
+    assert "plan boom" in record["error"]
+
+
+class RunErrorScheduler:
+    def __init__(self):
+        class Planner:
+            def plan(self, circuit):
+                pass
+
+        self.planner = Planner()
+
+    def run(self, circuit):
+        raise ValueError("run boom")
+
+
+def test_run_quasar_returns_failure_record_on_run_error():
+    runner = BenchmarkRunner()
+    scheduler = RunErrorScheduler()
+    record = runner.run_quasar(None, scheduler)
+    assert record["failed"] is True
+    assert "run boom" in record["error"]
+
+
+def test_run_quasar_multiple_raises_runtime_error_with_failures():
+    runner = BenchmarkRunner()
+    scheduler = RunErrorScheduler()
+    with pytest.raises(RuntimeError) as exc:
+        runner.run_quasar_multiple(None, scheduler, repetitions=2)
+    assert "run boom" in str(exc.value)
