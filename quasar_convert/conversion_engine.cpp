@@ -426,6 +426,7 @@ ConversionEngine::statevector_to_mps(const std::vector<std::complex<double>>& st
     return tensors;
 }
 
+#ifdef QUASAR_USE_STIM
 std::optional<StimTableau> ConversionEngine::try_build_tableau(
     const std::vector<std::complex<double>>& state) const {
     return learn_stabilizer(state);
@@ -538,7 +539,7 @@ std::optional<StimTableau> ConversionEngine::learn_stabilizer(
 
     return std::nullopt;
 }
-#endif
+#endif  // QUASAR_USE_STIM
 
 } // namespace quasar
 
