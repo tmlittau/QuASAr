@@ -90,3 +90,60 @@ def ripple_carry_modular_circuit(
 
     qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t"])
     return Circuit.from_qiskit(qc)
+
+
+def grover_with_oracle_circuit(
+    n_qubits: int, oracle_depth: int, iterations: int = 1
+) -> Circuit:
+    """Build a Grover circuit with a configurable-depth oracle.
+
+    Parameters
+    ----------
+    n_qubits:
+        Number of search qubits.
+    oracle_depth:
+        Number of cascaded Toffoli/CNOT layers forming the oracle.
+    iterations:
+        Number of Grover iterations to apply.
+
+    Returns
+    -------
+    Circuit
+        The assembled circuit ready for benchmarking.
+    """
+
+    if n_qubits <= 0:
+        return Circuit([])
+
+    qc = QuantumCircuit(n_qubits)
+    qc.h(range(n_qubits))
+
+    controls = list(range(n_qubits - 1))
+    target = n_qubits - 1
+
+    for _ in range(iterations):
+        # Oracle composed from cascaded Toffoli/CNOT layers.
+        qc.h(target)
+        for _ in range(oracle_depth):
+            if n_qubits > 1:
+                qc.mcx(controls, target)
+            else:
+                qc.x(target)
+            for q in range(n_qubits - 1):
+                qc.cx(q, q + 1)
+            for q in reversed(range(n_qubits - 1)):
+                qc.cx(q, q + 1)
+        qc.h(target)
+
+        # Standard Grover diffusion operator.
+        qc.h(range(n_qubits))
+        qc.x(range(n_qubits))
+        qc.h(target)
+        if n_qubits > 1:
+            qc.mcx(controls, target)
+        qc.h(target)
+        qc.x(range(n_qubits))
+        qc.h(range(n_qubits))
+
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t"])
+    return Circuit.from_qiskit(qc)
