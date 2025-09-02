@@ -10,7 +10,7 @@ included in both cases to demonstrate hybrid behaviour.
 from __future__ import annotations
 
 from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import VBERippleCarryAdder, CDKMRippleCarryAdder
+from qiskit.circuit.library import QFT, VBERippleCarryAdder, CDKMRippleCarryAdder
 import networkx as nx
 
 from quasar.circuit import Circuit
@@ -265,4 +265,70 @@ def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:
             qc.rx(0.5, q)
 
     qc = transpile(qc, basis_gates=["u", "p", "cx", "rx", "rzz"])
+    return Circuit.from_qiskit(qc)
+
+
+def phase_estimation_classical_unitary(
+    eigen_qubits: int, precision_qubits: int, classical_depth: int
+) -> Circuit:
+    """Construct a phase-estimation circuit using a classical reversible unitary.
+
+    The circuit uses ``precision_qubits`` qubits as the phase register and
+    ``eigen_qubits`` as the target on which a unitary consisting of
+    ``classical_depth`` layers of reversible logic (CNOT/Toffoli gates) is
+    applied. Controlled powers of this unitary are used followed by an inverse
+    quantum Fourier transform.
+
+    Parameters
+    ----------
+    eigen_qubits:
+        Number of qubits for the eigenstate register.
+    precision_qubits:
+        Number of qubits in the phase-estimation register.
+    classical_depth:
+        Number of reversible logic layers forming the base unitary.
+
+    Returns
+    -------
+    Circuit
+        The assembled circuit ready for benchmarking.
+    """
+
+    if eigen_qubits <= 0 or precision_qubits <= 0 or classical_depth <= 0:
+        return Circuit([])
+
+    # Build the classical reversible unitary composed of the requested depth.
+    unitary = QuantumCircuit(eigen_qubits, name="U")
+    for _ in range(classical_depth):
+        if eigen_qubits == 1:
+            unitary.x(0)
+        else:
+            for i in range(eigen_qubits - 1):
+                unitary.cx(i, i + 1)
+            if eigen_qubits >= 3:
+                for i in range(eigen_qubits - 2):
+                    unitary.ccx(i, i + 1, i + 2)
+
+    u_gate = unitary.to_gate()
+    cu_gate = u_gate.control(1)
+
+    total_qubits = precision_qubits + eigen_qubits
+    qc = QuantumCircuit(total_qubits)
+    phase_reg = list(range(precision_qubits))
+    eigen_reg = list(range(precision_qubits, total_qubits))
+
+    # Prepare the phase-estimation register.
+    qc.h(phase_reg)
+
+    # Apply controlled powers of the unitary.
+    for j, ctrl in enumerate(phase_reg):
+        repetitions = 2 ** j
+        for _ in range(repetitions):
+            qc.append(cu_gate, [ctrl, *eigen_reg])
+
+    # Inverse QFT on the phase register.
+    iqft = QFT(precision_qubits, inverse=True, do_swaps=False).to_gate()
+    qc.append(iqft, phase_reg)
+
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x"])
     return Circuit.from_qiskit(qc)
