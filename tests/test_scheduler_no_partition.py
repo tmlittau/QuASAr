@@ -1,0 +1,60 @@
+"""Ensure small circuits remain in a single partition.
+
+These circuits mirror examples from ``tests/notebooks/quasar_api_demo.ipynb``
+which use 2- and 3-qubit systems. They should fit into a single partition
+when processed by the scheduler or simulation engine.
+"""
+
+from quasar import Circuit, SimulationEngine, Scheduler
+from qiskit import QuantumCircuit
+import numpy as np
+
+
+def build_bell_circuit() -> Circuit:
+    """Bell state on 2 qubits."""
+    return Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+
+
+def build_three_qubit_ghz() -> Circuit:
+    """3-qubit GHZ-like circuit from the demo notebook."""
+    qc = QuantumCircuit(3)
+    qc.h(0)
+    qc.cx(0, 1)
+    qc.cx(0, 2)
+    return Circuit.from_qiskit(qc)
+
+
+def build_random_two_qubit_circuit() -> Circuit:
+    """Random 2-qubit circuit mirroring the notebook example."""
+    np.random.seed(0)
+    qc = QuantumCircuit(2)
+    qc.rx(0.3, 0)
+    qc.ry(0.2, 1)
+    qc.cz(0, 1)
+    qc.rz(0.1, 0)
+    qc.h(1)
+    return Circuit.from_qiskit(qc)
+
+
+def test_bell_circuit_single_partition():
+    circuit = build_bell_circuit()
+    engine = SimulationEngine()
+    result = engine.simulate(circuit)
+    assert len(result.ssd.partitions) == 1
+
+
+def test_three_qubit_ghz_single_partition():
+    circuit = build_three_qubit_ghz()
+    scheduler = Scheduler()
+    ssd = scheduler.run(circuit)
+    assert len(ssd.partitions) == 1
+
+
+def test_random_two_qubit_circuit_single_partition():
+    circuit = build_random_two_qubit_circuit()
+    engine = SimulationEngine()
+    result = engine.simulate(circuit)
+    assert len(result.ssd.partitions) == 1
