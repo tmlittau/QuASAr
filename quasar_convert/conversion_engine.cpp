@@ -260,6 +260,71 @@ StnTensor ConversionEngine::convert_boundary_to_stn(const SSD& ssd) const {
     return tensor;
 }
 
+std::vector<std::complex<double>>
+ConversionEngine::mps_to_statevector(const MPS& mps) const {
+    const auto& tensors = mps.tensors;
+    if (tensors.empty()) {
+        return {};
+    }
+    const std::size_t n = tensors.size();
+
+    // Determine bond dimensions.  When the caller does not provide them they
+    // are inferred from the tensor sizes by sweeping from left to right.
+    std::vector<std::size_t> bond_dims = mps.bond_dims;
+    if (bond_dims.size() != n + 1) {
+        bond_dims.assign(n + 1, 0);
+        bond_dims[0] = 1;
+        for (std::size_t i = 0; i < n; ++i) {
+            std::size_t left = bond_dims[i];
+            std::size_t right = tensors[i].size() / (left * 2);
+            bond_dims[i + 1] = right;
+        }
+    }
+
+    // Initialise the running matrix with the first tensor contracted over the
+    // left boundary which is assumed to have dimension one.
+    const std::size_t first_chi = bond_dims[1];
+    std::vector<std::complex<double>> current(2 * first_chi);
+    for (std::size_t p = 0; p < 2; ++p) {
+        for (std::size_t r = 0; r < first_chi; ++r) {
+            current[p * first_chi + r] = tensors[0][p * first_chi + r];
+        }
+    }
+
+    std::size_t left_dim = 2;  // 2^1 after absorbing the first tensor
+    for (std::size_t qubit = 1; qubit < n; ++qubit) {
+        const std::size_t bond = bond_dims[qubit];
+        const std::size_t next_bond = bond_dims[qubit + 1];
+        const auto& tensor = tensors[qubit];
+
+        std::vector<std::complex<double>> next(left_dim * 2 * next_bond,
+                                               {0.0, 0.0});
+        for (std::size_t i = 0; i < left_dim; ++i) {
+            for (std::size_t k = 0; k < bond; ++k) {
+                std::complex<double> coeff = current[i * bond + k];
+                if (coeff == std::complex<double>{0.0, 0.0}) {
+                    continue;
+                }
+                for (std::size_t p = 0; p < 2; ++p) {
+                    for (std::size_t r = 0; r < next_bond; ++r) {
+                        next[(i * 2 + p) * next_bond + r] +=
+                            coeff * tensor[(k * 2 + p) * next_bond + r];
+                    }
+                }
+            }
+        }
+        current.swap(next);
+        left_dim *= 2;
+    }
+
+    const std::size_t final_bond = bond_dims[n];
+    std::vector<std::complex<double>> state(left_dim);
+    for (std::size_t i = 0; i < left_dim; ++i) {
+        state[i] = current[i * final_bond];
+    }
+    return state;
+}
+
 #ifdef QUASAR_USE_MQT
 dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
     // Produce a zero-state decision diagram for the boundary qubits.

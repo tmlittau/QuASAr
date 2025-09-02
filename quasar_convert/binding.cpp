@@ -67,6 +67,19 @@ PYBIND11_MODULE(_conversion_engine, m) {
 #endif
         ;
 
+    py::class_<quasar::MPS>(m, "MPS")
+        .def(py::init([](std::vector<std::vector<std::complex<double>>> tensors,
+                         std::vector<std::size_t> bond_dims) {
+                 quasar::MPS m;
+                 m.tensors = std::move(tensors);
+                 m.bond_dims = std::move(bond_dims);
+                 return m;
+             }),
+             py::arg("tensors") = std::vector<std::vector<std::complex<double>>>{},
+             py::arg("bond_dims") = std::vector<std::size_t>{})
+        .def_readwrite("tensors", &quasar::MPS::tensors)
+        .def_readwrite("bond_dims", &quasar::MPS::bond_dims);
+
     py::class_<quasar::ConversionEngine>(m, "ConversionEngine")
         .def(py::init<>())
         .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
@@ -77,6 +90,7 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("build_bridge_tensor", &quasar::ConversionEngine::build_bridge_tensor)
         .def("convert_boundary_to_statevector", &quasar::ConversionEngine::convert_boundary_to_statevector)
         .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)
+        .def("mps_to_statevector", &quasar::ConversionEngine::mps_to_statevector)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("tableau_to_statevector", &quasar::ConversionEngine::tableau_to_statevector)
