@@ -111,6 +111,12 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.tableau_to_statevector(*args, **kwargs)
 
+        if hasattr(_CEngine, "tableau_to_dd"):
+
+            def tableau_to_dd(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.tableau_to_dd(*args, **kwargs)
+
         if hasattr(_CEngine, "convert_boundary_to_dd"):
 
             def convert_boundary_to_dd(self, *args, **kwargs):  # type: ignore[override]
