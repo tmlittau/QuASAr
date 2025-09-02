@@ -4,7 +4,10 @@ from unittest.mock import patch
 
 import pytest
 
+from benchmarks.backends import StatevectorAdapter
+from benchmarks.circuits import ghz_circuit
 from benchmarks.runner import BenchmarkRunner
+from quasar import SimulationEngine
 from quasar.ssd import SSD, SSDPartition
 from quasar.cost import Backend
 
@@ -193,3 +196,15 @@ def test_run_quasar_multiple_raises_runtime_error_with_failures():
     with pytest.raises(RuntimeError) as exc:
         runner.run_quasar_multiple(None, scheduler, repetitions=2)
     assert "run boom" in str(exc.value)
+
+
+def test_statevector_and_quasar_runtime_agree():
+    circuit = ghz_circuit(3)
+    runner = BenchmarkRunner()
+
+    direct = runner.run_multiple(circuit, StatevectorAdapter(), repetitions=3)
+    quasar = runner.run_quasar_multiple(
+        circuit, SimulationEngine(), backend=Backend.STATEVECTOR, repetitions=3
+    )
+
+    assert abs(direct["run_time_mean"] - quasar["run_time_mean"]) < 0.01
