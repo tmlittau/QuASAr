@@ -111,6 +111,12 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.tableau_to_statevector(*args, **kwargs)
 
+        if hasattr(_CEngine, "tableau_to_mps"):
+
+            def tableau_to_mps(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.tableau_to_mps(*args, **kwargs)
+
         if hasattr(_CEngine, "tableau_to_dd"):
 
             def tableau_to_dd(self, *args, **kwargs):  # type: ignore[override]

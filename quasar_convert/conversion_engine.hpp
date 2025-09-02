@@ -123,7 +123,9 @@ class ConversionEngine {
     // Factor the amplitudes represented by a decision diagram edge into a
     // matrix product state.  The returned chain stores each tensor as a flat
     // vector with dimensions ``(left, 2, right)``.  When ``chi`` is non-zero the
-    // intermediate bond dimensions are truncated to ``chi``.
+    // intermediate bond dimensions are truncated to ``chi``.  The underlying
+    // SVD sweep has complexity ``O(n\cdot\chi^3)`` where ``n`` is the number of
+    // qubits.
     std::vector<std::vector<std::complex<double>>> dd_to_mps(const dd::vEdge& edge,
                                                             std::size_t chi = 0) const;
 #endif
@@ -140,6 +142,11 @@ class ConversionEngine {
     // Convert a stabilizer tableau into a dense statevector.  The returned
     // vector has dimension ``2^n`` with qubit 0 as the least significant bit.
     std::vector<std::complex<double>> tableau_to_statevector(const StimTableau& tableau) const;
+    // Combine ``tableau_to_statevector`` with the DD→MPS SVD routine to produce
+    // an MPS representation.  When ``chi`` is non-zero the intermediate bond
+    // dimensions are truncated to ``chi`` with complexity ``O(n\cdot\chi^3)``.
+    std::vector<std::vector<std::complex<double>>> tableau_to_mps(const StimTableau& tableau,
+                                                                 std::size_t chi = 0) const;
     std::optional<StimTableau> try_build_tableau(const std::vector<std::complex<double>>& state) const;
     // Attempt to learn a stabilizer tableau from an arbitrary state vector.
     // Simple analytic checks recognise computational basis states and uniform
@@ -153,6 +160,10 @@ class ConversionEngine {
 #ifdef QUASAR_USE_MQT
     std::unique_ptr<dd::Package<>> dd_pkg;
 #endif
+
+    std::vector<std::vector<std::complex<double>>>
+    statevector_to_mps(const std::vector<std::complex<double>>& state,
+                       std::size_t chi) const;
 };
 
 } // namespace quasar

@@ -85,5 +85,38 @@ class OptionalBackendTests(unittest.TestCase):
         else:
             self.skipTest('Stim or MQT support not built')
 
+    def test_tableau_to_mps_reconstruction(self):
+        eng = qc.ConversionEngine()
+        if hasattr(eng, 'tableau_to_mps') and hasattr(qc, 'StimTableau'):
+            import stim
+            import numpy as np
+
+            def reconstruct(tensors):
+                vec = np.array([[1.0 + 0.0j]])
+                left = 1
+                for t in tensors:
+                    arr = np.asarray(t, dtype=complex).reshape(left, 2, -1)
+                    vec = np.tensordot(vec, arr, axes=(1, 0)).reshape(-1, arr.shape[2])
+                    left = arr.shape[2]
+                return vec.reshape(-1)
+
+            # Bell state |00> + |11>
+            bell = 'H 0\nCX 0 1\n'
+            tab_bell = qc.StimTableau.from_circuit(bell)
+            tensors = eng.tableau_to_mps(tab_bell)
+            rec = reconstruct(tensors)
+            expected = stim.Tableau.from_circuit(stim.Circuit(bell)).to_state_vector(endian='little')
+            np.testing.assert_allclose(rec, expected, atol=1e-6)
+
+            # Three-qubit GHZ state
+            ghz = 'H 0\nCX 0 1\nCX 0 2\n'
+            tab_ghz = qc.StimTableau.from_circuit(ghz)
+            tensors = eng.tableau_to_mps(tab_ghz)
+            rec = reconstruct(tensors)
+            expected = stim.Tableau.from_circuit(stim.Circuit(ghz)).to_state_vector(endian='little')
+            np.testing.assert_allclose(rec, expected, atol=1e-6)
+        else:
+            self.skipTest('Stim support not built')
+
 if __name__ == '__main__':
     unittest.main()
