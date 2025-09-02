@@ -41,6 +41,23 @@ phases as well as their sum:
 Adapters are expected to perform heavy translation work in the preparation
 phase so that `run_time` reflects only the actual simulation cost.
 
+## Comparing with baseline backends
+
+When results for several baseline simulators have been collected alongside
+QuASAr timings, the helper functions in [`plot_utils.py`](plot_utils.py) can
+highlight how QuASAr compares to the fastest individual backend. The function
+`compute_baseline_best` determines the per‑circuit minimum of `run_time_mean`
+and `total_time_mean` across all non‑QuASAr frameworks. `plot_quasar_vs_baseline_best`
+then overlays this "baseline_best" curve with the QuASAr measurements and can
+annotate QuASAr points with the backend chosen by the scheduler:
+
+```python
+from benchmarks.plot_utils import plot_quasar_vs_baseline_best
+
+df = runner.dataframe()
+plot_quasar_vs_baseline_best(df, annotate_backend=True)
+```
+
 ## Using notebooks
 
 Benchmark results can be explored with the Jupyter notebooks in
