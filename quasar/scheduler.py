@@ -68,6 +68,50 @@ class Scheduler:
         return sorted(backends, key=self._backend_rank)
 
     # ------------------------------------------------------------------
+    def should_use_quick_path(
+        self, circuit: Circuit, *, backend: Backend | None = None
+    ) -> bool:
+        """Return ``True`` if ``circuit`` can bypass planning.
+
+        The decision is based on the quick‑path heuristics configured for the
+        scheduler.  When ``backend`` is explicitly specified the caller is
+        requesting direct execution on a backend and therefore planning is not
+        required.
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to simulate.
+        backend:
+            Optional override selecting a specific backend.
+
+        Returns
+        -------
+        bool
+            ``True`` when the circuit is small enough to execute directly
+            without invoking the planner.
+        """
+
+        if backend is not None:
+            return True
+
+        quick = True
+        num_qubits = circuit.num_qubits
+        num_gates = len(circuit.gates)
+        depth = circuit.depth
+        if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
+            quick = False
+        if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
+            quick = False
+        if self.quick_max_depth is not None and depth > self.quick_max_depth:
+            quick = False
+
+        return quick and any(
+            t is not None
+            for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
+        )
+
+    # ------------------------------------------------------------------
     def select_backend(
         self, circuit: Circuit, *, backend: Backend | None = None
     ) -> Backend | None:
@@ -91,28 +135,17 @@ class Scheduler:
         if backend is not None:
             return backend
 
-        quick = True
+        if not self.should_use_quick_path(circuit):
+            return None
+
         num_qubits = circuit.num_qubits
         num_gates = len(circuit.gates)
-        depth = circuit.depth
-        if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
-            quick = False
-        if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
-            quick = False
-        if self.quick_max_depth is not None and depth > self.quick_max_depth:
-            quick = False
-        if quick and any(
-            t is not None
-            for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
-        ):
-            estimator = CostEstimator()
-            candidates: List[tuple[Backend, Cost]] = []
-            for b in self._order_backends(_supported_backends(circuit.gates)):
-                cost = _simulation_cost(estimator, b, num_qubits, num_gates)
-                candidates.append((b, cost))
-            return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))[0]
-
-        return None
+        estimator = CostEstimator()
+        candidates: List[tuple[Backend, Cost]] = []
+        for b in self._order_backends(_supported_backends(circuit.gates)):
+            cost = _simulation_cost(estimator, b, num_qubits, num_gates)
+            candidates.append((b, cost))
+        return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))[0]
 
     # ------------------------------------------------------------------
     def run(

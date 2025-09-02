@@ -1,3 +1,5 @@
+import pytest
+
 from benchmarks.runner import BenchmarkRunner
 from quasar.cost import Backend
 
@@ -47,6 +49,9 @@ class DummyScheduler:
         self.backends = {Backend.STATEVECTOR: DummyBackend()}
         self.ran = False
 
+    def should_use_quick_path(self, circuit, *, backend=None):  # pragma: no cover - trivial
+        return True
+
     def select_backend(self, circuit, *, backend=None):  # pragma: no cover - trivial
         return Backend.STATEVECTOR
 
@@ -65,6 +70,7 @@ def test_quick_path_prebuilds_backend():
     assert DummyBackend.loaded == 1
     assert DummyBackend.applied == 1
     assert DummyBackend.extracted == 1
+    assert record["prepare_time"] == pytest.approx(0.0, abs=0.01)
     assert record["backend"] == "STATEVECTOR"
     assert not record["failed"]
 

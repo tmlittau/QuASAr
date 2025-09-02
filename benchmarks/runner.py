@@ -279,11 +279,18 @@ class BenchmarkRunner:
         tracemalloc.start()
         try:
             backend_choice = None
-            select_backend = getattr(scheduler, "select_backend", None)
-            if callable(select_backend):
-                backend_choice = select_backend(circuit, backend=backend)
+            use_quick = False
+            should_quick = getattr(scheduler, "should_use_quick_path", None)
+            if callable(should_quick):
+                use_quick = should_quick(circuit, backend=backend)
 
-            if backend_choice is not None:
+            if use_quick:
+                select_backend = getattr(scheduler, "select_backend", None)
+                if callable(select_backend):
+                    backend_choice = select_backend(circuit, backend=backend)
+                else:
+                    backend_choice = backend
+
                 start_prepare = time.perf_counter()
                 sim = type(scheduler.backends[backend_choice])()
                 sim.load(circuit.num_qubits)
