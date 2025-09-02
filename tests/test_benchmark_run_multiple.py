@@ -6,6 +6,7 @@ import pytest
 
 from benchmarks.runner import BenchmarkRunner
 from quasar.ssd import SSD, SSDPartition
+from quasar.cost import Backend
 
 
 class DummyBackend:
@@ -97,13 +98,20 @@ def test_run_multiple_skips_failed_runs():
 
 class DummyScheduler:
     def __init__(self):
+        self.plan_calls = []
+        self.run_calls = []
+
         class Planner:
-            def plan(self, circuit):
-                pass
+            def __init__(self, outer):
+                self.outer = outer
 
-        self.planner = Planner()
+            def plan(self, circuit, *, backend=None):
+                self.outer.plan_calls.append(backend)
 
-    def run(self, circuit):
+        self.planner = Planner(self)
+
+    def run(self, circuit, *, backend=None):
+        self.run_calls.append(backend)
         return SSD([SSDPartition(subsystems=((0,),))])
 
 
@@ -120,23 +128,27 @@ def test_run_quasar_multiple_aggregates_statistics():
         3.0, 3.0, 3.0, 6.0,
     ]
     with patch("benchmarks.runner.time.perf_counter", side_effect=side_effect):
-        record = runner.run_quasar_multiple(None, scheduler, repetitions=3)
+        record = runner.run_quasar_multiple(
+            None, scheduler, repetitions=3, backend=Backend.TABLEAU
+        )
     assert len(runner.results) == 1
     assert runner.results[0] == record
     assert record["repetitions"] == 3
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
+    assert scheduler.plan_calls == [Backend.TABLEAU] * 3
+    assert scheduler.run_calls == [Backend.TABLEAU] * 3
 
 
 class PlannerErrorScheduler:
     def __init__(self):
         class Planner:
-            def plan(self, circuit):
+            def plan(self, circuit, *, backend=None):
                 raise RuntimeError("plan boom")
 
         self.planner = Planner()
 
-    def run(self, circuit):
+    def run(self, circuit, *, backend=None):
         return SSD([SSDPartition(subsystems=((0,),))])
 
 
@@ -151,12 +163,12 @@ def test_run_quasar_returns_failure_record_on_planner_error():
 class RunErrorScheduler:
     def __init__(self):
         class Planner:
-            def plan(self, circuit):
+            def plan(self, circuit, *, backend=None):
                 pass
 
         self.planner = Planner()
 
-    def run(self, circuit):
+    def run(self, circuit, *, backend=None):
         raise ValueError("run boom")
 
 
