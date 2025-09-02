@@ -59,5 +59,18 @@ class OptionalBackendTests(unittest.TestCase):
         else:
             self.skipTest('MQT DD support not built')
 
+    def test_tableau_to_statevector(self):
+        eng = qc.ConversionEngine()
+        if hasattr(eng, 'tableau_to_statevector') and hasattr(qc, 'StimTableau'):
+            import stim
+            import numpy as np
+            circuit_text = 'H 0\nCX 0 1\nS 1\n'
+            tab = qc.StimTableau.from_circuit(circuit_text)
+            vec_cpp = eng.tableau_to_statevector(tab)
+            vec_stim = stim.Tableau.from_circuit(stim.Circuit(circuit_text)).to_state_vector(endian='little')
+            np.testing.assert_allclose(vec_cpp, vec_stim, atol=1e-6)
+        else:
+            self.skipTest('Stim support not built')
+
 if __name__ == '__main__':
     unittest.main()

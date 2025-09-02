@@ -17,6 +17,7 @@ try:  # pragma: no cover - exercised when the extension is available
         Primitive,
         ConversionResult,
         StnTensor,
+        StimTableau,
         ConversionEngine as _CEngine,
     )
 
@@ -104,6 +105,12 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.convert_boundary_to_tableau(*args, **kwargs)
 
+        if hasattr(_CEngine, "tableau_to_statevector"):
+
+            def tableau_to_statevector(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.tableau_to_statevector(*args, **kwargs)
+
         if hasattr(_CEngine, "convert_boundary_to_dd"):
 
             def convert_boundary_to_dd(self, *args, **kwargs):  # type: ignore[override]
@@ -134,6 +141,7 @@ try:  # pragma: no cover - exercised when the extension is available
         "Primitive",
         "ConversionResult",
         "StnTensor",
+        "StimTableau",
         "ConversionEngine",
     ]
 except Exception:  # pragma: no cover - exercised when extension missing
