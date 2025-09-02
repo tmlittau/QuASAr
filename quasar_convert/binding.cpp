@@ -83,6 +83,14 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("try_build_tableau", &quasar::ConversionEngine::try_build_tableau)
         .def("learn_stabilizer", &quasar::ConversionEngine::learn_stabilizer)
 #endif
+#if defined(QUASAR_USE_MQT) && defined(QUASAR_USE_STIM)
+        .def("tableau_to_dd",
+             [](quasar::ConversionEngine& eng, const quasar::StimTableau& tab) {
+                 auto edge = eng.tableau_to_dd(tab);
+                 std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(edge.p);
+                 return py::make_tuple(tab.num_qubits, ptr);
+             })
+#endif
 #ifdef QUASAR_USE_MQT
         .def("convert_boundary_to_dd", [](quasar::ConversionEngine& eng, const quasar::SSD& ssd) {
             // Expose the decision diagram edge as a lightweight handle.  A

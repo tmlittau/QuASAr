@@ -128,6 +128,13 @@ class ConversionEngine {
                                                             std::size_t chi = 0) const;
 #endif
 
+#if defined(QUASAR_USE_MQT) && defined(QUASAR_USE_STIM)
+    // Convert a stabilizer tableau into a decision diagram representation by
+    // first materialising the corresponding statevector and then ingesting it
+    // into the DD package.
+    dd::vEdge tableau_to_dd(const StimTableau& tableau) const;
+#endif
+
 #ifdef QUASAR_USE_STIM
     StimTableau convert_boundary_to_tableau(const SSD& ssd) const;
     // Convert a stabilizer tableau into a dense statevector.  The returned

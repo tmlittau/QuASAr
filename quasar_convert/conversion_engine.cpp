@@ -6,6 +6,9 @@
 #include <complex>
 #include <vector>
 #include <random>
+#ifdef QUASAR_USE_MQT
+#include <dd/StateGeneration.hpp>
+#endif
 
 namespace quasar {
 
@@ -380,6 +383,21 @@ ConversionEngine::dd_to_mps(const dd::vEdge& edge, std::size_t chi) const {
     }
 
     return tensors;
+}
+#endif
+
+#if defined(QUASAR_USE_MQT) && defined(QUASAR_USE_STIM)
+dd::vEdge ConversionEngine::tableau_to_dd(const StimTableau& tableau) const {
+    // Produce a dense statevector for the tableau and construct a decision
+    // diagram representing the same amplitudes.
+    auto vec = tableau_to_statevector(tableau);
+    dd::CVec dd_vec;
+    dd_vec.reserve(vec.size());
+    for (const auto& amp : vec) {
+        dd_vec.emplace_back(static_cast<dd::fp>(amp.real()),
+                            static_cast<dd::fp>(amp.imag()));
+    }
+    return dd::makeStateFromVector(dd_vec, *dd_pkg);
 }
 #endif
 
