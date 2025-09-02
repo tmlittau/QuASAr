@@ -68,6 +68,13 @@ class BackendAdapter:
                 backend.apply_gate(name, qubits, params)
 
             if not return_state:
+                try:
+                    backend.statevector()  # type: ignore[call-arg]
+                except Exception:
+                    try:
+                        backend.extract_ssd()
+                    except Exception:
+                        pass
                 return backend
 
             try:
