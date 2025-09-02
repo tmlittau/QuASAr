@@ -92,6 +92,86 @@ def ripple_carry_modular_circuit(
     return Circuit.from_qiskit(qc)
 
 
+def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") -> Circuit:
+    """Construct repeated stabiliser-measurement cycles for simple error-correction codes.
+
+    Parameters
+    ----------
+    distance:
+        Code distance determining the number of data qubits.
+    rounds:
+        Number of stabiliser-measurement rounds to repeat.
+    scheme:
+        ``"surface"`` arranges qubits on a 2-D square lattice while ``"repetition"``
+        uses a 1-D chain.
+
+    Returns
+    -------
+    Circuit
+        Circuit implementing ``rounds`` cycles of parity-check measurements.
+    """
+
+    if distance <= 0 or rounds <= 0:
+        return Circuit([])
+
+    scheme = scheme.lower()
+    if scheme == "repetition":
+        data_count = distance
+        anc_count = distance - 1
+        total_qubits = data_count + anc_count
+        qc = QuantumCircuit(total_qubits, anc_count * rounds)
+        for r in range(rounds):
+            for i in range(anc_count):
+                anc = data_count + i
+                left = i
+                right = i + 1
+                qc.cx(left, anc)
+                qc.cx(right, anc)
+                qc.measure(anc, r * anc_count + i)
+    else:  # surface code
+        d = distance
+        data_count = d * d
+        horiz = d * (d - 1)
+        vert = d * (d - 1)
+        anc_count = horiz + vert
+        total_qubits = data_count + anc_count
+        qc = QuantumCircuit(total_qubits, anc_count * rounds)
+
+        def data_index(row: int, col: int) -> int:
+            return row * d + col
+
+        anc_start = data_count
+        for r in range(rounds):
+            a_offset = 0
+            # Horizontal parity checks
+            for row in range(d):
+                for col in range(d - 1):
+                    anc = anc_start + a_offset
+                    a_offset += 1
+                    q1 = data_index(row, col)
+                    q2 = data_index(row, col + 1)
+                    qc.h(anc)
+                    qc.cz(anc, q1)
+                    qc.cz(anc, q2)
+                    qc.h(anc)
+                    qc.measure(anc, r * anc_count + (a_offset - 1))
+            # Vertical parity checks
+            for row in range(d - 1):
+                for col in range(d):
+                    anc = anc_start + a_offset
+                    a_offset += 1
+                    q1 = data_index(row, col)
+                    q2 = data_index(row + 1, col)
+                    qc.h(anc)
+                    qc.cz(anc, q1)
+                    qc.cz(anc, q2)
+                    qc.h(anc)
+                    qc.measure(anc, r * anc_count + (a_offset - 1))
+
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t", "cz", "measure"])
+    return Circuit.from_qiskit(qc)
+
+
 def grover_with_oracle_circuit(
     n_qubits: int, oracle_depth: int, iterations: int = 1
 ) -> Circuit:
