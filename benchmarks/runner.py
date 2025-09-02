@@ -263,22 +263,44 @@ class BenchmarkRunner:
         prepare_time = 0.0
         prepare_peak_memory = 0
         run_peak_memory = 0
+        run_time = 0.0
+        result: Any | None = None
+
         tracemalloc.start()
-        if planner is not None:
-            start_prepare = time.perf_counter()
-            planner.plan(circuit)
-            prepare_time = time.perf_counter() - start_prepare
-            _, prepare_peak_memory = tracemalloc.get_traced_memory()
-            tracemalloc.reset_peak()
-        start_run = time.perf_counter()
-        result = scheduler.run(circuit)
         try:
-            result.extract_state(0)
-        except Exception:
-            pass
-        run_time = time.perf_counter() - start_run
-        _, run_peak_memory = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
+            if planner is not None:
+                start_prepare = time.perf_counter()
+                planner.plan(circuit)
+                prepare_time = time.perf_counter() - start_prepare
+                _, prepare_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.reset_peak()
+
+            start_run = time.perf_counter()
+            result = scheduler.run(circuit)
+            try:
+                result.extract_state(0)
+            except Exception:
+                pass
+            run_time = time.perf_counter() - start_run
+            _, run_peak_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        except Exception as exc:  # pragma: no cover - exercised in tests
+            _, run_peak_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            record = {
+                "framework": "quasar",
+                "prepare_time": prepare_time,
+                "run_time": run_time,
+                "total_time": prepare_time + run_time,
+                "prepare_peak_memory": prepare_peak_memory,
+                "run_peak_memory": run_peak_memory,
+                "result": result,
+                "failed": True,
+                "error": str(exc),
+            }
+            self.results.append(record)
+            return record
+
         record = {
             "framework": "quasar",
             "prepare_time": prepare_time,
@@ -287,6 +309,7 @@ class BenchmarkRunner:
             "prepare_peak_memory": prepare_peak_memory,
             "run_peak_memory": run_peak_memory,
             "result": result,
+            "failed": False,
         }
         self.results.append(record)
         return record
@@ -351,7 +374,7 @@ class BenchmarkRunner:
                 break
 
         if not records:
-            raise RuntimeError("no runs executed")
+            raise RuntimeError(f"no runs executed: {failures}")
 
         summary: Dict[str, Any] = {
             "framework": "quasar",
