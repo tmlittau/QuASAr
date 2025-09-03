@@ -38,6 +38,7 @@ def test_run_multiple_aggregates_statistics():
     assert record["repetitions"] == 3
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
+    assert record["backend"] == "dummy"
 
 
 class SleepBackend:
@@ -62,6 +63,7 @@ def test_run_multiple_timeout_records_failure():
     assert "failed_runs" in record and len(record["failed_runs"]) == 1
     assert "timed out" in record["failed_runs"][0]
     assert "comment" in record and "excluded" in record["comment"]
+    assert record["backend"] == "sleep"
 
 
 class FlakyBackend:
@@ -97,6 +99,7 @@ def test_run_multiple_skips_failed_runs():
     assert "comment" in record and "excluded" in record["comment"]
     assert record["run_time_mean"] == 2.0
     assert record["run_time_std"] == 1.0
+    assert record["backend"] == "flaky"
 
 
 class UnsupportedBackend:
@@ -113,6 +116,7 @@ def test_run_multiple_records_unsupported():
     assert record["repetitions"] == 0
     assert "nyi" in record["comment"]
     assert record["framework"] == "unsupported"
+    assert record["backend"] == "unsupported"
 
 
 class DummyScheduler:

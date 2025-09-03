@@ -121,6 +121,88 @@ class StimAdapter(BackendAdapter):
 
     def __init__(self) -> None:
         super().__init__(name="stim", backend_cls=StimBackend)
+        self._backend: StimBackend | None = None
+
+    # ------------------------------------------------------------------
+    def load(self, num_qubits: int, **kwargs: Any) -> None:
+        """Initialise the underlying :class:`StimBackend`."""
+
+        self._backend = self.backend_cls()
+        self._backend.load(num_qubits, **kwargs)
+
+    def prepare_benchmark(self, circuit: Circuit | None = None) -> None:
+        """Enable benchmark mode so gate applications are deferred."""
+
+        if self._backend is None and circuit is not None:
+            self.load(circuit.num_qubits)
+        if self._backend is not None:
+            self._backend.prepare_benchmark(circuit)
+
+    def apply_gate(
+        self,
+        name: str,
+        qubits: Sequence[int],
+        params: Dict[str, float] | None = None,
+    ) -> None:
+        if self._backend is None:
+            raise RuntimeError("backend not initialised; call 'load' first")
+        self._backend.apply_gate(name, qubits, params)
+
+    def _extract_state(self, backend: StimBackend, *, statevector: bool) -> Any:
+        if statevector:
+            try:
+                return backend.statevector()
+            except Exception:
+                try:
+                    return backend.extract_ssd()
+                except Exception:
+                    return None
+        try:
+            return backend.extract_ssd()
+        except Exception:
+            try:
+                return backend.statevector()
+            except Exception:
+                return None
+
+    def run_benchmark(
+        self,
+        *,
+        return_state: bool = True,
+        statevector: bool = False,
+    ) -> Any:
+        if self._backend is None:
+            raise RuntimeError("backend not initialised; call 'load' first")
+        self._backend.run()
+        if not return_state:
+            self._extract_state(self._backend, statevector=statevector)
+            return self._backend
+        return self._extract_state(self._backend, statevector=statevector)
+
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        circuit: Any,
+        *,
+        return_state: bool = True,
+        statevector: bool = False,
+    ) -> Any:
+        if self.defer_build:
+            if isinstance(circuit, Circuit):
+                num_qubits, ops = self.prepare(circuit)
+            else:
+                num_qubits, ops = circuit  # type: ignore[misc]
+            backend = self.backend_cls()
+            backend.load(num_qubits)
+            for name, qubits, params in ops:
+                backend.apply_gate(name, qubits, params)
+        else:
+            backend = circuit if not isinstance(circuit, Circuit) else self.prepare(circuit)
+
+        if not return_state:
+            self._extract_state(backend, statevector=statevector)
+            return backend
+        return self._extract_state(backend, statevector=statevector)
 
 
 class MPSAdapter(BackendAdapter):
