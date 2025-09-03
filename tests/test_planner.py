@@ -102,5 +102,7 @@ def test_conversion_cost_multiplier_discourages_switch():
         conversion_cost_multiplier=5.0,
     )
     steps2 = penalized.plan(circ).steps
-    assert len(steps2) == 1
-    assert (steps2[0].start, steps2[0].end) == (0, 3)
+    assert [(s.start, s.end, s.backend) for s in steps2] == [
+        (0, 2, Backend.TABLEAU),
+        (2, 3, Backend.STATEVECTOR),
+    ]

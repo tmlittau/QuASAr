@@ -199,23 +199,30 @@ class Partitioner:
 
         names = [g.gate.upper() for g in gates]
         num_gates = len(gates)
+
         if all(name in CLIFFORD_GATES for name in names):
             backend = Backend.TABLEAU
             cost = self.estimator.tableau(num_qubits, num_gates)
+            return backend, cost
+
+        if num_qubits < 20:
+            backend = Backend.STATEVECTOR
+            cost = self.estimator.statevector(num_qubits, num_gates)
             return backend, cost
 
         multi = [g for g in gates if len(g.qubits) > 1]
         local = multi and all(
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
+
+        if num_gates <= 2 ** num_qubits and not local:
+            backend = Backend.DECISION_DIAGRAM
+            cost = self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+            return backend, cost
+
         if local:
             backend = Backend.MPS
             cost = self.estimator.mps(num_qubits, num_gates, chi=4)
-            return backend, cost
-
-        if num_gates <= 2 ** num_qubits:
-            backend = Backend.DECISION_DIAGRAM
-            cost = self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
             return backend, cost
 
         backend = Backend.STATEVECTOR

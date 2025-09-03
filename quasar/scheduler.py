@@ -8,8 +8,9 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
 
-from .planner import Planner, PlanStep, _supported_backends, _simulation_cost
-from .cost import Backend, Cost, CostEstimator
+from .planner import Planner, PlanStep
+from .partitioner import CLIFFORD_GATES
+from .cost import Backend, Cost
 from . import config
 from .circuit import Circuit
 from .ssd import SSD, ConversionLayer, SSDPartition
@@ -58,16 +59,6 @@ class Scheduler:
                 Backend.DECISION_DIAGRAM: DecisionDiagramBackend(),
             }
 
-    def _backend_rank(self, backend: Backend) -> int:
-        try:
-            return self.backend_order.index(backend)
-        except ValueError:
-            return len(self.backend_order)
-
-    def _order_backends(self, backends: List[Backend]) -> List[Backend]:
-        return sorted(backends, key=self._backend_rank)
-
-    # ------------------------------------------------------------------
     def should_use_quick_path(
         self, circuit: Circuit, *, backend: Backend | None = None
     ) -> bool:
@@ -138,14 +129,25 @@ class Scheduler:
         if not self.should_use_quick_path(circuit):
             return None
 
+        names = [g.gate.upper() for g in circuit.gates]
         num_qubits = circuit.num_qubits
         num_gates = len(circuit.gates)
-        estimator = CostEstimator()
-        candidates: List[tuple[Backend, Cost]] = []
-        for b in self._order_backends(_supported_backends(circuit.gates)):
-            cost = _simulation_cost(estimator, b, num_qubits, num_gates)
-            candidates.append((b, cost))
-        return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))[0]
+
+        if names and all(name in CLIFFORD_GATES for name in names):
+            return Backend.TABLEAU
+        if num_qubits < 20:
+            return Backend.STATEVECTOR
+
+        multi = [g for g in circuit.gates if len(g.qubits) > 1]
+        local = multi and all(
+            len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
+        )
+
+        if num_gates <= 2 ** num_qubits and not local:
+            return Backend.DECISION_DIAGRAM
+        if local:
+            return Backend.MPS
+        return Backend.STATEVECTOR
 
     # ------------------------------------------------------------------
     def run(
