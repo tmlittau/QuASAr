@@ -263,7 +263,7 @@ class BenchmarkRunner:
 
         summary: Dict[str, Any] = {
             "framework": backend_name,
-            "backend": backend_name,
+            "backend": records[0].get("backend", backend_name),
             "repetitions": len(records),
         }
         if failures:
