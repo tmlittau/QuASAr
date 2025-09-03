@@ -21,7 +21,6 @@ from typing import Any, Callable, Dict, List
 import time
 import tracemalloc
 import statistics
-import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
@@ -66,8 +65,6 @@ class BenchmarkRunner:
         Backends that raise :class:`NotImplementedError` are classified as
         "unsupported" and reported accordingly without counting as failures.
         """
-
-        logger = logging.getLogger(__name__)
 
         prepare_time = 0.0
         prepare_peak_memory = 0
@@ -128,12 +125,6 @@ class BenchmarkRunner:
         except Exception as exc:  # pragma: no cover - exercised in tests
             _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
-            logger.exception(
-                "Error running circuit %s on backend %s: %s",
-                getattr(circuit, "name", str(circuit)),
-                getattr(backend, "name", backend.__class__.__name__),
-                exc,
-            )
             record = {
                 "framework": getattr(backend, "name", backend.__class__.__name__),
                 "prepare_time": prepare_time,
