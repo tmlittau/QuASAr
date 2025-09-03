@@ -149,7 +149,12 @@ def _better(a: Cost, b: Cost) -> bool:
 
 
 def _supported_backends(gates: Iterable[Gate]) -> List[Backend]:
-    """Determine which backends can simulate a gate sequence."""
+    """Determine which backends can simulate a gate sequence.
+
+    The function now exposes general-purpose backends even for Clifford-only
+    circuits while still listing :class:`Backend.TABLEAU` first to indicate the
+    preferred specialised simulator.
+    """
 
     gates = list(gates)
     names = [g.gate.upper() for g in gates]
@@ -157,19 +162,21 @@ def _supported_backends(gates: Iterable[Gate]) -> List[Backend]:
     qubits = {q for g in gates for q in g.qubits}
     num_qubits = len(qubits)
 
-    # --- Clifford only ---
-    if names and all(name in CLIFFORD_GATES for name in names):
-        return [Backend.TABLEAU]
+    candidates: List[Backend] = []
+
+    clifford = names and all(name in CLIFFORD_GATES for name in names)
+    if clifford:
+        candidates.append(Backend.TABLEAU)
 
     if num_qubits < 20:
-        return [Backend.STATEVECTOR]
+        candidates.append(Backend.STATEVECTOR)
+        return candidates
 
     multi = [g for g in gates if len(g.qubits) > 1]
     local = multi and all(
         len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
     )
 
-    candidates: List[Backend] = []
     if num_gates <= 2 ** num_qubits and not local:
         candidates.append(Backend.DECISION_DIAGRAM)
     if local:
@@ -271,7 +278,7 @@ class Planner:
             return len(self.backend_order)
 
     def _order_backends(self, backends: List[Backend]) -> List[Backend]:
-        return sorted(backends, key=self._backend_rank)
+        return sorted(backends, key=lambda b: (b != Backend.TABLEAU, self._backend_rank(b)))
 
     # ------------------------------------------------------------------
     def _dp(
@@ -456,7 +463,10 @@ class Planner:
 
         The planner stores previously computed plans in an in-memory cache
         keyed by the circuit's gate sequence.  Subsequent calls for an
-        identical gate sequence will reuse the cached result.
+        identical gate sequence will reuse the cached result.  When a
+        ``backend`` is supplied the entire circuit is executed on that
+        backend, provided it can simulate the gates (only the Tableau backend
+        is restricted to Clifford circuits).
         """
 
         gates = circuit.gates
@@ -473,9 +483,13 @@ class Planner:
         depth = circuit.depth
 
         if backend is not None:
-            supported = _supported_backends(gates)
-            if backend not in supported:
-                raise ValueError(f"Backend {backend} unsupported for given circuit")
+            # Allow explicitly requested backends as long as they can simulate the
+            # circuit.  Only Tableau has restrictions (it requires a Clifford
+            # circuit).
+            if backend == Backend.TABLEAU:
+                names = [g.gate.upper() for g in gates]
+                if names and not all(name in CLIFFORD_GATES for name in names):
+                    raise ValueError(f"Backend {backend} unsupported for given circuit")
             cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
             if threshold is not None and cost.memory > threshold:
                 raise ValueError("Requested backend exceeds memory threshold")

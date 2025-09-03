@@ -47,7 +47,9 @@ tensors, a ``stim.Tableau`` or a decision diagram node.
 The :func:`SimulationEngine.simulate` method accepts an optional ``backend``
 argument to explicitly choose the simulation backend (e.g.,
 ``Backend.TABLEAU`` for Clifford circuits).  When omitted, the planner selects a
-backend automatically based on estimated cost.
+backend automatically based on estimated cost.  Clifford circuits default to
+the specialised TABLEAU backend, though a general-purpose backend like
+``Backend.STATEVECTOR`` can be requested explicitly.
 If the circuit is small enough to satisfy the quick-path thresholds
 described below, this selection degenerates to running the whole circuit on
 a single backend.  Skipping partitioning and scheduling avoids overhead and
