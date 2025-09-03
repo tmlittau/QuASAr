@@ -63,12 +63,13 @@ class DecisionDiagramBackend(Backend):
         self, name: str, qubits: Sequence[int], params: Sequence[float]
     ) -> operations.Operation:
         name_l = self._ALIASES.get(name.upper(), name.lower())
-        if name_l.startswith("c") and len(name_l) == 2:
-            # simple single-control gate like CX, CZ, CY
-            control = operations.Control(qubits[0])
-            target = qubits[1]
-            op_type = getattr(operations.OpType, name_l[1:])
-            return operations.StandardOperation({control}, target, op_type, list(params))
+        if name_l.startswith("c"):
+            base = name_l[1:]
+            if hasattr(operations.OpType, base):
+                control = operations.Control(qubits[0])
+                target = qubits[1]
+                op_type = getattr(operations.OpType, base)
+                return operations.StandardOperation({control}, target, op_type, list(params))
         op_type = getattr(operations.OpType, name_l)
         return operations.StandardOperation(list(qubits), op_type, list(params))
 
@@ -88,7 +89,13 @@ class DecisionDiagramBackend(Backend):
         if not isinstance(self.state, dd.VectorDD):
             raise TypeError("Backend state is not a VectorDD")
 
-        op = self._standard_operation(name, qubits, list(params.values()) if params else [])
+        lname = name.upper()
+        if lname == "CP" and params and "k" in params:
+            theta = 2 * np.pi / (2 ** float(params["k"]))
+            param_list = [theta]
+        else:
+            param_list = list(params.values()) if params else []
+        op = self._standard_operation(name, qubits, param_list)
         new_state = self.package.apply_unitary_operation(self.state, op)
         self.package.inc_ref_vec(new_state)
         self.package.dec_ref_vec(self.state)
