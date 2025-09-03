@@ -33,3 +33,18 @@ def test_plot_quasar_vs_baseline_best_annotations():
     assert "mps" in texts
     assert "sv" in texts
     assert len(ax.lines) == 2
+
+
+def test_compute_baseline_best_handles_unsupported():
+    df = sample_df()
+    df.loc[df["framework"] == "sv", "unsupported"] = True
+    best = compute_baseline_best(df)
+    assert set(best["circuit"]) == {"c1"}
+
+
+def test_plot_marks_unsupported():
+    df = sample_df()
+    df.loc[df["framework"] == "sv", "unsupported"] = True
+    ax = plot_quasar_vs_baseline_best(df)
+    legend_labels = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert "not supported" in legend_labels

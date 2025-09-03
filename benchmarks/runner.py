@@ -61,7 +61,11 @@ class BenchmarkRunner:
 
     # ------------------------------------------------------------------
     def run(self, circuit: Any, backend: Any, **kwargs: Any) -> Dict[str, Any]:
-        """Execute ``circuit`` on ``backend`` and record runtime and memory."""
+        """Execute ``circuit`` on ``backend`` and record runtime and memory.
+
+        Backends that raise :class:`NotImplementedError` are classified as
+        "unsupported" and reported accordingly without counting as failures.
+        """
 
         logger = logging.getLogger(__name__)
 
@@ -104,6 +108,23 @@ class BenchmarkRunner:
                 run_time = time.perf_counter() - start_run
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
+        except NotImplementedError as exc:
+            _, run_peak_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            record = {
+                "framework": getattr(backend, "name", backend.__class__.__name__),
+                "prepare_time": prepare_time,
+                "run_time": run_time,
+                "total_time": prepare_time + run_time,
+                "prepare_peak_memory": prepare_peak_memory,
+                "run_peak_memory": run_peak_memory,
+                "result": result,
+                "failed": False,
+                "unsupported": True,
+                "error": str(exc),
+            }
+            self.results.append(record)
+            return record
         except Exception as exc:  # pragma: no cover - exercised in tests
             _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
@@ -174,7 +195,9 @@ class BenchmarkRunner:
         Dict[str, Any]
             Mapping containing mean and standard deviation for each recorded
             metric.  Individual run results are not retained in
-            :attr:`results` – only the aggregated statistics are stored.
+            :attr:`results` – only the aggregated statistics are stored.  If
+            the backend reports as unsupported, the returned record contains an
+            ``unsupported`` flag and no metrics.
         """
 
         metrics = [
@@ -186,6 +209,7 @@ class BenchmarkRunner:
         ]
         records: List[Dict[str, Any]] = []
         failures: List[str] = []
+        unsupported_comment: str | None = None
 
         def _run_once() -> Dict[str, Any]:
             rec = self.run(circuit, backend, **kwargs)
@@ -216,6 +240,9 @@ class BenchmarkRunner:
                     failures.append(f"run {i + 1} failed: {exc}")
                     continue
 
+            if rec.get("unsupported"):
+                unsupported_comment = rec.get("error", "backend not supported")
+                break
             if rec.get("failed"):
                 failures.append(
                     f"run {i + 1} failed: {rec.get('error', 'unknown error')}"
@@ -226,6 +253,15 @@ class BenchmarkRunner:
             if timeout is not None and (time.perf_counter() - start) > timeout:
                 break
 
+        if unsupported_comment is not None:
+            summary = {
+                "framework": getattr(backend, "name", backend.__class__.__name__),
+                "repetitions": 0,
+                "unsupported": True,
+                "comment": unsupported_comment,
+            }
+            self.results.append(summary)
+            return summary
         if not records:
             raise RuntimeError("no runs executed")
 
