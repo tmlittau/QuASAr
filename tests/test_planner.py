@@ -14,6 +14,18 @@ def test_tableau_for_clifford():
     assert (step.start, step.end, step.backend) == (0, 2, Backend.TABLEAU)
 
 
+def test_explicit_statevector_for_clifford():
+    gates = [
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [0]},
+    ]
+    circ = Circuit.from_dict(gates)
+    result = Planner().plan(circ, backend=Backend.STATEVECTOR)
+    steps = result.steps
+    assert len(steps) == 1
+    assert steps[0].backend == Backend.STATEVECTOR
+
+
 def test_split_and_recover():
     gates = [
         {"gate": "CX", "qubits": [0, 1]},
@@ -103,6 +115,6 @@ def test_conversion_cost_multiplier_discourages_switch():
     )
     steps2 = penalized.plan(circ).steps
     assert [(s.start, s.end, s.backend) for s in steps2] == [
-        (0, 2, Backend.TABLEAU),
+        (0, 2, Backend.STATEVECTOR),
         (2, 3, Backend.STATEVECTOR),
     ]
