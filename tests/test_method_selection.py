@@ -12,7 +12,7 @@ def test_clifford_tableau_selection():
     assert part.backend == Backend.TABLEAU
 
 
-def test_local_mps_selection():
+def test_small_statevector_selection():
     gates = [
         {"gate": "T", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
@@ -21,14 +21,12 @@ def test_local_mps_selection():
     ]
     circ = Circuit.from_dict(gates)
     part = circ.ssd.partitions[0]
-    assert part.backend == Backend.MPS
+    assert part.backend == Backend.STATEVECTOR
 
 
 def test_sparse_dd_selection():
     gates = [
-        {"gate": "T", "qubits": [0]},
-        {"gate": "CX", "qubits": [0, 2]},
-        {"gate": "T", "qubits": [2]},
+        {"gate": "T", "qubits": list(range(20))},
     ]
     circ = Circuit.from_dict(gates)
     part = circ.ssd.partitions[0]
@@ -88,19 +86,14 @@ def test_partition_multiple_backends():
     circ = Circuit.from_dict(gates)
     groups = circ.ssd.by_backend()
 
-    assert set(groups.keys()) == {
-        Backend.TABLEAU,
-        Backend.MPS,
-        Backend.DECISION_DIAGRAM,
-    }
+    assert set(groups.keys()) == {Backend.TABLEAU, Backend.STATEVECTOR}
 
     tableau = groups[Backend.TABLEAU][0]
     assert tableau.multiplicity == 2
     assert set(tableau.qubits) == {0, 1, 2, 3}
 
-    mps = groups[Backend.MPS][0]
-    assert set(mps.qubits) == {4, 5, 6}
-
-    dd = groups[Backend.DECISION_DIAGRAM][0]
-    assert set(dd.qubits) == {7, 9}
+    state_parts = groups[Backend.STATEVECTOR]
+    assert any({4, 5, 6}.issubset(set(p.qubits)) for p in state_parts)
+    assert any({7, 9}.issubset(set(p.qubits)) for p in state_parts)
+    assert any({10, 12}.issubset(set(p.qubits)) for p in state_parts)
 

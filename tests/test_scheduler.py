@@ -144,7 +144,7 @@ def test_scheduler_uses_non_dense_primitive():
     )
     circuit = build_switch_circuit_rz()
     scheduler.run(circuit)
-    assert engine.local_windows == 1
+    assert engine.local_windows == 0
     assert engine.dense_calls == 0
 
 
@@ -258,19 +258,19 @@ def test_parallel_execution_on_independent_subcircuits():
         {"gate": "H", "qubits": [1]},
     ])
     scheduler_p = Scheduler(
-        backends={Backend.DECISION_DIAGRAM: SleepBackend()},
+        backends={Backend.STATEVECTOR: SleepBackend()},
         planner=Planner(),
         quick_max_qubits=None,
         quick_max_gates=None,
         quick_max_depth=None,
-        parallel_backends=[Backend.DECISION_DIAGRAM],
+        parallel_backends=[Backend.STATEVECTOR],
     )
     start = time.time()
     scheduler_p.run(circuit)
     parallel_duration = time.time() - start
 
     scheduler_s = Scheduler(
-        backends={Backend.DECISION_DIAGRAM: SleepBackend()},
+        backends={Backend.STATEVECTOR: SleepBackend()},
         planner=Planner(),
         quick_max_qubits=None,
         quick_max_gates=None,
@@ -346,19 +346,14 @@ def test_partition_histories_multiple_backends():
         {"gate": "T", "qubits": [9]},
     ])
     groups = circuit.ssd.by_backend()
-    assert set(groups.keys()) == {
-        Backend.TABLEAU,
-        Backend.MPS,
-        Backend.DECISION_DIAGRAM,
-    }
+    assert set(groups.keys()) == {Backend.TABLEAU, Backend.STATEVECTOR}
     tableau = groups[Backend.TABLEAU][0]
     assert tableau.multiplicity == 2
     assert set(tableau.qubits) == {0, 1, 2, 3}
     assert tableau.history == ("H", "CX", "S")
-    mps_histories = [p.history for p in groups[Backend.MPS]]
-    assert ("T", "CX", "T", "CX", "T") in mps_histories
-    dd = groups[Backend.DECISION_DIAGRAM][0]
-    assert dd.history == ("CX", "T")
+    state_histories = [p.history for p in groups[Backend.STATEVECTOR]]
+    assert ("T", "CX", "T", "CX", "T") in state_histories
+    assert ("T", "CX", "T") in state_histories
 
 
 class B2BFallbackEngine(ConversionEngine):

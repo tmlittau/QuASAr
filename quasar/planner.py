@@ -161,21 +161,19 @@ def _supported_backends(gates: Iterable[Gate]) -> List[Backend]:
     if names and all(name in CLIFFORD_GATES for name in names):
         return [Backend.TABLEAU]
 
-    candidates: List[Backend] = []
+    if num_qubits < 20:
+        return [Backend.STATEVECTOR]
 
-    # --- Local multi-qubit gates for MPS ---
     multi = [g for g in gates if len(g.qubits) > 1]
     local = multi and all(
         len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
     )
+
+    candidates: List[Backend] = []
+    if num_gates <= 2 ** num_qubits and not local:
+        candidates.append(Backend.DECISION_DIAGRAM)
     if local:
         candidates.append(Backend.MPS)
-
-    # --- Decision diagrams when gate count is small ---
-    if num_gates <= 2 ** num_qubits:
-        candidates.append(Backend.DECISION_DIAGRAM)
-
-    # --- Statevector backend always available ---
     candidates.append(Backend.STATEVECTOR)
 
     return candidates
