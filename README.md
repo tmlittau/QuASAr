@@ -46,10 +46,26 @@ tensors, a ``stim.Tableau`` or a decision diagram node.
 
 The :func:`SimulationEngine.simulate` method accepts an optional ``backend``
 argument to explicitly choose the simulation backend (e.g.,
-``Backend.TABLEAU`` for Clifford circuits).  When omitted, the planner selects a
-backend automatically based on estimated cost.  Clifford circuits default to
-the specialised TABLEAU backend, though a general-purpose backend like
+``Backend.TABLEAU`` for Clifford circuits).  When ``backend`` is ``None`` (the
+default), the planner selects a backend automatically based on estimated cost.
+Supplying a :class:`~quasar.cost.Backend` instance fixes the simulator choice
+and disables this automatic selection.  Clifford circuits default to the
+specialised TABLEAU backend, though a general-purpose backend like
 ``Backend.STATEVECTOR`` can be requested explicitly.
+
+```python
+from quasar import Backend, Circuit, SimulationEngine
+
+circ = Circuit([
+    {"gate": "H", "qubits": [0]},
+    {"gate": "CX", "qubits": [0, 1]},
+])
+engine = SimulationEngine()
+
+auto = engine.simulate(circ, backend=None)               # automatic selection
+forced = engine.simulate(circ, backend=Backend.STATEVECTOR)  # explicit override
+print(auto.plan.final_backend, forced.plan.final_backend)
+```
 If the circuit is small enough to satisfy the quick-path thresholds
 described below, this selection degenerates to running the whole circuit on
 a single backend.  Skipping partitioning and scheduling avoids overhead and
