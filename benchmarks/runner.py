@@ -244,9 +244,11 @@ class BenchmarkRunner:
             if timeout is not None and (time.perf_counter() - start) > timeout:
                 break
 
+        backend_name = getattr(backend, "name", backend.__class__.__name__)
         if unsupported_comment is not None:
             summary = {
-                "framework": getattr(backend, "name", backend.__class__.__name__),
+                "framework": backend_name,
+                "backend": backend_name,
                 "repetitions": 0,
                 "unsupported": True,
                 "comment": unsupported_comment,
@@ -257,7 +259,8 @@ class BenchmarkRunner:
             raise RuntimeError("no runs executed")
 
         summary: Dict[str, Any] = {
-            "framework": getattr(backend, "name", backend.__class__.__name__),
+            "framework": backend_name,
+            "backend": backend_name,
             "repetitions": len(records),
         }
         if failures:
