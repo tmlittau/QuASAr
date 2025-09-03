@@ -34,6 +34,8 @@ def compute_baseline_best(
         raise ValueError("results DataFrame is empty")
 
     baselines = df[df["framework"] != "quasar"]
+    if "unsupported" in baselines.columns:
+        baselines = baselines[~baselines["unsupported"].fillna(False)]
     if baselines.empty:
         raise ValueError("no baseline entries in results")
 
@@ -79,6 +81,10 @@ def plot_quasar_vs_baseline_best(
 
     baseline_best = compute_baseline_best(df, metrics=[metric])
     quasar = df[df["framework"] == "quasar"]
+    if "unsupported" in df.columns:
+        unsupported = df[df["unsupported"].fillna(False)]
+    else:
+        unsupported = df.iloc[0:0]
 
     x_col = "qubits" if "qubits" in df.columns else "circuit"
     ax.plot(
@@ -93,6 +99,14 @@ def plot_quasar_vs_baseline_best(
         marker="o",
         label="QuASAr",
     )
+    if not unsupported.empty:
+        ax.scatter(
+            unsupported[x_col],
+            [0] * len(unsupported),
+            marker="x",
+            label="not supported",
+            color="red",
+        )
 
     if annotate_backend and "backend" in quasar.columns:
         for _, row in quasar.iterrows():
@@ -102,6 +116,7 @@ def plot_quasar_vs_baseline_best(
 
     ax.set_xlabel(x_col)
     ax.set_ylabel(metric.replace("_", " "))
+    ax.set_ylim(bottom=0)
     ax.legend()
     return ax
 

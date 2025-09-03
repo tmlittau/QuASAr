@@ -99,6 +99,22 @@ def test_run_multiple_skips_failed_runs():
     assert record["run_time_std"] == 1.0
 
 
+class UnsupportedBackend:
+    name = "unsupported"
+
+    def run(self, circuit, **_):
+        raise NotImplementedError("nyi")
+
+
+def test_run_multiple_records_unsupported():
+    runner = BenchmarkRunner()
+    record = runner.run_multiple(None, UnsupportedBackend(), repetitions=3)
+    assert record["unsupported"] is True
+    assert record["repetitions"] == 0
+    assert "nyi" in record["comment"]
+    assert record["framework"] == "unsupported"
+
+
 class DummyScheduler:
     def __init__(self):
         self.plan_calls = []
