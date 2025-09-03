@@ -110,6 +110,7 @@ class BenchmarkRunner:
             tracemalloc.stop()
             record = {
                 "framework": getattr(backend, "name", backend.__class__.__name__),
+                "backend": getattr(backend, "name", backend.__class__.__name__),
                 "prepare_time": prepare_time,
                 "run_time": run_time,
                 "total_time": prepare_time + run_time,
@@ -127,6 +128,7 @@ class BenchmarkRunner:
             tracemalloc.stop()
             record = {
                 "framework": getattr(backend, "name", backend.__class__.__name__),
+                "backend": getattr(backend, "name", backend.__class__.__name__),
                 "prepare_time": prepare_time,
                 "run_time": run_time,
                 "total_time": prepare_time + run_time,
@@ -141,6 +143,7 @@ class BenchmarkRunner:
 
         record = {
             "framework": getattr(backend, "name", backend.__class__.__name__),
+            "backend": getattr(backend, "name", backend.__class__.__name__),
             "prepare_time": prepare_time,
             "run_time": run_time,
             "total_time": prepare_time + run_time,

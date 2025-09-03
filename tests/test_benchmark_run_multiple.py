@@ -222,9 +222,18 @@ def test_statevector_and_quasar_runtime_agree():
     circuit = ghz_circuit(3)
     runner = BenchmarkRunner()
 
-    direct = runner.run_multiple(circuit, StatevectorAdapter(), repetitions=3)
+    direct = runner.run_multiple(
+        circuit, StatevectorAdapter(), repetitions=3, statevector=False
+    )
     quasar = runner.run_quasar_multiple(
         circuit, SimulationEngine(), backend=Backend.STATEVECTOR, repetitions=3
     )
 
     assert abs(direct["run_time_mean"] - quasar["run_time_mean"]) < 0.01
+
+
+def test_statevector_adapter_returns_ssd():
+    circuit = ghz_circuit(2)
+    runner = BenchmarkRunner()
+    record = runner.run(circuit, StatevectorAdapter(), statevector=False)
+    assert isinstance(record["result"], SSD)
