@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Tuple
+import numpy as np
 
 from mqt.core import dd
 from mqt.core.ir import operations
@@ -120,7 +121,14 @@ class DecisionDiagramBackend(Backend):
         return SSD([part])
 
     # ------------------------------------------------------------------
-    def statevector(self) -> Sequence[complex]:
+    def statevector(self) -> np.ndarray:
+        """Return a dense statevector for the current decision diagram state."""
+
         self.run()
-        raise NotImplementedError("Statevector extraction not supported")
+        if self.package is None or self.state is None:
+            raise RuntimeError("Backend not initialised; call 'load' first")
+        if not isinstance(self.state, dd.VectorDD):
+            raise TypeError("Backend state is not a VectorDD")
+        vec = self.state.get_vector()
+        return np.array(vec, dtype=complex)
 
