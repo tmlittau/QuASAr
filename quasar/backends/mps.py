@@ -110,6 +110,12 @@ class MPSBackend(Backend):
                 self._param(params, 2),
             )
             self.circuit.append(gate, [qubits[0]])
+        elif lname == "CP":
+            k = float(params.get("k", 0)) if params else 0.0
+            theta = 2 * np.pi / (2 ** k)
+            self.circuit.cp(theta, qubits[0], qubits[1])
+        elif lname == "CRY":
+            self.circuit.cry(self._param(params, 0), qubits[0], qubits[1])
         else:
             method = getattr(self.circuit, lname.lower(), None)
             if method is None:

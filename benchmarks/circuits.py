@@ -32,11 +32,20 @@ def ghz_circuit(n_qubits: int) -> Circuit:
     return Circuit(gates)
 
 
+def _qft_spec(n: int) -> dict:
+    """Return a dictionary specification of the QFT circuit."""
+    gates = []
+    for i in reversed(range(n)):
+        gates.append({"qubits": [i], "gate": "H"})
+        for j, q in enumerate(reversed(range(0, i))):
+            gates.append({"qubits": [q, i], "gate": "CP", "params": {"k": j + 1}})
+    return {"n_qubits": n, "gates": gates}
+
+
 def qft_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
-    qc = QFT(n_qubits)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "swap", "h"])
-    return Circuit.from_qiskit(qc)
+    spec = _qft_spec(n_qubits)
+    return Circuit(spec["gates"])
 
 
 def qft_on_ghz_circuit(n_qubits: int) -> Circuit:
@@ -46,20 +55,22 @@ def qft_on_ghz_circuit(n_qubits: int) -> Circuit:
     return Circuit(list(ghz.gates) + list(qft.gates))
 
 
+def _w_state_spec(n: int) -> dict:
+    """Return a dictionary specification of a W state preparation circuit."""
+    gates = []
+    gates.append({"gate": "RY", "qubits": [0], "params": {"theta": 2 * math.acos(math.sqrt(1 / n))}})
+    for q in range(1, n - 1):
+        gates.append({"gate": "CRY", "qubits": [q - 1, q], "params": {"theta": 2 * math.acos(math.sqrt(1 / (n - q)))}})
+    for q in reversed(range(n - 1)):
+        gates.append({"gate": "CX", "qubits": [q, q + 1]})
+    gates.append({"gate": "X", "qubits": [0]})
+    return {"n_qubits": n, "gates": gates}
+
+
 def w_state_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` W state preparation circuit."""
-    qc = QuantumCircuit(n_qubits)
-    state = np.zeros(2**n_qubits)
-    for i in range(n_qubits):
-        state[1 << i] = 1 / math.sqrt(n_qubits)
-    qc.initialize(state, range(n_qubits))
-    qc = transpile(qc, basis_gates=["u", "cx"])
-    new_qc = QuantumCircuit(n_qubits)
-    for inst, qargs, cargs in qc.data:
-        if inst.name == "reset":
-            continue
-        new_qc.append(inst, qargs, cargs)
-    return Circuit.from_qiskit(new_qc)
+    spec = _w_state_spec(n_qubits)
+    return Circuit(spec["gates"])
 
 
 def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
