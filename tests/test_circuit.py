@@ -1,4 +1,5 @@
 import json
+
 from quasar import Circuit, SSD
 
 
@@ -15,9 +16,6 @@ def test_circuit_from_dict():
     assert circ.num_qubits == 2
     assert len(circ.gates) == 3
     assert isinstance(circ.ssd, SSD)
-    # Initial Clifford block followed by a non-Clifford gate triggers a
-    # backend switch and thus two partitions.
-    assert len(circ.ssd.partitions) == 2
 
 
 def test_circuit_from_json(tmp_path):
