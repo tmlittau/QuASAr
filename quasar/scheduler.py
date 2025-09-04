@@ -312,8 +312,14 @@ class Scheduler:
                             cost=Cost(time=0.0, memory=0.0),
                         )
                     )
-                    current_sim = None
-                    current_backend = None
+                    sim_obj = type(self.backends[target])()
+                    sim_obj.load(circuit.num_qubits)
+                    for g in circuit.gates[: step.end]:
+                        sim_obj.apply_gate(g.gate, g.qubits, g.params)
+                    sims.clear()
+                    sims[(frozenset(range(circuit.num_qubits)), target)] = sim_obj
+                    current_sim = sim_obj
+                    current_backend = target
                     i += 1
                     continue
 
