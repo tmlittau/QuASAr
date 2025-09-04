@@ -17,6 +17,7 @@ from typing import Dict
 import argparse
 import json
 from pathlib import Path
+import math
 
 
 def _bench_loop(iters: int) -> float:
@@ -54,12 +55,26 @@ def benchmark_tableau(num_qubits: int = 8, num_gates: int = 50) -> Dict[str, flo
     }
 
 
-def benchmark_mps(num_qubits: int = 8, num_gates: int = 50, chi: int = 8) -> Dict[str, float]:
-    ops = num_gates * num_qubits * (chi ** 3)
-    elapsed = _bench_loop(ops)
+def benchmark_mps(
+    num_qubits: int = 8,
+    num_1q_gates: int = 50,
+    num_2q_gates: int = 50,
+    chi: int = 8,
+) -> Dict[str, float]:
+    chi2 = chi * chi
+    chi3 = chi2 * chi
+    ops_1q = num_1q_gates * num_qubits * chi2
+    ops_2q = num_2q_gates * num_qubits * chi3
+    logchi = math.log2(chi) if chi > 1 else 0.0
+    ops_trunc = num_2q_gates * num_qubits * chi3 * logchi
+    elapsed_1q = _bench_loop(int(ops_1q)) if ops_1q else 0.0
+    elapsed_2q = _bench_loop(int(ops_2q)) if ops_2q else 0.0
+    elapsed_trunc = _bench_loop(int(ops_trunc)) if ops_trunc else 0.0
     return {
-        "mps_gate": elapsed / ops,
-        "mps_mem": float(chi * chi),
+        "mps_gate_1q": elapsed_1q / ops_1q if ops_1q else 0.0,
+        "mps_gate_2q": elapsed_2q / ops_2q if ops_2q else 0.0,
+        "mps_trunc": elapsed_trunc / ops_trunc if ops_trunc else 0.0,
+        "mps_mem": float(chi2),
     }
 
 

@@ -66,7 +66,9 @@ class CostEstimator:
             "sv_mem": 1.0,
             "tab_gate": 1.0,
             "tab_mem": 1.0,
-            "mps_gate": 1.0,
+            "mps_gate_1q": 1.0,
+            "mps_gate_2q": 1.0,
+            "mps_trunc": 1.0,
             "mps_mem": 1.0,
             "dd_gate": 1.0,
             "dd_mem": 1.0,
@@ -133,9 +135,53 @@ class CostEstimator:
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
-    def mps(self, num_qubits: int, num_gates: int, chi: int) -> Cost:
-        time = self.coeff["mps_gate"] * num_gates * num_qubits * (chi ** 3)
-        memory = self.coeff["mps_mem"] * num_qubits * (chi ** 2)
+    def mps(
+        self,
+        num_qubits: int,
+        num_1q_gates: int,
+        num_2q_gates: int,
+        chi: int,
+        *,
+        svd: bool = False,
+    ) -> Cost:
+        r"""Estimate cost for matrix product state simulation.
+
+        Parameters
+        ----------
+        num_qubits:
+            Number of qubits in the simulated register.
+        num_1q_gates, num_2q_gates:
+            Counts of single- and two-qubit gates respectively. Measurement
+            operations should be included in ``num_1q_gates``.
+        chi:
+            Assumed bond dimension of the MPS.
+        svd:
+            If ``True``, include an additional cost for the singular value
+            decomposition and truncation step performed after entangling gates.
+
+        Notes
+        -----
+        Single-qubit gates scale with :math:`\chi^2` while two-qubit gates scale
+        with :math:`\chi^3`.  The optional truncation step adds a term scaling
+        as :math:`\chi^3 \log \chi` per two-qubit gate.
+        """
+
+        n = num_qubits
+        chi2 = chi ** 2
+        chi3 = chi ** 3
+        time = (
+            self.coeff["mps_gate_1q"] * num_1q_gates * n * chi2
+            + self.coeff["mps_gate_2q"] * num_2q_gates * n * chi3
+        )
+        if svd and chi > 1 and num_2q_gates > 0:
+            time += (
+                self.coeff["mps_trunc"]
+                * num_2q_gates
+                * n
+                * chi3
+                * math.log2(chi)
+            )
+        memory = self.coeff["mps_mem"] * n * chi2
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 

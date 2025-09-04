@@ -120,7 +120,12 @@ class Partitioner:
                 if backend_trial == Backend.TABLEAU:
                     current_cost = self.estimator.tableau(len(current_qubits), 1)
                 elif backend_trial == Backend.MPS:
-                    current_cost = self.estimator.mps(len(current_qubits), 1, chi=4)
+                    is_meas = gate.gate.upper() in {"MEASURE", "RESET"}
+                    num_1q = 1 if len(gate.qubits) == 1 or is_meas else 0
+                    num_2q = 1 if len(gate.qubits) > 1 else 0
+                    current_cost = self.estimator.mps(
+                        len(current_qubits), num_1q, num_2q, chi=4, svd=True
+                    )
                 elif backend_trial == Backend.DECISION_DIAGRAM:
                     current_cost = self.estimator.decision_diagram(
                         num_gates=1, frontier=len(current_qubits)
@@ -235,7 +240,13 @@ class Partitioner:
 
         if local:
             backend = Backend.MPS
-            cost = self.estimator.mps(num_qubits, num_gates, chi=4)
+            cost = self.estimator.mps(
+                num_qubits,
+                num_1q + num_meas,
+                num_2q,
+                chi=4,
+                svd=True,
+            )
             return backend, cost
 
         backend = Backend.STATEVECTOR

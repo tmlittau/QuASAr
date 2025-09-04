@@ -246,7 +246,10 @@ class Scheduler:
 
                 coeff = {
                     Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
-                    Backend.MPS: (["mps_gate"], "mps_mem"),
+                    Backend.MPS: (
+                        ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                        "mps_mem",
+                    ),
                     Backend.TABLEAU: (["tab_gate"], "tab_mem"),
                     Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
                 }[target]
@@ -418,7 +421,10 @@ class Scheduler:
             # Update cost model based on observation
             coeff = {
                 Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
-                Backend.MPS: (["mps_gate"], "mps_mem"),
+                Backend.MPS: (
+                    ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                    "mps_mem",
+                ),
                 Backend.TABLEAU: (["tab_gate"], "tab_mem"),
                 Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
             }[target]
@@ -483,7 +489,13 @@ class Scheduler:
         if backend == Backend.TABLEAU:
             return est.tableau(n, m)
         if backend == Backend.MPS:
-            return est.mps(n, m, chi=4)
+            return est.mps(
+                n,
+                num_1q + num_meas,
+                num_2q,
+                chi=4,
+                svd=True,
+            )
         if backend == Backend.DECISION_DIAGRAM:
             return est.decision_diagram(num_gates=m, frontier=n)
         return est.statevector(n, num_1q, num_2q, num_meas)
