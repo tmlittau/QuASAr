@@ -8,6 +8,7 @@ import time
 from types import SimpleNamespace
 from quasar.backends import StimBackend, StatevectorBackend, MPSBackend
 import pytest
+import numpy as np
 
 
 class CountingConversionEngine(ConversionEngine):
@@ -325,7 +326,7 @@ def test_cross_backend_gate_uses_bridge_tensor():
     scheduler = Scheduler(
         conversion_engine=engine,
         planner=BridgePlanner(),
-        backends={Backend.STATEVECTOR: StatevectorBackend(), Backend.MPS: DummyBackend()},
+        backends={Backend.STATEVECTOR: StatevectorBackend(), Backend.MPS: MPSBackend()},
         quick_max_qubits=None,
         quick_max_gates=None,
         quick_max_depth=None,
@@ -333,6 +334,13 @@ def test_cross_backend_gate_uses_bridge_tensor():
     result = scheduler.run(circuit)
     assert engine.bridge_calls == 1
     assert result.conversions[-1].primitive == "BRIDGE"
+    ref = StatevectorBackend()
+    ref.load(circuit.num_qubits)
+    for gate in circuit.gates:
+        ref.apply_gate(gate.gate, gate.qubits, gate.params)
+    expected = ref.statevector()
+    final = result.extract_state(0)
+    assert np.allclose(final, expected)
 
 
 def test_partition_histories_multiple_backends():
