@@ -216,7 +216,13 @@ def _simulation_cost(
     if backend == Backend.TABLEAU:
         return estimator.tableau(num_qubits, num_gates)
     if backend == Backend.MPS:
-        return estimator.mps(num_qubits, num_gates, chi=4)
+        return estimator.mps(
+            num_qubits,
+            num_1q_gates + num_meas,
+            num_2q_gates,
+            chi=4,
+            svd=True,
+        )
     if backend == Backend.DECISION_DIAGRAM:
         return estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
     return estimator.statevector(num_qubits, num_1q_gates, num_2q_gates, num_meas)

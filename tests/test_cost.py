@@ -21,10 +21,30 @@ def test_tableau_quadratic():
 
 def test_mps_chi_dependence():
     est = CostEstimator()
-    chi2 = est.mps(num_qubits=4, num_gates=1, chi=2)
-    chi4 = est.mps(num_qubits=4, num_gates=1, chi=4)
+    chi2 = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=2)
+    chi4 = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
     assert chi4.time == chi2.time * (4 ** 3) / (2 ** 3)
     assert chi4.memory == chi2.memory * (4 ** 2) / (2 ** 2)
+
+
+def test_mps_gate_scaling():
+    est = CostEstimator()
+    one = est.mps(num_qubits=4, num_1q_gates=1, num_2q_gates=0, chi=4)
+    two = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
+    assert two.time == one.time * 4
+
+
+def test_mps_svd_cost():
+    est = CostEstimator()
+    base = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
+    with_svd = est.mps(
+        num_qubits=4,
+        num_1q_gates=0,
+        num_2q_gates=1,
+        chi=4,
+        svd=True,
+    )
+    assert with_svd.time == base.time + 4 * (4 ** 3) * math.log2(4)
 
 
 def test_decision_diagram_linear():

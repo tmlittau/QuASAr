@@ -5,6 +5,12 @@ scale simple analytical models to the actual performance of the machine
 where conversions are executed.  The values can be tuned using small
 micro‑benchmarks bundled with the project.
 
+The matrix product state (MPS) calibration distinguishes between costs
+for single- and two-qubit gates and an additional optional
+singular-value-decomposition (SVD) truncation step.  Separate
+coefficients for these components are produced by the calibration
+script.
+
 ## Running the benchmarks
 
 Run the calibration script to measure the cost of the supported

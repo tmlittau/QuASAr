@@ -128,7 +128,13 @@ class CircuitAnalyzer:
                 num_qubits, num_1q, num_2q, num_meas
             ),
             Backend.TABLEAU: self.estimator.tableau(num_qubits, num_gates),
-            Backend.MPS: self.estimator.mps(num_qubits, num_gates, chi=self.chi),
+            Backend.MPS: self.estimator.mps(
+                num_qubits,
+                num_1q + num_meas,
+                num_2q,
+                chi=self.chi,
+                svd=True,
+            ),
             Backend.DECISION_DIAGRAM: self.estimator.decision_diagram(
                 num_gates=num_gates, frontier=num_qubits
             ),
