@@ -112,6 +112,7 @@ def test_planner_conversions_used():
         quick_max_depth=None,
     )
 
-    result = sched.run(circ)
+    plan = sched.prepare_run(circ)
+    result = sched.run(circ, plan)
 
     assert result.conversions == []

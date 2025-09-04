@@ -50,7 +50,8 @@ def test_bell_circuit_single_partition():
 def test_three_qubit_ghz_single_partition():
     circuit = build_three_qubit_ghz()
     scheduler = Scheduler()
-    ssd = scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    ssd = scheduler.run(circuit, plan)
     assert len(ssd.partitions) == 1
     assert not ssd.conversions
 

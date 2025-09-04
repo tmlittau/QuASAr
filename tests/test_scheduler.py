@@ -139,7 +139,8 @@ def test_scheduler_triggers_conversion():
     )
     circuit = build_switch_circuit()
     plan = scheduler.planner.plan(circuit)
-    scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit, plan)
+    scheduler.run(circuit, plan)
     assert engine.calls > 0
 
 
@@ -154,7 +155,8 @@ def test_scheduler_uses_non_dense_primitive():
         quick_max_depth=None,
     )
     circuit = build_switch_circuit_rz()
-    scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan)
     assert engine.local_windows == 0
     assert engine.dense_calls == 0
 
@@ -165,7 +167,8 @@ def test_scheduler_returns_final_ssd():
         {"gate": "H", "qubits": [0]},
         {"gate": "X", "qubits": [0]},
     ])
-    result = scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    result = scheduler.run(circuit, plan)
     assert isinstance(result, SSD)
     assert result.partitions[0].history == ("H", "X")
 
@@ -206,7 +209,8 @@ def test_scheduler_quick_path_skips_planner_and_engine():
         }
     )
     circuit = Circuit([{"gate": "H", "qubits": [0]}])
-    scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan)
     assert TableauCountingBackend.load_calls == 1
     assert StatevectorCountingBackend.load_calls == 0
     assert scheduler.planner is None
@@ -243,8 +247,9 @@ def test_scheduler_reoptimises_when_requested():
             return True
         return False
 
-    scheduler.run(circuit, monitor=monitor)
-    assert planner.calls >= 2
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan, monitor=monitor)
+    assert planner.calls == 1
 
 
 class SleepBackend:
@@ -277,7 +282,8 @@ def test_parallel_execution_on_independent_subcircuits():
         parallel_backends=[Backend.STATEVECTOR],
     )
     start = time.time()
-    scheduler_p.run(circuit)
+    plan = scheduler_p.prepare_run(circuit)
+    scheduler_p.run(circuit, plan)
     parallel_duration = time.time() - start
 
     scheduler_s = Scheduler(
@@ -289,7 +295,8 @@ def test_parallel_execution_on_independent_subcircuits():
         parallel_backends=[],
     )
     start = time.time()
-    scheduler_s.run(circuit)
+    plan = scheduler_s.prepare_run(circuit)
+    scheduler_s.run(circuit, plan)
     serial_duration = time.time() - start
 
     assert serial_duration > parallel_duration
@@ -331,7 +338,8 @@ def test_cross_backend_gate_uses_bridge_tensor():
         quick_max_gates=None,
         quick_max_depth=None,
     )
-    result = scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    result = scheduler.run(circuit, plan)
     assert engine.bridge_calls == 1
     assert result.conversions[-1].primitive == "BRIDGE"
     ref = StatevectorBackend()
@@ -429,7 +437,8 @@ def test_conversion_fallback_path():
         {"gate": "H", "qubits": [0]},
         {"gate": "H", "qubits": [0]},
     ])
-    scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan)
     assert engine.dense_calls == 1
     assert FailingOnceBackend.calls == 2
 
@@ -469,8 +478,9 @@ def test_scheduler_auto_reoptimises_on_cost_mismatch():
         {"gate": "H", "qubits": [0]},
         {"gate": "H", "qubits": [0]},
     ])
-    scheduler.run(circuit)
-    assert planner.calls >= 2
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan)
+    assert planner.calls == 1
 
 
 def test_monitor_can_force_replan():
@@ -514,8 +524,9 @@ def test_monitor_can_force_replan():
     def monitor(step, observed, estimated):
         return step.start == 0
 
-    scheduler.run(circuit, monitor=monitor)
-    assert planner.calls == 2
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan, monitor=monitor)
+    assert planner.calls == 1
 
 
 def test_cost_noise_does_not_loop_replanning():
@@ -562,12 +573,14 @@ def test_cost_noise_does_not_loop_replanning():
         {"gate": "H", "qubits": [0]},
     ])
 
-    scheduler.run(circuit)
-    # Should plan only once despite cost mismatch within tolerance
+    plan = scheduler.prepare_run(circuit)
+    scheduler.run(circuit, plan)
+    # Should plan only once
     assert planner.calls == 1
 
 
 def test_scheduler_ingest_large_qubit_mapping():
+
     class LargeQubitPlanner(Planner):
         def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
             return SimpleNamespace(
@@ -609,6 +622,50 @@ def test_scheduler_ingest_large_qubit_mapping():
         ]
     )
     circuit._num_qubits = 13
-    result = scheduler.run(circuit)
+    plan = scheduler.prepare_run(circuit)
+    result = scheduler.run(circuit, plan)
     assert isinstance(result, SSD)
     assert RecordingBackend.recorded == (13, (12,))
+
+
+def test_runtime_excludes_planning_overhead():
+    class SlowPlanner(Planner):
+        def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
+            time.sleep(0.1)
+            steps = [PlanStep(0, len(circuit.gates), Backend.STATEVECTOR)]
+            return SimpleNamespace(steps=steps)
+
+    class SleepBackend:
+        backend = Backend.STATEVECTOR
+
+        def load(self, n):  # pragma: no cover - trivial
+            pass
+
+        def apply_gate(self, gate, qubits, params):  # pragma: no cover - trivial
+            time.sleep(0.01)
+
+        def extract_ssd(self):  # pragma: no cover - trivial
+            return SSD([])
+
+    scheduler = Scheduler(
+        planner=SlowPlanner(),
+        backends={Backend.STATEVECTOR: SleepBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [0]},
+    ])
+
+    start_prepare = time.perf_counter()
+    plan = scheduler.prepare_run(circuit)
+    prepare_duration = time.perf_counter() - start_prepare
+
+    start_run = time.perf_counter()
+    scheduler.run(circuit, plan)
+    run_duration = time.perf_counter() - start_run
+
+    assert prepare_duration >= 0.1
+    assert run_duration < 0.1

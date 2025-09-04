@@ -69,6 +69,7 @@ class PlanResult:
     gates: List['Gate']
     explicit_steps: Optional[List[PlanStep]] = None
     explicit_conversions: Optional[List['ConversionLayer']] = None
+    step_costs: Optional[List[Cost]] = None
 
     # The ``steps`` property recovers the final plan lazily using the
     # backpointers contained in ``table``.  If ``explicit_steps`` is provided

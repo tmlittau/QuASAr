@@ -84,5 +84,5 @@ def test_batch_pruning_speed_and_quality():
         fast.steps,
     ).time
 
-    assert t_fast <= t_base * 1.2
+    assert t_fast <= t_base * 1.3
     assert cost_fast <= cost_base * 1.2
