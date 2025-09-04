@@ -1,4 +1,5 @@
 from benchmarks.runner import BenchmarkRunner
+from quasar.planner import PlanResult
 
 
 class DummyBackend:
@@ -36,8 +37,10 @@ class DummyPlanner:
 class DummyScheduler:
     def __init__(self):
         self.planner = DummyPlanner()
+    def prepare_run(self, circuit, plan=None, *, backend=None):
+        return PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
 
-    def run(self, circuit, *, backend=None):
+    def run(self, circuit, plan, *, monitor=None):
         self._data = [0] * 10000
         return "done"
 

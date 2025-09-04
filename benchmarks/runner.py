@@ -343,13 +343,20 @@ class BenchmarkRunner:
             else:
                 if planner is not None:
                     start_prepare = time.perf_counter()
-                    planner.plan(circuit, backend=backend)
+                    plan = planner.plan(circuit, backend=backend)
+                    plan = scheduler.prepare_run(circuit, plan, backend=backend)
+                    prepare_time = time.perf_counter() - start_prepare
+                    _, prepare_peak_memory = tracemalloc.get_traced_memory()
+                    tracemalloc.reset_peak()
+                else:
+                    start_prepare = time.perf_counter()
+                    plan = scheduler.prepare_run(circuit, backend=backend)
                     prepare_time = time.perf_counter() - start_prepare
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
                     tracemalloc.reset_peak()
 
                 start_run = time.perf_counter()
-                result = scheduler.run(circuit, backend=backend)
+                result = scheduler.run(circuit, plan)
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))

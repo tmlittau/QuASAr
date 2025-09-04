@@ -9,6 +9,7 @@ from benchmarks.runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.ssd import SSD, SSDPartition
 from quasar.cost import Backend
+from quasar.planner import PlanResult
 
 
 class DummyBackend:
@@ -129,13 +130,17 @@ class DummyScheduler:
 
             def plan(self, circuit, *, backend=None):
                 self.outer.plan_calls.append(backend)
+                return PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
 
         self.planner = Planner(self)
 
-    def run(self, circuit, *, backend=None):
-        self.run_calls.append(backend)
+    def prepare_run(self, circuit, plan=None, *, backend=None):
+        return plan if plan is not None else PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
+
+    def run(self, circuit, plan, *, monitor=None):
+        self.run_calls.append(plan.final_backend)
         return SSD([
-            SSDPartition(subsystems=((0,),), backend=backend or Backend.STATEVECTOR)
+            SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
         ])
 
 
@@ -173,9 +178,12 @@ class PlannerErrorScheduler:
 
         self.planner = Planner()
 
-    def run(self, circuit, *, backend=None):
+    def prepare_run(self, circuit, plan=None, *, backend=None):  # pragma: no cover - unused
+        return plan
+
+    def run(self, circuit, plan, *, monitor=None):  # pragma: no cover - unused
         return SSD([
-            SSDPartition(subsystems=((0,),), backend=backend or Backend.STATEVECTOR)
+            SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
         ])
 
 
@@ -192,11 +200,14 @@ class RunErrorScheduler:
     def __init__(self):
         class Planner:
             def plan(self, circuit, *, backend=None):
-                pass
+                return PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
 
         self.planner = Planner()
 
-    def run(self, circuit, *, backend=None):
+    def prepare_run(self, circuit, plan=None, *, backend=None):
+        return plan
+
+    def run(self, circuit, plan, *, monitor=None):
         raise ValueError("run boom")
 
 

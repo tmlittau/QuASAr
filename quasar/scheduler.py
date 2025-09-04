@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
 
-from .planner import Planner, PlanStep
+from .planner import Planner, PlanStep, PlanResult
 from .partitioner import CLIFFORD_GATES
 from .cost import Backend, Cost
 from . import config
@@ -150,38 +150,39 @@ class Scheduler:
         return Backend.STATEVECTOR
 
     # ------------------------------------------------------------------
-    def run(
+    def prepare_run(
         self,
         circuit: Circuit,
-        monitor: CostHook | None = None,
+        plan: PlanResult | None = None,
         *,
         backend: Backend | None = None,
-    ) -> SSD:
-        """Execute ``circuit`` according to a planner-derived schedule.
+    ) -> PlanResult:
+        """Prepare an execution plan for ``circuit``.
 
-        Parameters
-        ----------
-        circuit:
-            Circuit to simulate.
-        monitor:
-            Optional callback receiving ``(step, observed, estimated)``.  If the
-            callback returns ``True`` the scheduler re-plans the remaining gates
-            starting from ``step.end``.
-        Returns
-        -------
-        SSD
-            Descriptor of the simulated state after all gates have been
-            executed.
+        This step performs cache lookups and cost estimation but does not
+        execute any gates.  The returned :class:`PlanResult` contains
+        precomputed cost estimates for each step which allows
+        :meth:`run` to execute without invoking the planner again.
         """
 
         backend_choice = self.select_backend(circuit, backend=backend)
-        if backend_choice is not None:
-            sim = type(self.backends[backend_choice])()
-            sim.load(circuit.num_qubits)
-            for gate in circuit.gates:
-                sim.apply_gate(gate.gate, gate.qubits, gate.params)
-            ssd = sim.extract_ssd()
-            return ssd if ssd is not None else circuit.ssd
+        if plan is None and backend_choice is not None:
+            # Quick path – execute the entire circuit on a single backend
+            plan = PlanResult(
+                table=[],
+                final_backend=backend_choice,
+                gates=circuit.gates,
+                explicit_steps=[PlanStep(0, len(circuit.gates), backend_choice)],
+            )
+            plan.explicit_conversions = []
+            if self.planner is not None:
+                plan.step_costs = [
+                    self._estimate_cost(backend_choice, circuit.gates)
+                ]
+            else:
+                plan.step_costs = [Cost(time=0.0, memory=0.0)]
+            circuit.ssd.conversions = []
+            return plan
 
         if self.planner is None:
             self.planner = Planner(
@@ -193,14 +194,51 @@ class Scheduler:
         if self.conversion_engine is None:
             self.conversion_engine = ConversionEngine()
 
-        plan = self.planner.cache_lookup(circuit.gates, backend)
         if plan is None:
-            plan = self.planner.plan(circuit, backend=backend)
+            plan = self.planner.cache_lookup(circuit.gates, backend)
+            if plan is None:
+                plan = self.planner.plan(circuit, backend=backend)
+
         conversions = list(getattr(plan, "conversions", []))
         circuit.ssd.conversions = conversions
+        plan.explicit_conversions = conversions
+
+        step_costs: List[Cost] = []
+        for step in plan.steps:
+            segment = circuit.gates[step.start : step.end]
+            step_costs.append(self._estimate_cost(step.backend, segment))
+        plan.step_costs = step_costs
+        return plan
+
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        circuit: Circuit,
+        plan: PlanResult,
+        monitor: CostHook | None = None,
+    ) -> SSD:
+        """Execute ``circuit`` according to ``plan``.
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to simulate.
+        plan:
+            Prepared execution plan returned by :meth:`prepare_run`.
+        monitor:
+            Optional callback receiving ``(step, observed, estimated)``.  The
+            callback is invoked for each step but its return value is ignored.
+        Returns
+        -------
+        SSD
+            Descriptor of the simulated state after all gates have been
+            executed.
+        """
+
         steps: List[PlanStep] = list(plan.steps)
-        conv_layers = conversions
+        conv_layers = list(getattr(plan, "conversions", []))
         conv_idx = 0
+        est_costs = plan.step_costs or [Cost(time=0.0, memory=0.0)] * len(steps)
 
         sims: Dict[tuple, object] = {}
         current_backend = None
@@ -227,7 +265,7 @@ class Scheduler:
                         sims[key_p] = sim_p
                     jobs.append((sims[key_p], glist))
 
-                est_cost = self._estimate_cost(target, segment)
+                est_cost = est_costs[i]
                 tracemalloc.start()
                 start_time = time.perf_counter()
 
@@ -253,31 +291,21 @@ class Scheduler:
                     Backend.TABLEAU: (["tab_gate"], "tab_mem"),
                     Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
                 }[target]
-                updates: Dict[str, float] = {}
-                est = self.planner.estimator
-                gate_keys, mem_key = coeff
-                if est_cost.time > 0:
-                    ratio = observed.time / est_cost.time
-                    for gk in gate_keys:
-                        updates[gk] = est.coeff[gk] * ratio
-                if est_cost.memory > 0 and observed.memory > 0:
-                    updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
-                if updates:
-                    est.update_coefficients(updates)
-                    # Recompute the estimate with the updated coefficients
-                    est_cost = self._estimate_cost(target, segment)
+                est = self.planner.estimator if self.planner is not None else None
+                if est is not None:
+                    updates: Dict[str, float] = {}
+                    gate_keys, mem_key = coeff
+                    if est_cost.time > 0:
+                        ratio = observed.time / est_cost.time
+                        for gk in gate_keys:
+                            updates[gk] = est.coeff[gk] * ratio
+                    if est_cost.memory > 0 and observed.memory > 0:
+                        updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                    if updates:
+                        est.update_coefficients(updates)
 
-                trigger_replan = False
-                if observed.time > est_cost.time * (1 + self.replan_tolerance):
-                    trigger_replan = True
-                if monitor and monitor(step, observed, est_cost):
-                    trigger_replan = True
-                if trigger_replan:
-                    remaining = Circuit(circuit.gates[step.end :])
-                    replanned = self.planner.cache_lookup(remaining.gates, backend)
-                    if replanned is None:
-                        replanned = self.planner.plan(remaining, backend=backend)
-                    steps[i + 1 :] = list(replanned.steps) + steps[i + 1 :]
+                if monitor:
+                    monitor(step, observed, est_cost)
                 current_sim = None
                 current_backend = None
                 i += 1
@@ -405,7 +433,7 @@ class Scheduler:
                     if k[0] == qubits and k != key:
                         sims.pop(k)
 
-            est_cost = self._estimate_cost(target, segment)
+            est_cost = est_costs[i]
 
             tracemalloc.start()
             start_time = time.perf_counter()
@@ -428,36 +456,21 @@ class Scheduler:
                 Backend.TABLEAU: (["tab_gate"], "tab_mem"),
                 Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
             }[target]
-            updates: Dict[str, float] = {}
-            est = self.planner.estimator
-            gate_keys, mem_key = coeff
-            if est_cost.time > 0:
-                ratio = observed.time / est_cost.time
-                for gk in gate_keys:
-                    updates[gk] = est.coeff[gk] * ratio
-            if est_cost.memory > 0 and observed.memory > 0:
-                updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
-            if updates:
-                est.update_coefficients(updates)
-                # Refresh the estimated cost with updated coefficients
-                est_cost = self._estimate_cost(target, segment)
+            est = self.planner.estimator if self.planner is not None else None
+            if est is not None:
+                updates: Dict[str, float] = {}
+                gate_keys, mem_key = coeff
+                if est_cost.time > 0:
+                    ratio = observed.time / est_cost.time
+                    for gk in gate_keys:
+                        updates[gk] = est.coeff[gk] * ratio
+                if est_cost.memory > 0 and observed.memory > 0:
+                    updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                if updates:
+                    est.update_coefficients(updates)
 
-            trigger_replan = False
-            if observed.time > est_cost.time * (1 + self.replan_tolerance):
-                trigger_replan = True
-            if monitor and monitor(step, observed, est_cost):
-                trigger_replan = True
-            if trigger_replan:
-                remaining = Circuit(circuit.gates[step.end :])
-                replanned = self.planner.cache_lookup(remaining.gates, backend)
-                if replanned is None:
-                    replanned = self.planner.plan(remaining, backend=backend)
-                offset = step.end
-                new_steps = [
-                    PlanStep(s.start + offset, s.end + offset, s.backend, parallel=s.parallel)
-                    for s in replanned.steps
-                ]
-                steps = steps[: i + 1] + new_steps
+            if monitor:
+                monitor(step, observed, est_cost)
             i += 1
 
         if sims:

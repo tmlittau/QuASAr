@@ -73,8 +73,15 @@ class SimulationEngine:
         analyzer = CircuitAnalyzer(circuit, estimator=self.planner.estimator)
         analysis = analyzer.analyze()
         threshold = memory_threshold if memory_threshold is not None else self.memory_threshold
-        plan = self.planner.plan(circuit, max_memory=threshold, backend=backend)
-        ssd = self.scheduler.run(circuit, backend=backend)
+        if (
+            memory_threshold is None
+            and self.scheduler.should_use_quick_path(circuit, backend=backend)
+        ):
+            plan = self.scheduler.prepare_run(circuit, backend=backend)
+        else:
+            plan = self.planner.plan(circuit, max_memory=threshold, backend=backend)
+            plan = self.scheduler.prepare_run(circuit, plan, backend=backend)
+        ssd = self.scheduler.run(circuit, plan)
         return SimulationResult(ssd=ssd, analysis=analysis, plan=plan)
 
 
