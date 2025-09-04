@@ -23,6 +23,9 @@
 - When benchmarking, enable quick‑path heuristics (`QUASAR_QUICK_MAX_QUBITS`, `QUASAR_QUICK_MAX_GATES`, `QUASAR_QUICK_MAX_DEPTH`) for QuASAr to really investigate QuASAr's capabilities.
 - Explicitly pass a `Backend` to QuASAr when comparing against single-method simulators, instead of creating extra Adapters. QuASAr should always provide the option to manually pick the simulator anyway.
 - Benchmarks and example notebooks live under `benchmarks/`; raw results are stored in `benchmarks/results/`.
+- Planning, scheduling, and cost estimation must finish before benchmarking.
+- Simulation timing should cover only backend execution using a prebuilt SSD.
+- Any planner or estimator adjustments must occur outside the timed region.
 
 ## Paper Insights
 - The paper highlights:
