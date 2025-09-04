@@ -121,8 +121,9 @@ def test_run_multiple_records_unsupported():
 
 class DummyScheduler:
     def __init__(self):
-        self.plan_calls = []
-        self.run_calls = []
+        self.plan_calls: list = []
+        self.run_calls: list = []
+        self.run_times = [1.0, 2.0, 3.0]
 
         class Planner:
             def __init__(self, outer):
@@ -130,36 +131,51 @@ class DummyScheduler:
 
             def plan(self, circuit, *, backend=None):
                 self.outer.plan_calls.append(backend)
-                return PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
+                return PlanResult(
+                    table=[],
+                    final_backend=backend,
+                    gates=[],
+                    explicit_steps=[],
+                    explicit_conversions=[],
+                    step_costs=[],
+                )
 
         self.planner = Planner(self)
 
     def prepare_run(self, circuit, plan=None, *, backend=None):
-        return plan if plan is not None else PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
+        return (
+            plan
+            if plan is not None
+            else PlanResult(
+                table=[],
+                final_backend=backend,
+                gates=[],
+                explicit_steps=[],
+                explicit_conversions=[],
+                step_costs=[],
+            )
+        )
 
     def run(self, circuit, plan, *, monitor=None, instrument=False):
         self.run_calls.append((plan.final_backend, instrument))
-        return SSD([
-            SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
-        ])
+        runtime = self.run_times.pop(0)
+        ssd = SSD(
+            [
+                SSDPartition(
+                    subsystems=((0,),),
+                    backend=plan.final_backend or Backend.STATEVECTOR,
+                )
+            ]
+        )
+        return ssd, runtime
 
 
 def test_run_quasar_multiple_aggregates_statistics():
     runner = BenchmarkRunner()
     scheduler = DummyScheduler()
-    side_effect = [
-        0.0,  # start of run_quasar_multiple
-        # run 1
-        0.0, 0.0, 0.0, 1.0,
-        # run 2
-        1.0, 1.0, 1.0, 3.0,
-        # run 3
-        3.0, 3.0, 3.0, 6.0,
-    ]
-    with patch("benchmarks.runner.time.perf_counter", side_effect=side_effect):
-        record = runner.run_quasar_multiple(
-            None, scheduler, repetitions=3, backend=Backend.TABLEAU
-        )
+    record = runner.run_quasar_multiple(
+        None, scheduler, repetitions=3, backend=Backend.TABLEAU
+    )
     assert len(runner.results) == 1
     assert runner.results[0] == record
     assert record["repetitions"] == 3
@@ -182,9 +198,10 @@ class PlannerErrorScheduler:
         return plan
 
     def run(self, circuit, plan, *, monitor=None, instrument=False):  # pragma: no cover - unused
-        return SSD([
+        ssd = SSD([
             SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
         ])
+        return ssd, 0.0
 
 
 def test_run_quasar_returns_failure_record_on_planner_error():

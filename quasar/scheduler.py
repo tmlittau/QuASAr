@@ -221,7 +221,7 @@ class Scheduler:
         *,
         instrument: bool = False,
         backend: Backend | None = None,
-    ) -> SSD:
+    ) -> SSD | tuple[SSD, float]:
         """Execute ``circuit`` according to a plan.
 
         When ``plan`` is ``None`` the method performs planning internally using
@@ -250,7 +250,10 @@ class Scheduler:
         -------
         SSD
             Descriptor of the simulated state after all gates have been
-            executed.
+            executed.  When ``instrument`` is ``True`` a tuple of
+            ``(ssd, gate_time)`` is returned where ``gate_time`` records the
+            aggregated wall-clock time spent applying gates, excluding setup
+            and conversion overhead.
         """
 
         if plan is None or plan.step_costs is None:
@@ -262,6 +265,7 @@ class Scheduler:
         est_costs = plan.step_costs or [Cost(time=0.0, memory=0.0)] * len(steps)
 
         sims: Dict[tuple, object] = {}
+        total_gate_time = 0.0
         current_backend = None
         current_sim = None
         i = 0
@@ -301,6 +305,7 @@ class Scheduler:
 
                 if instrument:
                     elapsed = time.perf_counter() - start_time
+                    total_gate_time += elapsed
                     _, peak = tracemalloc.get_traced_memory()
                     tracemalloc.stop()
                     observed = Cost(time=elapsed, memory=float(peak))
@@ -467,6 +472,7 @@ class Scheduler:
 
             if instrument:
                 elapsed = time.perf_counter() - start_time
+                total_gate_time += elapsed
                 _, peak = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
                 observed = Cost(time=elapsed, memory=float(peak))
@@ -511,8 +517,10 @@ class Scheduler:
             for part in circuit.ssd.partitions:
                 if all(q not in used_qubits for q in part.qubits):
                     parts.append(part)
-            return SSD(parts, circuit.ssd.conversions)
-        return circuit.ssd
+            ssd_res = SSD(parts, circuit.ssd.conversions)
+            return (ssd_res, total_gate_time) if instrument else ssd_res
+        ssd_res = circuit.ssd
+        return (ssd_res, total_gate_time) if instrument else ssd_res
 
     # ------------------------------------------------------------------
     def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:
