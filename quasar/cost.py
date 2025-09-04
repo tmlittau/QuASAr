@@ -78,6 +78,7 @@ class CostEstimator:
             "lw_extract": 1.0,
             "st_stage": 1.0,
             "full_extract": 1.0,
+            "st_chi_cap": 16.0,
             # Ingestion cost per target backend
             "ingest_sv": 1.0,
             "ingest_tab": 1.0,
@@ -213,6 +214,8 @@ class CostEstimator:
         frontier: int,
         window: Optional[int] = None,
         *,
+        window_1q_gates: int = 0,
+        window_2q_gates: int = 0,
         s_max: Optional[int] = None,
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
@@ -231,6 +234,8 @@ class CostEstimator:
             Decision diagram frontier size ``r``.
         window:
             Optional dense extraction window ``w`` for the LW primitive.
+        window_1q_gates, window_2q_gates:
+            Gate counts within the dense window used by the LW primitive.
         Notes
         -----
         A fixed ``conversion_base`` overhead is applied to every backend switch
@@ -254,8 +259,9 @@ class CostEstimator:
         overhead = ingest_time + base_time
 
         # --- B2B primitive ---
+        svd_cost = min(num_qubits * (rank ** 2), rank * (num_qubits ** 2))
         b2b_time = (
-            self.coeff["b2b_svd"] * (rank ** 3)
+            self.coeff["b2b_svd"] * svd_cost
             + self.coeff["b2b_copy"] * num_qubits * (rank ** 2)
             + overhead
         )
@@ -264,11 +270,16 @@ class CostEstimator:
         # --- LW primitive ---
         w = window if window is not None else min(num_qubits, 4)
         dense = 2 ** w
-        lw_time = self.coeff["lw_extract"] * dense + overhead
+        gate_time = (
+            self.coeff["sv_gate_1q"] * window_1q_gates
+            + self.coeff["sv_gate_2q"] * window_2q_gates
+        )
+        lw_time = self.coeff["lw_extract"] * dense + gate_time * dense + overhead
         lw_mem = max(dense, full)
 
         # --- ST primitive ---
-        chi_tilde = min(rank, 16)
+        chi_cap = int(self.coeff.get("st_chi_cap", 16)) or 16
+        chi_tilde = min(rank, chi_cap)
         st_time = self.coeff["st_stage"] * (chi_tilde ** 3) + overhead
         st_mem = max(num_qubits * (chi_tilde ** 2), full)
 

@@ -25,15 +25,17 @@ try:  # pragma: no cover - exercised when the extension is available
     class ConversionEngine:
         """Thin Python wrapper around the C++ implementation with caching."""
 
-        def __init__(self, cache_limit: int | None = None) -> None:
+        def __init__(self, cache_limit: int | None = None, st_chi_cap: int = 16) -> None:
             self._cache_limit = cache_limit
             self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._boundary_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._bridge_cache: OrderedDict[tuple, list] = OrderedDict()
+            self.st_chi_cap = st_chi_cap
 
         def _ensure_impl(self) -> None:
             if "_impl" not in self.__dict__:
                 self.__dict__["_impl"] = _CEngine()
+                self._impl.st_chi_cap = self.st_chi_cap
 
         # Cache helpers -------------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -203,11 +205,12 @@ except Exception:  # pragma: no cover - exercised when extension missing
         bond_dims: List[int] | None = None
 
     class ConversionEngine:
-        def __init__(self, cache_limit: int | None = None) -> None:
+        def __init__(self, cache_limit: int | None = None, st_chi_cap: int = 16) -> None:
             self._cache_limit = cache_limit
             self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._boundary_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._bridge_cache: OrderedDict[tuple, list] = OrderedDict()
+            self.st_chi_cap = st_chi_cap
 
         # Cache utilities -----------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -345,10 +348,11 @@ except Exception:  # pragma: no cover - exercised when extension missing
 
             window = min(boundary, 4)
             dense = 1 << window
-            chi_tilde = min(rank, 16)
+            chi_tilde = min(rank, self.st_chi_cap)
             full = 1 << min(boundary, 16)
 
-            cost_b2b = rank ** 3 + boundary * (rank ** 2) + rank ** 2
+            svd_cost = min(boundary * (rank ** 2), rank * (boundary ** 2))
+            cost_b2b = svd_cost + boundary * (rank ** 2) + rank ** 2
             cost_lw = 2.0 * dense
             cost_st = chi_tilde ** 3 + chi_tilde ** 2
             cost_full = 2.0 * full

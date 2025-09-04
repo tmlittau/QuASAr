@@ -177,11 +177,12 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
     // ignore memory for now since the conversion planner only compares runtime.
     const std::size_t window = std::min<std::size_t>(boundary, 4);
     const std::size_t dense = 1ULL << window;  // dense window size for LW
-    const std::size_t chi_tilde = std::min<std::size_t>(rank, 16);  // staged cap
+    const std::size_t chi_tilde = std::min<std::size_t>(rank, st_chi_cap);  // staged cap
     const std::size_t full = 1ULL << std::min<std::size_t>(boundary, 16);
 
-    const double cost_b2b = std::pow(static_cast<double>(rank), 3) +
-                            static_cast<double>(boundary) * rank * rank +
+    const double svd_cost = std::min<double>(boundary * rank * rank,
+                                             rank * boundary * boundary);
+    const double cost_b2b = svd_cost + static_cast<double>(boundary) * rank * rank +
                             rank * rank;  // ingest
     const double cost_lw = static_cast<double>(dense) * 2.0;  // extract + ingest
     const double cost_st = std::pow(static_cast<double>(chi_tilde), 3) +
