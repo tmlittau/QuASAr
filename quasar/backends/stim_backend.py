@@ -39,7 +39,9 @@ class StimBackend(Backend):
     )
 
     def load(self, num_qubits: int, **_: dict) -> None:
+        """Initialise the Stim simulator with a given number of qubits."""
         self.simulator = stim.TableauSimulator()
+        self.simulator.do_tableau(stim.Tableau(num_qubits), list(range(num_qubits)))
         self.num_qubits = num_qubits
         self.history.clear()
 
