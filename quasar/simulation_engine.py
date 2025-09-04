@@ -12,6 +12,7 @@ users that simply want to simulate a circuit and obtain both the final
 
 from dataclasses import dataclass
 from typing import Optional
+import time
 
 from .circuit import Circuit
 from .analyzer import CircuitAnalyzer, AnalysisResult
@@ -34,11 +35,16 @@ class SimulationResult:
         Static circuit analysis information produced before execution.
     plan:
         The execution plan derived by :class:`Planner`.
+    analysis_time, planning_time, execution_time:
+        Wall-clock durations for each phase of :meth:`SimulationEngine.simulate`.
     """
 
     ssd: SSD
     analysis: AnalysisResult
     plan: PlanResult
+    analysis_time: float = 0.0
+    planning_time: float = 0.0
+    execution_time: float = 0.0
 
 
 class SimulationEngine:
@@ -70,9 +76,15 @@ class SimulationEngine:
     ) -> SimulationResult:
         """Simulate ``circuit`` and return the final :class:`SSD` and metrics."""
 
+        start = time.perf_counter()
         analyzer = CircuitAnalyzer(circuit, estimator=self.planner.estimator)
         analysis = analyzer.analyze()
-        threshold = memory_threshold if memory_threshold is not None else self.memory_threshold
+        analysis_time = time.perf_counter() - start
+
+        start = time.perf_counter()
+        threshold = (
+            memory_threshold if memory_threshold is not None else self.memory_threshold
+        )
         if (
             memory_threshold is None
             and self.scheduler.should_use_quick_path(circuit, backend=backend)
@@ -80,9 +92,20 @@ class SimulationEngine:
             plan = self.scheduler.prepare_run(circuit, backend=backend)
         else:
             plan = self.planner.plan(circuit, max_memory=threshold, backend=backend)
-            plan = self.scheduler.prepare_run(circuit, plan, backend=backend)
-        ssd = self.scheduler.run(circuit, plan)
-        return SimulationResult(ssd=ssd, analysis=analysis, plan=plan)
+        planning_time = time.perf_counter() - start
+
+        start = time.perf_counter()
+        ssd = self.scheduler.run(circuit, plan, backend=backend)
+        execution_time = time.perf_counter() - start
+
+        return SimulationResult(
+            ssd=ssd,
+            analysis=analysis,
+            plan=plan,
+            analysis_time=analysis_time,
+            planning_time=planning_time,
+            execution_time=execution_time,
+        )
 
 
 __all__ = ["SimulationEngine", "SimulationResult"]

@@ -214,19 +214,26 @@ class Scheduler:
     def run(
         self,
         circuit: Circuit,
-        plan: PlanResult,
+        plan: PlanResult | None = None,
         monitor: CostHook | None = None,
         *,
         instrument: bool = False,
+        backend: Backend | None = None,
     ) -> SSD:
-        """Execute ``circuit`` according to ``plan``.
+        """Execute ``circuit`` according to a plan.
+
+        When ``plan`` is ``None`` the method performs planning internally using
+        :meth:`prepare_run`.  Providing an explicit :class:`PlanResult` allows
+        callers to precompute a plan (e.g. for separate timing of planning and
+        execution) and ensures that this method skips any additional calls to
+        :meth:`Planner.plan`.
 
         Parameters
         ----------
         circuit:
             Circuit to simulate.
         plan:
-            Prepared execution plan returned by :meth:`prepare_run`.
+            Optional precomputed execution plan.
         monitor:
             Optional callback receiving ``(step, observed, estimated)``.  The
             callback is invoked for each step but its return value is ignored.
@@ -234,12 +241,18 @@ class Scheduler:
             Enable timing and memory instrumentation using ``time.perf_counter``
             and :mod:`tracemalloc`.  When ``False`` (the default) these metrics
             are skipped and any supplied ``monitor`` callback is not invoked.
+        backend:
+            Optional backend hint used when planning is performed internally.
+
         Returns
         -------
         SSD
             Descriptor of the simulated state after all gates have been
             executed.
         """
+
+        if plan is None or plan.step_costs is None:
+            plan = self.prepare_run(circuit, plan, backend=backend)
 
         steps: List[PlanStep] = list(plan.steps)
         conv_layers = list(getattr(plan, "conversions", []))

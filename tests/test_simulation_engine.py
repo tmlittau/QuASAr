@@ -14,6 +14,10 @@ def test_simulation_engine_simulate_returns_metrics():
     assert sum(result.analysis.gate_distribution.values()) == 3
     # Planner produced at least one step
     assert result.plan.steps
+    # Timing metrics are recorded
+    assert isinstance(result.analysis_time, float)
+    assert isinstance(result.planning_time, float)
+    assert isinstance(result.execution_time, float)
 
 
 def test_partition_state_extraction():
@@ -45,3 +49,19 @@ def test_backend_selection():
     engine = SimulationEngine()
     result = engine.simulate(circuit, backend=Backend.TABLEAU)
     assert all(step.backend == Backend.TABLEAU for step in result.plan.steps)
+
+
+def test_simulate_uses_supplied_plan(monkeypatch):
+    circuit = Circuit([{ "gate": "H", "qubits": [i] } for i in range(13)])
+    engine = SimulationEngine()
+    calls = {"count": 0}
+
+    original_plan = engine.planner.plan
+
+    def counting_plan(*args, **kwargs):
+        calls["count"] += 1
+        return original_plan(*args, **kwargs)
+
+    monkeypatch.setattr(engine.planner, "plan", counting_plan)
+    engine.simulate(circuit)
+    assert calls["count"] == 1
