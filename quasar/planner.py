@@ -29,6 +29,7 @@ if True:  # pragma: no cover - used for type checking when available
 # Helper data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PlanStep:
     """Single contiguous fragment of the circuit.
@@ -66,9 +67,9 @@ class PlanResult:
 
     table: List[Dict[Optional[Backend], DPEntry]]
     final_backend: Optional[Backend]
-    gates: List['Gate']
+    gates: List["Gate"]
     explicit_steps: Optional[List[PlanStep]] = None
-    explicit_conversions: Optional[List['ConversionLayer']] = None
+    explicit_conversions: Optional[List["ConversionLayer"]] = None
     step_costs: Optional[List[Cost]] = None
 
     # The ``steps`` property recovers the final plan lazily using the
@@ -82,7 +83,7 @@ class PlanResult:
         return self.recover()
 
     @property
-    def conversions(self) -> List['ConversionLayer']:
+    def conversions(self) -> List["ConversionLayer"]:
         """Conversion layers associated with the plan.
 
         When planning populates conversions explicitly (``explicit_conversions``)
@@ -124,7 +125,7 @@ class PlanResult:
         part = Partitioner()
         while i > 0 and b is not None:
             entry = self.table[i][b]
-            segment = self.gates[entry.prev_index:i]
+            segment = self.gates[entry.prev_index : i]
             groups = part.parallel_groups(segment)
             qubits = tuple(g[0] for g in groups) if groups else ()
             steps.append(
@@ -144,6 +145,7 @@ class PlanResult:
 # ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
+
 
 def _add_cost(a: Cost, b: Cost) -> Cost:
     """Combine two cost estimates sequentially.
@@ -203,7 +205,7 @@ def _supported_backends(
         len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
     )
 
-    if num_gates <= 2 ** num_qubits and not local:
+    if num_gates <= 2**num_qubits and not local:
         candidates.append(Backend.DECISION_DIAGRAM)
     if local:
         candidates.append(Backend.MPS)
@@ -275,7 +277,9 @@ class Planner:
         quick_max_qubits: int | None = config.DEFAULT.quick_max_qubits,
         quick_max_gates: int | None = config.DEFAULT.quick_max_gates,
         quick_max_depth: int | None = config.DEFAULT.quick_max_depth,
-        force_single_backend_below: int | None = config.DEFAULT.force_single_backend_below,
+        force_single_backend_below: (
+            int | None
+        ) = config.DEFAULT.force_single_backend_below,
         backend_order: Optional[List[Backend]] = None,
         conversion_cost_multiplier: float = 1.0,
     ):
@@ -325,7 +329,11 @@ class Planner:
         self.quick_max_gates = quick_max_gates
         self.quick_max_depth = quick_max_depth
         self.force_single_backend_below = force_single_backend_below
-        self.backend_order = list(backend_order) if backend_order is not None else list(config.DEFAULT.preferred_backend_order)
+        self.backend_order = (
+            list(backend_order)
+            if backend_order is not None
+            else list(config.DEFAULT.preferred_backend_order)
+        )
         self.conversion_cost_multiplier = conversion_cost_multiplier
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
@@ -342,7 +350,9 @@ class Planner:
             return len(self.backend_order)
 
     def _order_backends(self, backends: List[Backend]) -> List[Backend]:
-        return sorted(backends, key=lambda b: (b != Backend.TABLEAU, self._backend_rank(b)))
+        return sorted(
+            backends, key=lambda b: (b != Backend.TABLEAU, self._backend_rank(b))
+        )
 
     # ------------------------------------------------------------------
     def _dp(
@@ -366,7 +376,9 @@ class Planner:
         n = len(gates)
         if n == 0:
             init = initial_backend if initial_backend is not None else None
-            table = [{init: DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)}]
+            table = [
+                {init: DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)}
+            ]
             return PlanResult(table=table, final_backend=init, gates=gates)
 
         if self.force_single_backend_below is not None:
@@ -402,13 +414,13 @@ class Planner:
                         num_meas,
                     )
                     if max_memory is not None and cost.memory > max_memory:
-                        raise ValueError(
-                            "Requested backend exceeds memory threshold"
-                        )
+                        raise ValueError("Requested backend exceeds memory threshold")
                     part = Partitioner()
                     groups = part.parallel_groups(gates)
                     parallel = tuple(g[0] for g in groups) if groups else ()
-                    step = PlanStep(start=0, end=n, backend=backend_choice, parallel=parallel)
+                    step = PlanStep(
+                        start=0, end=n, backend=backend_choice, parallel=parallel
+                    )
                     return PlanResult(
                         table=[],
                         final_backend=backend_choice,
@@ -454,7 +466,9 @@ class Planner:
 
         table: List[Dict[Optional[Backend], DPEntry]] = [dict() for _ in range(n + 1)]
         start_backend = initial_backend if initial_backend is not None else None
-        table[0][start_backend] = DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)
+        table[0][start_backend] = DPEntry(
+            cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None
+        )
 
         indices = list(range(0, n, batch_size)) + [n]
 
@@ -466,9 +480,13 @@ class Planner:
                 qubits = {q for g in segment for q in g.qubits}
                 num_qubits = len(qubits)
                 num_gates = i - j
-                num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
+                num_meas = sum(
+                    1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"}
+                )
                 num_1q = sum(
-                    1 for g in segment if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+                    1
+                    for g in segment
+                    if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
                 )
                 num_2q = num_gates - num_1q - num_meas
                 backends = self._order_backends(
@@ -493,7 +511,12 @@ class Planner:
                         (
                             backend,
                             _simulation_cost(
-                                self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+                                self.estimator,
+                                backend,
+                                num_qubits,
+                                num_1q,
+                                num_2q,
+                                num_meas,
                             ),
                         )
                         for backend in backends
@@ -514,12 +537,18 @@ class Planner:
                                     frontier=frontier,
                                 )
                                 conv_cost = Cost(
-                                    time=conv_est.cost.time * self.conversion_cost_multiplier,
+                                    time=conv_est.cost.time
+                                    * self.conversion_cost_multiplier,
                                     memory=conv_est.cost.memory,
                                 )
-                                if max_memory is not None and conv_cost.memory > max_memory:
+                                if (
+                                    max_memory is not None
+                                    and conv_cost.memory > max_memory
+                                ):
                                     continue
-                        total_cost = _add_cost(_add_cost(prev_entry.cost, conv_cost), sim_cost)
+                        total_cost = _add_cost(
+                            _add_cost(prev_entry.cost, conv_cost), sim_cost
+                        )
                         entry = table[i].get(backend)
                         if entry is None or _better(total_cost, entry.cost):
                             table[i][backend] = DPEntry(
@@ -528,7 +557,9 @@ class Planner:
                                 prev_backend=prev_backend,
                             )
             if self.top_k and len(table[i]) > self.top_k:
-                best = sorted(table[i].items(), key=lambda kv: kv[1].cost.time)[: self.top_k]
+                best = sorted(table[i].items(), key=lambda kv: kv[1].cost.time)[
+                    : self.top_k
+                ]
                 table[i] = dict(best)
 
         final_entries = table[n]
@@ -603,7 +634,9 @@ class Planner:
             fp.append((g.gate, tuple(g.qubits), params))
         return tuple(fp)
 
-    def cache_lookup(self, gates: List["Gate"], backend: Backend | None = None) -> Optional[PlanResult]:
+    def cache_lookup(
+        self, gates: List["Gate"], backend: Backend | None = None
+    ) -> Optional[PlanResult]:
         """Return a cached plan for ``gates`` if available.
 
         Parameters
@@ -655,10 +688,14 @@ class Planner:
         num_gates = len(gates)
         num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
         num_1q = sum(
-            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            1
+            for g in gates
+            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
-        backends = self._order_backends(_supported_backends(gates, allow_tableau=allow_tableau))
+        backends = self._order_backends(
+            _supported_backends(gates, allow_tableau=allow_tableau)
+        )
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:
             cost = _simulation_cost(
@@ -716,7 +753,9 @@ class Planner:
         depth = circuit.depth
         num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
         num_1q = sum(
-            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            1
+            for g in gates
+            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
 
@@ -748,6 +787,10 @@ class Planner:
             if use_cache:
                 self.cache_insert(gates, result, backend)
             return result
+        # Pre-compute the cost of executing the full circuit on a single backend
+        single_backend_choice, single_cost = self._single_backend(
+            gates, threshold, allow_tableau=allow_tableau
+        )
 
         quick = True
         if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
@@ -760,75 +803,52 @@ class Planner:
             t is not None
             for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
         ):
-            backend_choice, cost = self._single_backend(
-                gates, threshold, allow_tableau=allow_tableau
-            )
-            if threshold is None or cost.memory <= threshold:
+            if threshold is None or single_cost.memory <= threshold:
                 part = Partitioner()
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
-                step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
-                conversions = self._conversions_for_steps(gates, [step])
-                circuit.ssd.conversions = list(conversions)
+                step = PlanStep(
+                    start=0,
+                    end=len(gates),
+                    backend=single_backend_choice,
+                    parallel=parallel,
+                )
                 result = PlanResult(
                     table=[],
-                    final_backend=backend_choice,
+                    final_backend=single_backend_choice,
                     gates=gates,
                     explicit_steps=[step],
-                    explicit_conversions=conversions,
+                    explicit_conversions=[],
                 )
+                circuit.ssd.conversions = []
                 if use_cache:
-                    self.cache_insert(gates, result, backend_choice)
+                    self.cache_insert(gates, result, single_backend_choice)
                 return result
 
-        if (
-            self.force_single_backend_below is not None
-            and (
-                num_qubits <= self.force_single_backend_below
-                or depth <= self.force_single_backend_below
-            )
+        if self.force_single_backend_below is not None and (
+            num_qubits <= self.force_single_backend_below
+            or depth <= self.force_single_backend_below
         ):
-            backend_choice, cost = self._single_backend(
-                gates, threshold, allow_tableau=allow_tableau
-            )
-            if threshold is None or cost.memory <= threshold:
+            if threshold is None or single_cost.memory <= threshold:
                 part = Partitioner()
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
-                step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
-                conversions = self._conversions_for_steps(gates, [step])
-                circuit.ssd.conversions = list(conversions)
+                step = PlanStep(
+                    start=0,
+                    end=len(gates),
+                    backend=single_backend_choice,
+                    parallel=parallel,
+                )
                 result = PlanResult(
                     table=[],
-                    final_backend=backend_choice,
+                    final_backend=single_backend_choice,
                     gates=gates,
                     explicit_steps=[step],
-                    explicit_conversions=conversions,
+                    explicit_conversions=[],
                 )
+                circuit.ssd.conversions = []
                 if use_cache:
-                    self.cache_insert(gates, result, backend_choice)
-                return result
-
-        if threshold is not None and gates:
-            backend_choice, cost = self._single_backend(
-                gates, threshold, allow_tableau=allow_tableau
-            )
-            if cost.memory <= threshold:
-                part = Partitioner()
-                groups = part.parallel_groups(gates)
-                parallel = tuple(g[0] for g in groups) if groups else ()
-                step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
-                conversions = self._conversions_for_steps(gates, [step])
-                circuit.ssd.conversions = list(conversions)
-                result = PlanResult(
-                    table=[],
-                    final_backend=backend_choice,
-                    gates=gates,
-                    explicit_steps=[step],
-                    explicit_conversions=conversions,
-                )
-                if use_cache:
-                    self.cache_insert(gates, result, backend_choice)
+                    self.cache_insert(gates, result, single_backend_choice)
                 return result
 
         # First perform a coarse plan using the configured batch size.
@@ -838,6 +858,36 @@ class Planner:
             max_memory=threshold,
             allow_tableau=allow_tableau,
         )
+
+        dp_cost = (
+            coarse.table[-1][coarse.final_backend].cost
+            if coarse.table
+            else Cost(0.0, 0.0)
+        )
+
+        if _better(single_cost, dp_cost) and (
+            threshold is None or single_cost.memory <= threshold
+        ):
+            part = Partitioner()
+            groups = part.parallel_groups(gates)
+            parallel = tuple(g[0] for g in groups) if groups else ()
+            step = PlanStep(
+                start=0,
+                end=len(gates),
+                backend=single_backend_choice,
+                parallel=parallel,
+            )
+            result = PlanResult(
+                table=[],
+                final_backend=single_backend_choice,
+                gates=gates,
+                explicit_steps=[step],
+                explicit_conversions=[],
+            )
+            circuit.ssd.conversions = []
+            if use_cache:
+                self.cache_insert(gates, result, single_backend_choice)
+            return result
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
@@ -854,7 +904,7 @@ class Planner:
         refined_steps: List[PlanStep] = []
         prev_backend: Optional[Backend] = None
         for step in coarse.steps:
-            segment = gates[step.start:step.end]
+            segment = gates[step.start : step.end]
             sub = self._dp(
                 segment,
                 initial_backend=prev_backend,
