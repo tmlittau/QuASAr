@@ -137,8 +137,8 @@ class DummyScheduler:
     def prepare_run(self, circuit, plan=None, *, backend=None):
         return plan if plan is not None else PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
 
-    def run(self, circuit, plan, *, monitor=None):
-        self.run_calls.append(plan.final_backend)
+    def run(self, circuit, plan, *, monitor=None, instrument=False):
+        self.run_calls.append((plan.final_backend, instrument))
         return SSD([
             SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
         ])
@@ -166,7 +166,7 @@ def test_run_quasar_multiple_aggregates_statistics():
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
     assert scheduler.plan_calls == [Backend.TABLEAU] * 3
-    assert scheduler.run_calls == [Backend.TABLEAU] * 3
+    assert scheduler.run_calls == [(Backend.TABLEAU, True)] * 3
     assert record["backend"] == Backend.TABLEAU.name
 
 
@@ -181,7 +181,7 @@ class PlannerErrorScheduler:
     def prepare_run(self, circuit, plan=None, *, backend=None):  # pragma: no cover - unused
         return plan
 
-    def run(self, circuit, plan, *, monitor=None):  # pragma: no cover - unused
+    def run(self, circuit, plan, *, monitor=None, instrument=False):  # pragma: no cover - unused
         return SSD([
             SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
         ])
@@ -207,7 +207,7 @@ class RunErrorScheduler:
     def prepare_run(self, circuit, plan=None, *, backend=None):
         return plan
 
-    def run(self, circuit, plan, *, monitor=None):
+    def run(self, circuit, plan, *, monitor=None, instrument=False):
         raise ValueError("run boom")
 
 

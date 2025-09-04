@@ -37,17 +37,21 @@ class DummyPlanner:
 class DummyScheduler:
     def __init__(self):
         self.planner = DummyPlanner()
+        self.instrument_calls = []
     def prepare_run(self, circuit, plan=None, *, backend=None):
         return PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
 
-    def run(self, circuit, plan, *, monitor=None):
+    def run(self, circuit, plan, *, monitor=None, instrument=False):
+        self.instrument_calls.append(instrument)
         self._data = [0] * 10000
         return "done"
 
 
 def test_run_quasar_records_memory():
     runner = BenchmarkRunner()
-    record = runner.run_quasar(None, DummyScheduler())
+    scheduler = DummyScheduler()
+    record = runner.run_quasar(None, scheduler)
     assert record["prepare_peak_memory"] > 0
     assert record["run_peak_memory"] > 0
     assert "backend" in record and record["backend"] is None
+    assert scheduler.instrument_calls == [True]
