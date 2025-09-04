@@ -114,11 +114,24 @@ class CircuitAnalyzer:
 
         num_qubits = self.circuit.num_qubits
         num_gates = len(self.circuit.gates)
+        num_meas = sum(
+            1 for g in self.circuit.gates if g.gate.upper() in {"MEASURE", "RESET"}
+        )
+        num_1q = sum(
+            1
+            for g in self.circuit.gates
+            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = num_gates - num_1q - num_meas
         estimates: Dict[Backend, Cost] = {
-            Backend.STATEVECTOR: self.estimator.statevector(num_qubits, num_gates),
+            Backend.STATEVECTOR: self.estimator.statevector(
+                num_qubits, num_1q, num_2q, num_meas
+            ),
             Backend.TABLEAU: self.estimator.tableau(num_qubits, num_gates),
             Backend.MPS: self.estimator.mps(num_qubits, num_gates, chi=self.chi),
-            Backend.DECISION_DIAGRAM: self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits),
+            Backend.DECISION_DIAGRAM: self.estimator.decision_diagram(
+                num_gates=num_gates, frontier=num_qubits
+            ),
         }
         return estimates
 

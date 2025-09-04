@@ -203,17 +203,23 @@ def _supported_backends(gates: Iterable[Gate]) -> List[Backend]:
 
 
 def _simulation_cost(
-    estimator: CostEstimator, backend: Backend, num_qubits: int, num_gates: int
+    estimator: CostEstimator,
+    backend: Backend,
+    num_qubits: int,
+    num_1q_gates: int,
+    num_2q_gates: int,
+    num_meas: int,
 ) -> Cost:
     """Query the cost estimator for a simulation fragment."""
 
+    num_gates = num_1q_gates + num_2q_gates + num_meas
     if backend == Backend.TABLEAU:
         return estimator.tableau(num_qubits, num_gates)
     if backend == Backend.MPS:
         return estimator.mps(num_qubits, num_gates, chi=4)
     if backend == Backend.DECISION_DIAGRAM:
         return estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
-    return estimator.statevector(num_qubits, num_gates)
+    return estimator.statevector(num_qubits, num_1q_gates, num_2q_gates, num_meas)
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +355,11 @@ class Planner:
                 qubits = {q for g in segment for q in g.qubits}
                 num_qubits = len(qubits)
                 num_gates = i - j
+                num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
+                num_1q = sum(
+                    1 for g in segment if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+                )
+                num_2q = num_gates - num_1q - num_meas
                 backends = self._order_backends(_supported_backends(segment))
                 if forced_backend is not None:
                     if forced_backend not in backends:
@@ -358,13 +369,20 @@ class Planner:
                     backends = [forced_backend]
                 candidates: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
-                    cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+                    cost = _simulation_cost(
+                        self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+                    )
                     if max_memory is not None and cost.memory > max_memory:
                         continue
                     candidates.append((backend, cost))
                 if not candidates:
                     candidates = [
-                        (backend, _simulation_cost(self.estimator, backend, num_qubits, num_gates))
+                        (
+                            backend,
+                            _simulation_cost(
+                                self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+                            ),
+                        )
                         for backend in backends
                     ]
                 for backend, sim_cost in candidates:
@@ -504,16 +522,28 @@ class Planner:
         qubits = {q for g in gates for q in g.qubits}
         num_qubits = len(qubits)
         num_gates = len(gates)
+        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+        num_1q = sum(
+            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = num_gates - num_1q - num_meas
         backends = self._order_backends(_supported_backends(gates))
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:
-            cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+            cost = _simulation_cost(
+                self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+            )
             if max_memory is not None and cost.memory > max_memory:
                 continue
             candidates.append((backend, cost))
         if not candidates:
             candidates = [
-                (backend, _simulation_cost(self.estimator, backend, num_qubits, num_gates))
+                (
+                    backend,
+                    _simulation_cost(
+                        self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+                    ),
+                )
                 for backend in backends
             ]
         return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))
@@ -550,6 +580,11 @@ class Planner:
         num_qubits = circuit.num_qubits
         num_gates = circuit.num_gates
         depth = circuit.depth
+        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+        num_1q = sum(
+            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = num_gates - num_1q - num_meas
 
         if backend is not None:
             # Allow explicitly requested backends as long as they can simulate the
@@ -559,7 +594,9 @@ class Planner:
                 names = [g.gate.upper() for g in gates]
                 if names and not all(name in CLIFFORD_GATES for name in names):
                     raise ValueError(f"Backend {backend} unsupported for given circuit")
-            cost = _simulation_cost(self.estimator, backend, num_qubits, num_gates)
+            cost = _simulation_cost(
+                self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+            )
             if threshold is not None and cost.memory > threshold:
                 raise ValueError("Requested backend exceeds memory threshold")
             part = Partitioner()

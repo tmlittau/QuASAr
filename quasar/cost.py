@@ -60,7 +60,9 @@ class CostEstimator:
     ):
         # Baseline coefficients; tuned empirically in a full system.
         self.coeff: Dict[str, float] = {
-            "sv_gate": 1.0,
+            "sv_gate_1q": 1.0,
+            "sv_gate_2q": 1.0,
+            "sv_meas": 1.0,
             "sv_mem": 1.0,
             "tab_gate": 1.0,
             "tab_mem": 1.0,
@@ -106,9 +108,20 @@ class CostEstimator:
             coeff = json.load(fh)
         return cls(coeff=coeff)
 
-    def statevector(self, num_qubits: int, num_gates: int) -> Cost:
+    def statevector(
+        self,
+        num_qubits: int,
+        num_1q_gates: int,
+        num_2q_gates: int,
+        num_meas: int,
+    ) -> Cost:
         amp = 2 ** num_qubits
-        time = self.coeff["sv_gate"] * num_gates * amp
+        gate_time = (
+            self.coeff["sv_gate_1q"] * num_1q_gates
+            + self.coeff["sv_gate_2q"] * num_2q_gates
+            + self.coeff["sv_meas"] * num_meas
+        )
+        time = gate_time * amp
         memory = self.coeff["sv_mem"] * amp
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)

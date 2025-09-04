@@ -543,9 +543,9 @@ def test_cost_noise_does_not_loop_replanning():
             return SSD([])
 
     class UnderEstimator(CostEstimator):
-        def statevector(self, n, m):  # type: ignore[override]
+        def statevector(self, n, g1, g2, meas):  # type: ignore[override]
             # Slightly underestimate time so observed cost is within tolerance
-            base = super().statevector(n, m)
+            base = super().statevector(n, g1, g2, meas)
             return Cost(time=base.time * 0.99, memory=base.memory)
 
     planner = SingleStepPlanner()
