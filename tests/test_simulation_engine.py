@@ -31,10 +31,8 @@ def test_memory_threshold_triggers_adaptive_plan():
         {"gate": "X", "qubits": [1]},
     ])
     high = SimulationEngine().simulate(circuit, memory_threshold=1000)
-    assert high.plan.explicit_steps is not None
     assert len(high.plan.steps) == 1
     low = SimulationEngine().simulate(circuit, memory_threshold=1)
-    assert low.plan.explicit_steps is None
     assert len(low.plan.steps) > 1
 
 

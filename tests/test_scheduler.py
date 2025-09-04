@@ -3,6 +3,7 @@ from quasar.planner import PlanStep, Planner
 from quasar_convert import ConversionEngine
 from quasar.cost import Backend, Cost, CostEstimator
 from quasar import SSD
+from quasar.ssd import ConversionLayer
 import time
 from types import SimpleNamespace
 from quasar.backends import StimBackend, StatevectorBackend, MPSBackend
@@ -75,7 +76,16 @@ class TwoStepPlanner(Planner):
             PlanStep(0, 5, Backend.TABLEAU),
             PlanStep(5, 6, Backend.MPS),
         ]
-        return SimpleNamespace(steps=steps)
+        conv = ConversionLayer(
+            boundary=(0,),
+            source=Backend.TABLEAU,
+            target=Backend.MPS,
+            rank=2,
+            frontier=1,
+            primitive="B2B",
+            cost=Cost(time=0.0, memory=0.0),
+        )
+        return SimpleNamespace(steps=steps, conversions=[conv])
 
 
 class DummyBackend:
@@ -385,7 +395,16 @@ class SVThenMPSPlanner(Planner):
             PlanStep(0, 1, Backend.STATEVECTOR),
             PlanStep(1, 2, Backend.MPS),
         ]
-        return SimpleNamespace(steps=steps)
+        conv = ConversionLayer(
+            boundary=(0,),
+            source=Backend.STATEVECTOR,
+            target=Backend.MPS,
+            rank=2,
+            frontier=1,
+            primitive="B2B",
+            cost=Cost(time=0.0, memory=0.0),
+        )
+        return SimpleNamespace(steps=steps, conversions=[conv])
 
 
 def test_conversion_fallback_path():

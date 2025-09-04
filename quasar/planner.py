@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
 from .partitioner import CLIFFORD_GATES, Partitioner
+from .ssd import ConversionLayer
 from . import config
 
 if True:  # pragma: no cover - used for type checking when available
@@ -67,6 +68,7 @@ class PlanResult:
     final_backend: Optional[Backend]
     gates: List['Gate']
     explicit_steps: Optional[List[PlanStep]] = None
+    explicit_conversions: Optional[List['ConversionLayer']] = None
 
     # The ``steps`` property recovers the final plan lazily using the
     # backpointers contained in ``table``.  If ``explicit_steps`` is provided
@@ -77,6 +79,20 @@ class PlanResult:
         if self.explicit_steps is not None:
             return self.explicit_steps
         return self.recover()
+
+    @property
+    def conversions(self) -> List['ConversionLayer']:
+        """Conversion layers associated with the plan.
+
+        When planning populates conversions explicitly (``explicit_conversions``)
+        they are returned directly.  Otherwise an empty list is provided as the
+        planner lacks sufficient context to recover conversion information from
+        the DP table alone.
+        """
+
+        if self.explicit_conversions is not None:
+            return self.explicit_conversions
+        return []
 
     def recover(
         self,
@@ -395,6 +411,58 @@ class Planner:
         return PlanResult(table=table, final_backend=backend, gates=gates)
 
     # ------------------------------------------------------------------
+    def _conversions_for_steps(
+        self, gates: List["Gate"], steps: List[PlanStep]
+    ) -> List[ConversionLayer]:
+        """Derive conversion layers for a sequence of plan steps."""
+
+        if len(steps) <= 1:
+            return []
+
+        n = len(gates)
+        prefix_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
+        running: Set[int] = set()
+        for i, gate in enumerate(gates, start=1):
+            running |= set(gate.qubits)
+            prefix_qubits[i] = running.copy()
+
+        future_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
+        running.clear()
+        for idx in range(n - 1, -1, -1):
+            running |= set(gates[idx].qubits)
+            future_qubits[idx] = running.copy()
+
+        layers: List[ConversionLayer] = []
+        for prev, step in zip(steps, steps[1:]):
+            if prev.backend == step.backend:
+                continue
+            cut = step.start
+            boundary = sorted(prefix_qubits[cut] & future_qubits[cut])
+            if not boundary:
+                continue
+            rank = 2 ** len(boundary)
+            frontier = len(boundary)
+            conv_est = self.estimator.conversion(
+                prev.backend,
+                step.backend,
+                num_qubits=len(boundary),
+                rank=rank,
+                frontier=frontier,
+            )
+            layers.append(
+                ConversionLayer(
+                    boundary=tuple(boundary),
+                    source=prev.backend,
+                    target=step.backend,
+                    rank=rank,
+                    frontier=frontier,
+                    primitive=conv_est.primitive,
+                    cost=conv_est.cost,
+                )
+            )
+        return layers
+
+    # ------------------------------------------------------------------
     def _fingerprint(self, gates: List["Gate"]) -> Hashable:
         """Create an immutable fingerprint for a sequence of gates."""
 
@@ -476,6 +544,7 @@ class Planner:
         if use_cache:
             cached = self.cache_lookup(gates, backend)
             if cached is not None:
+                circuit.ssd.conversions = list(cached.conversions)
                 return cached
 
         num_qubits = circuit.num_qubits
@@ -497,7 +566,15 @@ class Planner:
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(start=0, end=len(gates), backend=backend, parallel=parallel)
-            result = PlanResult(table=[], final_backend=backend, gates=gates, explicit_steps=[step])
+            conversions = self._conversions_for_steps(gates, [step])
+            circuit.ssd.conversions = list(conversions)
+            result = PlanResult(
+                table=[],
+                final_backend=backend,
+                gates=gates,
+                explicit_steps=[step],
+                explicit_conversions=conversions,
+            )
             if use_cache:
                 self.cache_insert(gates, result, backend)
             return result
@@ -519,7 +596,15 @@ class Planner:
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
                 step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
-                result = PlanResult(table=[], final_backend=backend_choice, gates=gates, explicit_steps=[step])
+                conversions = self._conversions_for_steps(gates, [step])
+                circuit.ssd.conversions = list(conversions)
+                result = PlanResult(
+                    table=[],
+                    final_backend=backend_choice,
+                    gates=gates,
+                    explicit_steps=[step],
+                    explicit_conversions=conversions,
+                )
                 if use_cache:
                     self.cache_insert(gates, result, backend_choice)
                 return result
@@ -531,7 +616,15 @@ class Planner:
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
                 step = PlanStep(start=0, end=len(gates), backend=backend_choice, parallel=parallel)
-                result = PlanResult(table=[], final_backend=backend_choice, gates=gates, explicit_steps=[step])
+                conversions = self._conversions_for_steps(gates, [step])
+                circuit.ssd.conversions = list(conversions)
+                result = PlanResult(
+                    table=[],
+                    final_backend=backend_choice,
+                    gates=gates,
+                    explicit_steps=[step],
+                    explicit_conversions=conversions,
+                )
                 if use_cache:
                     self.cache_insert(gates, result, backend_choice)
                 return result
@@ -541,6 +634,11 @@ class Planner:
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
+            steps = list(coarse.steps)
+            conversions = self._conversions_for_steps(gates, steps)
+            circuit.ssd.conversions = list(conversions)
+            coarse.explicit_steps = steps
+            coarse.explicit_conversions = conversions
             if use_cache:
                 self.cache_insert(gates, coarse)
             return coarse
@@ -569,7 +667,15 @@ class Planner:
             prev_backend = step.backend
 
         final_backend = refined_steps[-1].backend if refined_steps else None
-        result = PlanResult(table=[], final_backend=final_backend, gates=gates, explicit_steps=refined_steps)
+        conversions = self._conversions_for_steps(gates, refined_steps)
+        circuit.ssd.conversions = list(conversions)
+        result = PlanResult(
+            table=[],
+            final_backend=final_backend,
+            gates=gates,
+            explicit_steps=refined_steps,
+            explicit_conversions=conversions,
+        )
         if use_cache:
             self.cache_insert(gates, result)
         return result
