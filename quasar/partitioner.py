@@ -122,9 +122,17 @@ class Partitioner:
                 elif backend_trial == Backend.MPS:
                     current_cost = self.estimator.mps(len(current_qubits), 1, chi=4)
                 elif backend_trial == Backend.DECISION_DIAGRAM:
-                    current_cost = self.estimator.decision_diagram(num_gates=1, frontier=len(current_qubits))
+                    current_cost = self.estimator.decision_diagram(
+                        num_gates=1, frontier=len(current_qubits)
+                    )
                 else:
-                    current_cost = self.estimator.statevector(len(current_qubits), 1)
+                    is_meas = gate.gate.upper() in {"MEASURE", "RESET"}
+                    num_1q = 1 if len(gate.qubits) == 1 and not is_meas else 0
+                    num_2q = 1 if len(gate.qubits) > 1 else 0
+                    num_meas = 1 if is_meas else 0
+                    current_cost = self.estimator.statevector(
+                        len(current_qubits), num_1q, num_2q, num_meas
+                    )
                 current_backend = backend_trial
             else:
                 current_gates = trial_gates
@@ -199,6 +207,11 @@ class Partitioner:
 
         names = [g.gate.upper() for g in gates]
         num_gates = len(gates)
+        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+        num_1q = sum(
+            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = num_gates - num_1q - num_meas
 
         if all(name in CLIFFORD_GATES for name in names):
             backend = Backend.TABLEAU
@@ -207,7 +220,7 @@ class Partitioner:
 
         if num_qubits < 20:
             backend = Backend.STATEVECTOR
-            cost = self.estimator.statevector(num_qubits, num_gates)
+            cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
             return backend, cost
 
         multi = [g for g in gates if len(g.qubits) > 1]
@@ -226,7 +239,7 @@ class Partitioner:
             return backend, cost
 
         backend = Backend.STATEVECTOR
-        cost = self.estimator.statevector(num_qubits, num_gates)
+        cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
         return backend, cost
 
     # ------------------------------------------------------------------

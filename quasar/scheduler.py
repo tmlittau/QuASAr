@@ -12,7 +12,7 @@ from .planner import Planner, PlanStep
 from .partitioner import CLIFFORD_GATES
 from .cost import Backend, Cost
 from . import config
-from .circuit import Circuit
+from .circuit import Circuit, Gate
 from .ssd import SSD, ConversionLayer, SSDPartition
 from .backends import (
     AerStatevectorBackend,
@@ -227,8 +227,7 @@ class Scheduler:
                         sims[key_p] = sim_p
                     jobs.append((sims[key_p], glist))
 
-                num_q = len({q for grp in step.parallel for q in grp})
-                est_cost = self._estimate_cost(target, num_q, len(segment))
+                est_cost = self._estimate_cost(target, segment)
                 tracemalloc.start()
                 start_time = time.perf_counter()
 
@@ -246,22 +245,24 @@ class Scheduler:
                 observed = Cost(time=elapsed, memory=float(peak))
 
                 coeff = {
-                    Backend.STATEVECTOR: ("sv_gate", "sv_mem"),
-                    Backend.MPS: ("mps_gate", "mps_mem"),
-                    Backend.TABLEAU: ("tab_gate", "tab_mem"),
-                    Backend.DECISION_DIAGRAM: ("dd_gate", "dd_mem"),
+                    Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                    Backend.MPS: (["mps_gate"], "mps_mem"),
+                    Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                    Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
                 }[target]
                 updates: Dict[str, float] = {}
                 est = self.planner.estimator
-                gate_key, mem_key = coeff
+                gate_keys, mem_key = coeff
                 if est_cost.time > 0:
-                    updates[gate_key] = est.coeff[gate_key] * observed.time / est_cost.time
+                    ratio = observed.time / est_cost.time
+                    for gk in gate_keys:
+                        updates[gk] = est.coeff[gk] * ratio
                 if est_cost.memory > 0 and observed.memory > 0:
                     updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
                 if updates:
                     est.update_coefficients(updates)
                     # Recompute the estimate with the updated coefficients
-                    est_cost = self._estimate_cost(target, num_q, len(segment))
+                    est_cost = self._estimate_cost(target, segment)
 
                 trigger_replan = False
                 if observed.time > est_cost.time * (1 + self.replan_tolerance):
@@ -401,7 +402,7 @@ class Scheduler:
                     if k[0] == qubits and k != key:
                         sims.pop(k)
 
-            est_cost = self._estimate_cost(target, len(qubits), len(segment))
+            est_cost = self._estimate_cost(target, segment)
 
             tracemalloc.start()
             start_time = time.perf_counter()
@@ -416,22 +417,24 @@ class Scheduler:
 
             # Update cost model based on observation
             coeff = {
-                Backend.STATEVECTOR: ("sv_gate", "sv_mem"),
-                Backend.MPS: ("mps_gate", "mps_mem"),
-                Backend.TABLEAU: ("tab_gate", "tab_mem"),
-                Backend.DECISION_DIAGRAM: ("dd_gate", "dd_mem"),
+                Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                Backend.MPS: (["mps_gate"], "mps_mem"),
+                Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
             }[target]
             updates: Dict[str, float] = {}
             est = self.planner.estimator
-            gate_key, mem_key = coeff
+            gate_keys, mem_key = coeff
             if est_cost.time > 0:
-                updates[gate_key] = est.coeff[gate_key] * observed.time / est_cost.time
+                ratio = observed.time / est_cost.time
+                for gk in gate_keys:
+                    updates[gk] = est.coeff[gk] * ratio
             if est_cost.memory > 0 and observed.memory > 0:
                 updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
             if updates:
                 est.update_coefficients(updates)
                 # Refresh the estimated cost with updated coefficients
-                est_cost = self._estimate_cost(target, len(qubits), len(segment))
+                est_cost = self._estimate_cost(target, segment)
 
             trigger_replan = False
             if observed.time > est_cost.time * (1 + self.replan_tolerance):
@@ -468,12 +471,19 @@ class Scheduler:
         return circuit.ssd
 
     # ------------------------------------------------------------------
-    def _estimate_cost(self, backend: Backend, n: int, m: int) -> Cost:
+    def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:
         est = self.planner.estimator
+        n = len({q for g in gates for q in g.qubits})
+        m = len(gates)
+        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+        num_1q = sum(
+            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = m - num_1q - num_meas
         if backend == Backend.TABLEAU:
             return est.tableau(n, m)
         if backend == Backend.MPS:
             return est.mps(n, m, chi=4)
         if backend == Backend.DECISION_DIAGRAM:
             return est.decision_diagram(num_gates=m, frontier=n)
-        return est.statevector(n, m)
+        return est.statevector(n, num_1q, num_2q, num_meas)

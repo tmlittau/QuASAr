@@ -105,7 +105,11 @@ from quasar import CostEstimator
 
 with open("results/ghz.json") as f:
     data = json.load(f)
-coeff = {"sv_gate": data[0]["avg_time"] / len(circuit.gates)}
+coeff = {
+    "sv_gate_1q": data[0]["avg_time"] / len(circuit.gates),
+    "sv_gate_2q": data[0]["avg_time"] / len(circuit.gates),
+    "sv_meas": data[0]["avg_time"] / len(circuit.gates),
+}
 
 est = CostEstimator()
 est.update_coefficients(coeff)

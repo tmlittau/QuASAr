@@ -4,8 +4,8 @@ import math
 
 def test_statevector_scaling():
     est = CostEstimator()
-    small = est.statevector(num_qubits=3, num_gates=1)
-    large = est.statevector(num_qubits=4, num_gates=1)
+    small = est.statevector(num_qubits=3, num_1q_gates=1, num_2q_gates=0, num_meas=0)
+    large = est.statevector(num_qubits=4, num_1q_gates=1, num_2q_gates=0, num_meas=0)
     assert large.time == 2 * small.time
     assert large.memory == 2 * small.memory
     assert small.log_depth == math.log2(3)

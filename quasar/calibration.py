@@ -36,8 +36,11 @@ def benchmark_statevector(num_qubits: int = 8, num_gates: int = 50) -> Dict[str,
     amp = 1 << num_qubits
     # Simulate state update on a dense vector
     elapsed = _bench_loop(amp * num_gates)
+    coeff = elapsed / (num_gates * amp)
     return {
-        "sv_gate": elapsed / (num_gates * amp),
+        "sv_gate_1q": coeff,
+        "sv_gate_2q": coeff,
+        "sv_meas": coeff,
         "sv_mem": 16.0,  # Rough bytes per amplitude for complex128
     }
 

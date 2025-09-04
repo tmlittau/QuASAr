@@ -34,9 +34,16 @@ def _plan_cost(planner: Planner, circuit: Circuit, steps):
     total = Cost(0.0, 0.0)
     prev_backend = None
     for step in steps:
-        segment = gates[step.start:step.end]
+        segment = gates[step.start : step.end]
         qubits = {q for g in segment for q in g.qubits}
-        sim = _simulation_cost(planner.estimator, step.backend, len(qubits), len(segment))
+        num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
+        num_1q = sum(
+            1 for g in segment if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = len(segment) - num_1q - num_meas
+        sim = _simulation_cost(
+            planner.estimator, step.backend, len(qubits), num_1q, num_2q, num_meas
+        )
         conv = Cost(0.0, 0.0)
         if prev_backend is not None and prev_backend != step.backend:
             boundary = boundaries[step.start]
