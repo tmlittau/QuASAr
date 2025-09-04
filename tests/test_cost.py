@@ -125,3 +125,57 @@ def test_conversion_caps():
     assert res.primitive == "Full"
     assert math.isinf(res.cost.time)
     assert math.isinf(res.cost.memory)
+
+
+def test_b2b_uses_svd_min():
+    est = CostEstimator(
+        coeff={
+            "b2b_copy": 0.0,
+            "b2b_svd": 1.0,
+            "ingest_mps": 0.0,
+            "conversion_base": 0.0,
+            "lw_extract": 100.0,
+            "full_extract": 100.0,
+        }
+    )
+    res = est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=2,
+        rank=4,
+        frontier=0,
+    )
+    assert res.primitive == "B2B"
+    # min(2 * 4^2, 4 * 2^2) = 16
+    assert res.cost.time == 16
+
+
+def test_st_chi_cap_override():
+    coeff = {
+        "b2b_svd": 1000.0,
+        "b2b_copy": 1000.0,
+        "lw_extract": 1000.0,
+        "full_extract": 1000.0,
+        "ingest_mps": 0.0,
+        "conversion_base": 0.0,
+    }
+    est_default = CostEstimator(coeff=coeff)
+    res_default = est_default.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=4,
+        rank=32,
+        frontier=0,
+    )
+    coeff["st_chi_cap"] = 8.0
+    est_custom = CostEstimator(coeff=coeff)
+    res_custom = est_custom.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=4,
+        rank=32,
+        frontier=0,
+    )
+    assert res_default.primitive == "ST"
+    assert res_custom.primitive == "ST"
+    assert res_custom.cost.time < res_default.cost.time

@@ -168,7 +168,9 @@ std::vector<std::complex<double>> ConversionEngine::build_bridge_tensor(const SS
     return tensor;
 }
 
-ConversionResult ConversionEngine::convert(const SSD& ssd) const {
+ConversionResult ConversionEngine::convert(const SSD& ssd,
+                                           std::size_t window_1q_gates,
+                                           std::size_t window_2q_gates) const {
     const std::size_t boundary = ssd.boundary_qubits.size();
     const std::size_t rank = ssd.top_s;
 
@@ -184,7 +186,9 @@ ConversionResult ConversionEngine::convert(const SSD& ssd) const {
                                              rank * boundary * boundary);
     const double cost_b2b = svd_cost + static_cast<double>(boundary) * rank * rank +
                             rank * rank;  // ingest
-    const double cost_lw = static_cast<double>(dense) * 2.0;  // extract + ingest
+    const double gate_cost =
+        static_cast<double>(window_1q_gates) + static_cast<double>(window_2q_gates);
+    const double cost_lw = static_cast<double>(dense) * (2.0 + gate_cost);  // extract + gates + ingest
     const double cost_st = std::pow(static_cast<double>(chi_tilde), 3) +
                            chi_tilde * chi_tilde;  // stage + ingest
     const double cost_full = static_cast<double>(full) * 2.0;  // full extraction

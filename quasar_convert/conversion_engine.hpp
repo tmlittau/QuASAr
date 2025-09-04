@@ -106,8 +106,11 @@ class ConversionEngine {
 
     // Choose a conversion primitive for the given SSD by estimating the cost of
     // each available strategy (B2B, LW, ST and Full) and returning the minimal
-    // option.
-    ConversionResult convert(const SSD& ssd) const;
+    // option.  Gate counts within the local window can be provided to account
+    // for dense region depth when considering the LW primitive.
+    ConversionResult convert(const SSD& ssd,
+                             std::size_t window_1q_gates = 0,
+                             std::size_t window_2q_gates = 0) const;
 
     // Provide a concrete statevector representation for the boundary qubits.
     // A phase-factorable stabilizer state is synthesised from the leading

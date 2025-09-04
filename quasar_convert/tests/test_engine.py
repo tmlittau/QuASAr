@@ -20,6 +20,14 @@ class ConversionPrimitiveTests(unittest.TestCase):
         res = self.eng.convert(ssd)
         self.assertEqual(res.primitive, qc.Primitive.LW)
 
+    def test_lw_gate_counts_increase_cost(self):
+        ssd = qc.SSD()
+        ssd.boundary_qubits = list(range(8))
+        ssd.top_s = 2
+        base = self.eng.convert(ssd)
+        with_gates = self.eng.convert(ssd, window_1q_gates=3, window_2q_gates=1)
+        self.assertGreater(with_gates.cost, base.cost)
+
     def test_st_selected(self):
         ssd = qc.SSD()
         ssd.boundary_qubits = list(range(20))
