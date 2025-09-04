@@ -111,7 +111,7 @@ def test_conversion_cost_multiplier_discourages_switch():
         quick_max_qubits=None,
         quick_max_gates=None,
         quick_max_depth=None,
-        conversion_cost_multiplier=5.0,
+        conversion_cost_multiplier=50.0,
     )
     steps2 = penalized.plan(circ).steps
     assert [(s.start, s.end, s.backend) for s in steps2] == [

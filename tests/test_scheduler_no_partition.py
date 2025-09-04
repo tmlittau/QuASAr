@@ -44,6 +44,7 @@ def test_bell_circuit_single_partition():
     engine = SimulationEngine()
     result = engine.simulate(circuit)
     assert len(result.ssd.partitions) == 1
+    assert not result.ssd.conversions
 
 
 def test_three_qubit_ghz_single_partition():
@@ -51,6 +52,7 @@ def test_three_qubit_ghz_single_partition():
     scheduler = Scheduler()
     ssd = scheduler.run(circuit)
     assert len(ssd.partitions) == 1
+    assert not ssd.conversions
 
 
 def test_random_two_qubit_circuit_single_partition():
@@ -58,3 +60,15 @@ def test_random_two_qubit_circuit_single_partition():
     engine = SimulationEngine()
     result = engine.simulate(circuit)
     assert len(result.ssd.partitions) == 1
+    assert not result.ssd.conversions
+
+
+def test_fifteen_qubit_circuit_single_backend():
+    qc = QuantumCircuit(15)
+    for i in range(14):
+        qc.cx(i, i + 1)
+    circuit = Circuit.from_qiskit(qc)
+    engine = SimulationEngine(scheduler=Scheduler(quick_max_qubits=15))
+    result = engine.simulate(circuit)
+    assert len(result.ssd.partitions) == 1
+    assert not result.ssd.conversions

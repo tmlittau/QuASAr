@@ -79,6 +79,8 @@ class CostEstimator:
             "ingest_tab": 1.0,
             "ingest_mps": 1.0,
             "ingest_dd": 1.0,
+            # Fixed overhead applied to every backend switch
+            "conversion_base": 0.0,
         }
         if coeff:
             self.coeff.update(coeff)
@@ -159,6 +161,10 @@ class CostEstimator:
             Decision diagram frontier size ``r``.
         window:
             Optional dense extraction window ``w`` for the LW primitive.
+        Notes
+        -----
+        A fixed ``conversion_base`` overhead is applied to every backend switch
+        and ingestion costs are scaled with the full register size.
         """
 
         s_cap = s_max if s_max is not None else self.s_max
@@ -172,28 +178,32 @@ class CostEstimator:
         ):
             return ConversionEstimate("Full", Cost(float("inf"), float("inf")))
 
+        full = 2 ** num_qubits
+        ingest_time = self.coeff[f"ingest_{target.value}"] * full
+        base_time = self.coeff.get("conversion_base", 0.0)
+        overhead = ingest_time + base_time
+
         # --- B2B primitive ---
         b2b_time = (
             self.coeff["b2b_svd"] * (rank ** 3)
             + self.coeff["b2b_copy"] * num_qubits * (rank ** 2)
-            + self.coeff[f"ingest_{target.value}"] * (rank ** 2)
+            + overhead
         )
-        b2b_mem = num_qubits * rank ** 2
+        b2b_mem = max(num_qubits * rank ** 2, full)
 
         # --- LW primitive ---
         w = window if window is not None else min(num_qubits, 4)
         dense = 2 ** w
-        lw_time = self.coeff["lw_extract"] * dense + self.coeff[f"ingest_{target.value}"] * dense
-        lw_mem = dense
+        lw_time = self.coeff["lw_extract"] * dense + overhead
+        lw_mem = max(dense, full)
 
         # --- ST primitive ---
         chi_tilde = min(rank, 16)
-        st_time = self.coeff["st_stage"] * (chi_tilde ** 3) + self.coeff[f"ingest_{target.value}"] * (chi_tilde ** 2)
-        st_mem = num_qubits * (chi_tilde ** 2)
+        st_time = self.coeff["st_stage"] * (chi_tilde ** 3) + overhead
+        st_mem = max(num_qubits * (chi_tilde ** 2), full)
 
         # --- Full extraction primitive ---
-        full = 2 ** num_qubits
-        full_time = self.coeff["full_extract"] * full + self.coeff[f"ingest_{target.value}"] * full
+        full_time = self.coeff["full_extract"] * full + overhead
         full_mem = full
 
         candidates = {
