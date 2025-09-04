@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import statistics
 import sys
 from pathlib import Path
 from typing import Iterable, List, Callable
@@ -14,8 +13,8 @@ from typing import Iterable, List, Callable
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from runner import BenchmarkRunner
-from backends import BackendAdapter
-from quasar.backends import StatevectorBackend
+from quasar import SimulationEngine
+from quasar.cost import Backend
 import circuits as circuit_lib
 
 
@@ -42,35 +41,42 @@ def resolve_circuit(name: str) -> Callable[[int], object]:
         raise SystemExit(f"unknown circuit family '{name}'") from exc
 
 
-def run_suite(circuit_fn: Callable[[int], object], qubits: Iterable[int], repetitions: int) -> List[dict]:
-    backend = BackendAdapter(name="statevector", backend_cls=StatevectorBackend)
+def run_suite(
+    circuit_fn: Callable[[int], object],
+    qubits: Iterable[int],
+    repetitions: int,
+) -> List[dict]:
+    """Execute ``circuit_fn`` for each qubit count using a fixed backend.
+
+    The helper runs QuASAr's scheduler multiple times, forcing the
+    :class:`~quasar.cost.Backend.STATEVECTOR` backend so that results are
+    comparable to single-method simulators.
+    """
+
+    engine = SimulationEngine()
     results = []
     for n in qubits:
         circuit = circuit_fn(n)
         runner = BenchmarkRunner()
-        for _ in range(repetitions):
-            runner.run(circuit, backend, return_state=False)
-        times = [r["run_time"] for r in runner.results]
-        total_times = [r["total_time"] for r in runner.results]
-        run_memories = [r["run_peak_memory"] for r in runner.results]
-        prepare_memories = [r["prepare_peak_memory"] for r in runner.results]
+        rec = runner.run_quasar_multiple(
+            circuit,
+            engine,
+            backend=Backend.STATEVECTOR,
+            repetitions=repetitions,
+        )
         record = {
             "circuit": circuit_fn.__name__,
             "qubits": n,
-            "framework": backend.name,
-            "repetitions": repetitions,
-            "avg_time": statistics.mean(times),
-            "time_variance": statistics.pvariance(times) if repetitions > 1 else 0.0,
-            "avg_total_time": statistics.mean(total_times),
-            "total_time_variance": statistics.pvariance(total_times) if repetitions > 1 else 0.0,
-            "avg_prepare_peak_memory": statistics.mean(prepare_memories),
-            "prepare_peak_memory_variance": statistics.pvariance(prepare_memories)
-            if repetitions > 1
-            else 0.0,
-            "avg_run_peak_memory": statistics.mean(run_memories),
-            "run_peak_memory_variance": statistics.pvariance(run_memories)
-            if repetitions > 1
-            else 0.0,
+            "framework": rec["backend"],
+            "repetitions": rec["repetitions"],
+            "avg_time": rec["run_time_mean"],
+            "time_variance": rec["run_time_std"] ** 2,
+            "avg_total_time": rec["total_time_mean"],
+            "total_time_variance": rec["total_time_std"] ** 2,
+            "avg_prepare_peak_memory": rec["prepare_peak_memory_mean"],
+            "prepare_peak_memory_variance": rec["prepare_peak_memory_std"] ** 2,
+            "avg_run_peak_memory": rec["run_peak_memory_mean"],
+            "run_peak_memory_variance": rec["run_peak_memory_std"] ** 2,
         }
         results.append(record)
     return results

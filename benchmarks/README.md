@@ -38,8 +38,7 @@ phases as well as their sum:
 - For QuASAr runs, **backend** – the simulator backend selected by the
   scheduler.
 
-Adapters are expected to perform heavy translation work in the preparation
-phase so that `run_time` reflects only the actual simulation cost.
+
 
 ## Comparing with baseline backends
 
@@ -75,20 +74,24 @@ New circuit generators are added to
 CLI can discover it automatically.  The existing functions, such as
 [`ghz_circuit`](circuits.py), illustrate the expected structure.
 
-## Adding backends
+## Running specific backends
 
-Backend adapters live in [backends.py](backends.py).  Subclass
-`BackendAdapter` and provide a `name` along with the underlying backend
-class:
+Benchmarks can force a particular simulator without using adapter classes.
+Invoke :func:`benchmarks.runner.BenchmarkRunner.run_quasar_multiple` and pass
+the desired :class:`quasar.cost.Backend` value:
 
 ```python
-class MyBackendAdapter(BackendAdapter):
-    def __init__(self) -> None:
-        super().__init__(name="my_backend", backend_cls=MyBackend)
+from benchmarks.runner import BenchmarkRunner
+from quasar import SimulationEngine
+from quasar.cost import Backend
+
+runner = BenchmarkRunner()
+engine = SimulationEngine()
+rec = runner.run_quasar_multiple(circuit, engine, backend=Backend.STATEVECTOR, repetitions=3)
 ```
 
-Include the new adapter in the module's `__all__` list so that it can be
-imported by `run_benchmarks.py`.
+This leverages the scheduler while still collecting timings for a single
+backend implementation.
 
 ## Feeding results into the cost model
 
