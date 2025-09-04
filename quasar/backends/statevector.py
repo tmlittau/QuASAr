@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Sequence, List, Tuple
 import numpy as np
 from qiskit import QuantumCircuit
-from qiskit.circuit.library import U2Gate, UGate
+from qiskit.circuit.library import U2Gate, UGate, standard_gates
 from qiskit.quantum_info import Statevector
 from qiskit_aer import AerSimulator
 
@@ -113,8 +113,15 @@ class StatevectorBackend(Backend):
             k = float(params.get("k", 0)) if params else 0.0
             theta = 2 * np.pi / (2 ** k)
             self.circuit.cp(theta, qubits[0], qubits[1])
-        elif lname == "CRY":
-            self.circuit.cry(self._param(params, 0), qubits[0], qubits[1])
+        elif lname.startswith("C"):
+            base = lname[1:]
+            num_params = len(params) if params else 0
+            pvals = [self._param(params, i) for i in range(num_params)]
+            gate_cls = getattr(standard_gates, f"{base}Gate", None)
+            if gate_cls is None:
+                raise NotImplementedError(f"Unsupported gate {name}")
+            gate = gate_cls(*pvals).control()
+            self.circuit.unitary(gate.to_matrix(), qubits)
         else:
             method = getattr(self.circuit, lname.lower(), None)
             if method is None:

@@ -10,6 +10,7 @@
 - Code is primarily Python 3.8+ with optional C++17 extensions.
 - Follow existing style: PEP8 formatting, descriptive docstrings and type annotations.
 - Document new user‑facing behaviour in `docs/` or relevant notebooks.
+- Unsupported gates should be implemented natively without decomposing into other operations.
 
 ## Testing
 - Run the full test suite with:
