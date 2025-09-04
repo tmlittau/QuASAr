@@ -42,15 +42,30 @@ class DecisionDiagramBackend(Backend):
         self.num_qubits = num_qubits
         self.history.clear()
 
-    def ingest(self, state: object) -> None:
+    def ingest(
+        self,
+        state: object,
+        *,
+        num_qubits: int | None = None,
+        mapping: Sequence[int] | None = None,
+    ) -> None:
         """Initialise the backend from an existing ``(n, VectorDD)`` pair."""
 
         if not (isinstance(state, tuple) and len(state) == 2):
             raise TypeError("Unsupported state for decision diagram backend")
         n, vec = state
-        self.num_qubits = int(n)
+        n = int(n)
+        if num_qubits is None:
+            num_qubits = n
+        if mapping is None:
+            mapping = list(range(n))
+        if len(mapping) != n:
+            raise ValueError("Mapping length does not match state size")
+        if mapping != list(range(n)):
+            raise NotImplementedError("Qubit mapping not supported for decision diagrams")
+        self.num_qubits = num_qubits
         self.package = dd.DDPackage(self.num_qubits)
-        if isinstance(vec, dd.VectorDD):
+        if isinstance(vec, dd.VectorDD) and num_qubits == n:
             self.package.inc_ref_vec(vec)
             self.state = vec
         else:  # stub environments provide integer handles; ignore and start from |0>

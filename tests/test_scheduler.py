@@ -85,7 +85,7 @@ class DummyBackend:
     def load(self, n):
         self.num_qubits = n
 
-    def ingest(self, state):
+    def ingest(self, state, *, num_qubits=None, mapping=None):
         self.state = state
 
     def apply_gate(self, gate, qubits, params):
@@ -246,7 +246,7 @@ class SleepBackend:
     def extract_ssd(self):  # pragma: no cover - not used
         return None
 
-    def ingest(self, ssd):  # pragma: no cover - not used
+    def ingest(self, ssd, *, num_qubits=None, mapping=None):  # pragma: no cover - not used
         pass
 
 
@@ -372,7 +372,7 @@ class B2BFallbackEngine(ConversionEngine):
 class FailingOnceBackend(DummyBackend):
     calls = 0
 
-    def ingest(self, state):  # type: ignore[override]
+    def ingest(self, state, *, num_qubits=None, mapping=None):  # type: ignore[override]
         type(self).calls += 1
         if type(self).calls == 1:
             raise RuntimeError("fail")
@@ -538,3 +538,50 @@ def test_cost_noise_does_not_loop_replanning():
     scheduler.run(circuit)
     # Should plan only once despite cost mismatch within tolerance
     assert planner.calls == 1
+
+
+def test_scheduler_ingest_large_qubit_mapping():
+    class LargeQubitPlanner(Planner):
+        def plan(self, circuit, *, backend=None, **kwargs):  # type: ignore[override]
+            return SimpleNamespace(
+                steps=[
+                    PlanStep(0, 1, Backend.TABLEAU),
+                    PlanStep(1, 2, Backend.STATEVECTOR),
+                ]
+            )
+
+    class RecordingBackend:
+        backend = Backend.STATEVECTOR
+        recorded = None
+
+        def load(self, n):
+            self.num_qubits = n
+
+        def ingest(self, state, *, num_qubits=None, mapping=None):
+            if not isinstance(state, list):
+                raise TypeError("unsupported")
+            type(self).recorded = (num_qubits, tuple(mapping) if mapping else None)
+
+        def apply_gate(self, gate, qubits, params):
+            pass
+
+        def extract_ssd(self):
+            return SSD([])
+
+    scheduler = Scheduler(
+        planner=LargeQubitPlanner(),
+        backends={Backend.TABLEAU: StimBackend(), Backend.STATEVECTOR: RecordingBackend()},
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
+    circuit = Circuit(
+        [
+            {"gate": "H", "qubits": [12]},
+            {"gate": "H", "qubits": [12]},
+        ]
+    )
+    circuit._num_qubits = 13
+    result = scheduler.run(circuit)
+    assert isinstance(result, SSD)
+    assert RecordingBackend.recorded == (13, (12,))

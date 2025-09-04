@@ -358,7 +358,7 @@ class Scheduler:
                     try:
                         if primitive == "B2B":
                             try:
-                                sim_obj.ingest(current_ssd)
+                                sim_obj.ingest(current_ssd, num_qubits=circuit.num_qubits)
                             except Exception:
                                 if target == Backend.TABLEAU:
                                     rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
@@ -366,14 +366,26 @@ class Scheduler:
                                     rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
                                 else:
                                     rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
-                                sim_obj.ingest(rep)
+                                sim_obj.ingest(
+                                    rep,
+                                    num_qubits=circuit.num_qubits,
+                                    mapping=boundary,
+                                )
                         elif primitive == "LW":
                             state = current_sim.statevector()
                             rep = self.conversion_engine.extract_local_window(state, boundary)
-                            sim_obj.ingest(rep)
+                            sim_obj.ingest(
+                                rep,
+                                num_qubits=circuit.num_qubits,
+                                mapping=boundary,
+                            )
                         elif primitive == "ST":
                             rep = self.conversion_engine.build_bridge_tensor(conv_ssd, conv_ssd)
-                            sim_obj.ingest(rep)
+                            sim_obj.ingest(
+                                rep,
+                                num_qubits=circuit.num_qubits,
+                                mapping=boundary,
+                            )
                         else:
                             if target == Backend.TABLEAU:
                                 rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
@@ -381,7 +393,11 @@ class Scheduler:
                                 rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
                             else:
                                 rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
-                            sim_obj.ingest(rep)
+                            sim_obj.ingest(
+                                rep,
+                                num_qubits=circuit.num_qubits,
+                                mapping=boundary,
+                            )
                     except Exception:
                         sim_obj.load(circuit.num_qubits)
                     circuit.ssd.conversions.append(
