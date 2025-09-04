@@ -47,14 +47,23 @@ def test_mps_svd_cost():
     assert with_svd.time == base.time + 4 * (4 ** 3) * math.log2(4)
 
 
-def test_decision_diagram_linear():
+def test_decision_diagram_log_scaling():
     est = CostEstimator()
     c1 = est.decision_diagram(num_gates=10, frontier=5)
     c2 = est.decision_diagram(num_gates=10, frontier=10)
-    assert c2.time == 2 * c1.time
-    assert c2.memory == 2 * c1.memory
+    ratio = (10 * math.log2(10)) / (5 * math.log2(5))
+    assert c2.time == c1.time * ratio
+    assert c2.memory == c1.memory * ratio
     assert c1.log_depth == math.log2(5)
     assert c2.log_depth == math.log2(10)
+
+
+def test_decision_diagram_small_frontier_linear():
+    est = CostEstimator()
+    c1 = est.decision_diagram(num_gates=5, frontier=1)
+    c2 = est.decision_diagram(num_gates=5, frontier=2)
+    assert c2.time == 2 * c1.time
+    assert c2.memory == 2 * c1.memory
 
 
 def test_conversion_primitive_selection():
