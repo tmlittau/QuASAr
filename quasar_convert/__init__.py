@@ -342,7 +342,12 @@ except Exception:  # pragma: no cover - exercised when extension missing
                 window[local] = state[global_index]
             return window
 
-        def convert(self, ssd: SSD) -> ConversionResult:
+        def convert(
+            self,
+            ssd: SSD,
+            window_1q_gates: int = 0,
+            window_2q_gates: int = 0,
+        ) -> ConversionResult:
             boundary = len(ssd.boundary_qubits or [])
             rank = ssd.top_s
 
@@ -353,7 +358,8 @@ except Exception:  # pragma: no cover - exercised when extension missing
 
             svd_cost = min(boundary * (rank ** 2), rank * (boundary ** 2))
             cost_b2b = svd_cost + boundary * (rank ** 2) + rank ** 2
-            cost_lw = 2.0 * dense
+            gate_time = window_1q_gates + window_2q_gates
+            cost_lw = (2.0 + gate_time) * dense
             cost_st = chi_tilde ** 3 + chi_tilde ** 2
             cost_full = 2.0 * full
 
