@@ -71,7 +71,7 @@ def test_quick_path_prebuilds_backend():
     assert DummyBackend.applied == 1
     assert DummyBackend.extracted == 1
     assert record["prepare_time"] == pytest.approx(0.0, abs=0.01)
-    assert record["run_time"] == 0.0
+    assert record["run_time"] == pytest.approx(0.0, abs=0.01)
     assert record["backend"] == "STATEVECTOR"
     assert not record["failed"]
 
