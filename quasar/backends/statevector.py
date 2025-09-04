@@ -49,8 +49,20 @@ class StatevectorBackend(Backend):
         self.circuit = QuantumCircuit(num_qubits)
         self.history.clear()
 
-    def ingest(self, state: Sequence[complex] | Statevector) -> None:
-        """Initialise from an external statevector."""
+    def ingest(
+        self,
+        state: Sequence[complex] | Statevector,
+        *,
+        num_qubits: int | None = None,
+        mapping: Sequence[int] | None = None,
+    ) -> None:
+        """Initialise from an external statevector.
+
+        The provided ``state`` may describe only a subset of the global
+        register.  ``num_qubits`` specifies the size of the global register
+        and ``mapping`` maps the qubits of ``state`` onto the global indices.
+        When omitted, the state is assumed to span the full register.
+        """
         if isinstance(state, Statevector):
             data = state.data
             n = int(np.log2(len(data)))
@@ -59,11 +71,19 @@ class StatevectorBackend(Backend):
             n = int(np.log2(len(data)))
         if 2**n != len(data):
             raise TypeError("Statevector length is not a power of two")
-        self.num_qubits = n
-        self.circuit = QuantumCircuit(n)
+        if num_qubits is None:
+            num_qubits = n
+        if mapping is None:
+            if n != num_qubits:
+                raise ValueError("num_qubits does not match state size")
+            mapping = list(range(n))
+        if len(mapping) != n:
+            raise ValueError("Mapping length does not match state size")
+        self.num_qubits = num_qubits
+        self.circuit = QuantumCircuit(num_qubits)
         # convert from little-endian to Qiskit's big-endian ordering
         be = data.reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
-        self.circuit.initialize(be, range(n))
+        self.circuit.initialize(be, mapping)
         self.history.clear()
 
     # ------------------------------------------------------------------

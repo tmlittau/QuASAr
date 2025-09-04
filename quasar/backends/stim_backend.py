@@ -43,23 +43,37 @@ class StimBackend(Backend):
         self.num_qubits = num_qubits
         self.history.clear()
 
-    def ingest(self, state: stim.Tableau | stim.TableauSimulator) -> None:
+    def ingest(
+        self,
+        state: stim.Tableau | stim.TableauSimulator,
+        *,
+        num_qubits: int | None = None,
+        mapping: Sequence[int] | None = None,
+    ) -> None:
         """Initialise simulator from a Stim tableau or simulator."""
         if isinstance(state, stim.TableauSimulator):
-            self.simulator = state
-            self.num_qubits = state.num_qubits
+            tableau = state.current_inverse_tableau().inverse()
+            n = state.num_qubits
         elif isinstance(state, stim.Tableau):
-            self.simulator = stim.TableauSimulator()
+            tableau = state.inverse()
             n = len(state)
-            self.simulator.do_tableau(state.inverse(), list(range(n)))
-            self.num_qubits = n
         elif getattr(state, "num_qubits", None) is not None:
             n = int(getattr(state, "num_qubits"))
-            self.simulator = stim.TableauSimulator()
-            self.simulator.do_tableau(stim.Tableau(n), list(range(n)))
-            self.num_qubits = n
+            tableau = stim.Tableau(n)
         else:
             raise TypeError("Unsupported state for Stim backend")
+        if num_qubits is None:
+            num_qubits = n
+        if mapping is None:
+            if n != num_qubits:
+                raise ValueError("num_qubits does not match state size")
+            mapping = list(range(n))
+        if len(mapping) != n:
+            raise ValueError("Mapping length does not match state size")
+        self.simulator = stim.TableauSimulator()
+        self.simulator.do_tableau(stim.Tableau(num_qubits), list(range(num_qubits)))
+        self.simulator.do_tableau(tableau, list(mapping))
+        self.num_qubits = num_qubits
         self.history.clear()
 
     def apply_gate(

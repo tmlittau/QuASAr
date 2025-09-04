@@ -1,6 +1,7 @@
 import numpy as np
+import stim
 
-from quasar.backends import StatevectorBackend, MPSBackend
+from quasar.backends import StatevectorBackend, MPSBackend, StimBackend
 
 
 def _build_reference_state():
@@ -43,3 +44,29 @@ def test_mps_to_statevector_roundtrip():
     sv.apply_gate("H", [1])
 
     assert np.allclose(sv.statevector(), ref_state)
+
+
+def test_backends_ingest_with_mapping_preserves_register():
+    ref_sv = StatevectorBackend()
+    ref_sv.load(13)
+    ref_sv.apply_gate("X", [12])
+    ref_state = ref_sv.statevector()
+
+    sv = StatevectorBackend()
+    sv.ingest([0, 1], num_qubits=13, mapping=[12])
+    assert np.allclose(sv.statevector(), ref_state)
+
+    mps = MPSBackend()
+    mps.ingest([0, 1], num_qubits=13, mapping=[12])
+    assert np.allclose(mps.statevector(), ref_state)
+
+    ref_stim = StimBackend()
+    ref_stim.load(13)
+    ref_stim.apply_gate("X", [12])
+    ref_stim_state = ref_stim.statevector()
+
+    sim = stim.TableauSimulator()
+    sim.x(0)
+    stim_b = StimBackend()
+    stim_b.ingest(sim, num_qubits=13, mapping=[12])
+    assert np.allclose(stim_b.statevector(), ref_stim_state)

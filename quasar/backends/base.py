@@ -68,12 +68,29 @@ class Backend:
                 return None
 
     # ------------------------------------------------------------------
-    def ingest(self, state: Any) -> None:
+    def ingest(
+        self,
+        state: Any,
+        *,
+        num_qubits: int | None = None,
+        mapping: Sequence[int] | None = None,
+    ) -> None:
         """Load an externally prepared ``state`` into the backend.
 
-        Implementations may accept backend specific state representations or
-        raise ``TypeError`` if the provided object is unsupported.  Backends
-        are expected to update ``num_qubits`` and any internal caches
+        Parameters
+        ----------
+        state:
+            Backend specific representation to ingest.
+        num_qubits:
+            Optional global register size.  When provided, the backend must
+            embed ``state`` into a register of this size.
+        mapping:
+            Mapping of qubits in ``state`` to positions in the global
+            register.  ``len(mapping)`` must match the number of qubits
+            represented by ``state``.  When ``None``, the state is assumed to
+            describe the full register in order ``0..n-1``.
+
+        Implementations should update ``num_qubits`` and any internal caches
         accordingly.
         """
         raise NotImplementedError
