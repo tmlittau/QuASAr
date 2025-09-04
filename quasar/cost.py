@@ -186,8 +186,19 @@ class CostEstimator:
         return Cost(time=time, memory=memory, log_depth=depth)
 
     def decision_diagram(self, num_gates: int, frontier: int) -> Cost:
-        time = self.coeff["dd_gate"] * num_gates * frontier
-        memory = self.coeff["dd_mem"] * frontier
+        """Estimate cost for decision diagram simulation.
+
+        The active node count is approximated by ``frontier * log2(frontier)``
+        with a linear fallback for small frontiers.
+        """
+
+        threshold = 2
+        if frontier < threshold:
+            active_nodes = frontier
+        else:
+            active_nodes = frontier * math.log2(frontier)
+        time = self.coeff["dd_gate"] * num_gates * active_nodes
+        memory = self.coeff["dd_mem"] * active_nodes
         depth = math.log2(frontier) if frontier > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
