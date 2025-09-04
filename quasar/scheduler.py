@@ -216,6 +216,8 @@ class Scheduler:
         circuit: Circuit,
         plan: PlanResult,
         monitor: CostHook | None = None,
+        *,
+        instrument: bool = False,
     ) -> SSD:
         """Execute ``circuit`` according to ``plan``.
 
@@ -228,6 +230,10 @@ class Scheduler:
         monitor:
             Optional callback receiving ``(step, observed, estimated)``.  The
             callback is invoked for each step but its return value is ignored.
+        instrument:
+            Enable timing and memory instrumentation using ``time.perf_counter``
+            and :mod:`tracemalloc`.  When ``False`` (the default) these metrics
+            are skipped and any supplied ``monitor`` callback is not invoked.
         Returns
         -------
         SSD
@@ -266,8 +272,9 @@ class Scheduler:
                     jobs.append((sims[key_p], glist))
 
                 est_cost = est_costs[i]
-                tracemalloc.start()
-                start_time = time.perf_counter()
+                if instrument:
+                    tracemalloc.start()
+                    start_time = time.perf_counter()
 
                 def run_group(job):
                     sim, glist = job
@@ -277,35 +284,36 @@ class Scheduler:
                 with ThreadPoolExecutor() as executor:
                     executor.map(run_group, jobs)
 
-                elapsed = time.perf_counter() - start_time
-                _, peak = tracemalloc.get_traced_memory()
-                tracemalloc.stop()
-                observed = Cost(time=elapsed, memory=float(peak))
+                if instrument:
+                    elapsed = time.perf_counter() - start_time
+                    _, peak = tracemalloc.get_traced_memory()
+                    tracemalloc.stop()
+                    observed = Cost(time=elapsed, memory=float(peak))
 
-                coeff = {
-                    Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
-                    Backend.MPS: (
-                        ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
-                        "mps_mem",
-                    ),
-                    Backend.TABLEAU: (["tab_gate"], "tab_mem"),
-                    Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
-                }[target]
-                est = self.planner.estimator if self.planner is not None else None
-                if est is not None:
-                    updates: Dict[str, float] = {}
-                    gate_keys, mem_key = coeff
-                    if est_cost.time > 0:
-                        ratio = observed.time / est_cost.time
-                        for gk in gate_keys:
-                            updates[gk] = est.coeff[gk] * ratio
-                    if est_cost.memory > 0 and observed.memory > 0:
-                        updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
-                    if updates:
-                        est.update_coefficients(updates)
+                    coeff = {
+                        Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                        Backend.MPS: (
+                            ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                            "mps_mem",
+                        ),
+                        Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                        Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
+                    }[target]
+                    est = self.planner.estimator if self.planner is not None else None
+                    if est is not None:
+                        updates: Dict[str, float] = {}
+                        gate_keys, mem_key = coeff
+                        if est_cost.time > 0:
+                            ratio = observed.time / est_cost.time
+                            for gk in gate_keys:
+                                updates[gk] = est.coeff[gk] * ratio
+                        if est_cost.memory > 0 and observed.memory > 0:
+                            updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                        if updates:
+                            est.update_coefficients(updates)
 
-                if monitor:
-                    monitor(step, observed, est_cost)
+                    if monitor:
+                        monitor(step, observed, est_cost)
                 current_sim = None
                 current_backend = None
                 i += 1
@@ -435,42 +443,44 @@ class Scheduler:
 
             est_cost = est_costs[i]
 
-            tracemalloc.start()
-            start_time = time.perf_counter()
+            if instrument:
+                tracemalloc.start()
+                start_time = time.perf_counter()
 
             for gate in segment:
                 current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
 
-            elapsed = time.perf_counter() - start_time
-            _, peak = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
-            observed = Cost(time=elapsed, memory=float(peak))
+            if instrument:
+                elapsed = time.perf_counter() - start_time
+                _, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                observed = Cost(time=elapsed, memory=float(peak))
 
-            # Update cost model based on observation
-            coeff = {
-                Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
-                Backend.MPS: (
-                    ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
-                    "mps_mem",
-                ),
-                Backend.TABLEAU: (["tab_gate"], "tab_mem"),
-                Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
-            }[target]
-            est = self.planner.estimator if self.planner is not None else None
-            if est is not None:
-                updates: Dict[str, float] = {}
-                gate_keys, mem_key = coeff
-                if est_cost.time > 0:
-                    ratio = observed.time / est_cost.time
-                    for gk in gate_keys:
-                        updates[gk] = est.coeff[gk] * ratio
-                if est_cost.memory > 0 and observed.memory > 0:
-                    updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
-                if updates:
-                    est.update_coefficients(updates)
+                # Update cost model based on observation
+                coeff = {
+                    Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                    Backend.MPS: (
+                        ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                        "mps_mem",
+                    ),
+                    Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                    Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
+                }[target]
+                est = self.planner.estimator if self.planner is not None else None
+                if est is not None:
+                    updates: Dict[str, float] = {}
+                    gate_keys, mem_key = coeff
+                    if est_cost.time > 0:
+                        ratio = observed.time / est_cost.time
+                        for gk in gate_keys:
+                            updates[gk] = est.coeff[gk] * ratio
+                    if est_cost.memory > 0 and observed.memory > 0:
+                        updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                    if updates:
+                        est.update_coefficients(updates)
 
-            if monitor:
-                monitor(step, observed, est_cost)
+                if monitor:
+                    monitor(step, observed, est_cost)
             i += 1
 
         if sims:

@@ -356,7 +356,7 @@ class BenchmarkRunner:
                     tracemalloc.reset_peak()
 
                 start_run = time.perf_counter()
-                result = scheduler.run(circuit, plan)
+                result = scheduler.run(circuit, plan, instrument=True)
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
