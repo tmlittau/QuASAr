@@ -82,6 +82,7 @@ PYBIND11_MODULE(_conversion_engine, m) {
 
     py::class_<quasar::ConversionEngine>(m, "ConversionEngine")
         .def(py::init<>())
+        .def_readwrite("st_chi_cap", &quasar::ConversionEngine::st_chi_cap)
         .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
         .def("extract_ssd", &quasar::ConversionEngine::extract_ssd)
         .def("extract_boundary_ssd", &quasar::ConversionEngine::extract_boundary_ssd)

@@ -91,6 +91,28 @@ def test_conversion_primitive_selection():
     assert large.cost.log_depth == math.log2(16)
 
 
+def test_lw_gate_counts_increase_time():
+    est = CostEstimator()
+    base = est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=4,
+        rank=16,
+        frontier=0,
+        window=2,
+    )
+    with_gates = est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=4,
+        rank=16,
+        frontier=0,
+        window=2,
+        window_1q_gates=5,
+    )
+    assert with_gates.cost.time > base.cost.time
+
+
 def test_conversion_caps():
     est = CostEstimator(q_max=2, r_max=2, s_max=4)
     res = est.conversion(

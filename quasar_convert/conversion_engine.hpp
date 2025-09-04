@@ -73,6 +73,7 @@ struct ConversionResult {
 class ConversionEngine {
   public:
     ConversionEngine();
+    std::size_t st_chi_cap = 16;
 
     std::pair<double, double> estimate_cost(std::size_t fragment_size, Backend backend) const;
 
