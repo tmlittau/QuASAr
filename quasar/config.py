@@ -49,6 +49,7 @@ class Config:
     quick_max_qubits: int | None = _int_from_env("QUASAR_QUICK_MAX_QUBITS", 12)
     quick_max_gates: int | None = _int_from_env("QUASAR_QUICK_MAX_GATES", 240)
     quick_max_depth: int | None = _int_from_env("QUASAR_QUICK_MAX_DEPTH", 60)
+    force_single_backend_below: int | None = _int_from_env("QUASAR_FORCE_SINGLE_BACKEND_BELOW", None)
     preferred_backend_order: List[Backend] = field(
         default_factory=lambda: _order_from_env(
             "QUASAR_BACKEND_ORDER",

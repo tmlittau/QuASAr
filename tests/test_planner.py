@@ -109,3 +109,22 @@ def test_conversion_cost_multiplier_discourages_switch():
     )
     steps2 = penalized.plan(circ).steps
     assert all(s.backend == Backend.STATEVECTOR for s in steps2)
+
+
+def test_force_single_backend_below():
+    gates = [
+        {"gate": "H", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "CX", "qubits": [1, 2]},
+        {"gate": "CX", "qubits": [2, 3]},
+    ]
+    circ = Circuit.from_dict(gates)
+    planner = Planner(
+        quick_max_qubits=3,
+        quick_max_gates=100,
+        quick_max_depth=3,
+        force_single_backend_below=5,
+    )
+    result = planner.plan(circ)
+    assert len(result.steps) == 1
+    assert circ.ssd.conversions == []
