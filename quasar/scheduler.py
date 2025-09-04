@@ -419,6 +419,12 @@ class Scheduler:
             sim_obj = sims[key]
 
             if sim_obj is not current_sim:
+                if (
+                    getattr(sim_obj, "backend", None) == Backend.TABLEAU
+                    and getattr(sim_obj, "num_qubits", circuit.num_qubits)
+                    != circuit.num_qubits
+                ):
+                    sim_obj.load(circuit.num_qubits)
                 if current_sim is not None:
                     current_ssd = current_sim.extract_ssd()
                     layer = None
