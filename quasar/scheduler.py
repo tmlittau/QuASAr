@@ -196,7 +196,11 @@ class Scheduler:
         plan = self.planner.cache_lookup(circuit.gates, backend)
         if plan is None:
             plan = self.planner.plan(circuit, backend=backend)
+        conversions = list(getattr(plan, "conversions", []))
+        circuit.ssd.conversions = conversions
         steps: List[PlanStep] = list(plan.steps)
+        conv_layers = conversions
+        conv_idx = 0
 
         sims: Dict[tuple, object] = {}
         current_backend = None
@@ -322,39 +326,24 @@ class Scheduler:
             if sim_obj is not current_sim:
                 if current_sim is not None:
                     current_ssd = current_sim.extract_ssd()
-                    layer = next(
-                        (
-                            c
-                            for c in circuit.ssd.conversions
-                            if c.source == current_backend and c.target == target
-                        ),
-                        None,
-                    )
-                    if layer:
+                    layer = None
+                    if conv_idx < len(conv_layers):
+                        cand = conv_layers[conv_idx]
+                        if cand.source == current_backend and cand.target == target:
+                            layer = cand
+                            conv_idx += 1
+                    if layer is not None:
                         boundary = list(layer.boundary)
                         rank = layer.rank
-                    else:
+                        primitive = layer.primitive
+                    else:  # Fallback path; should not trigger in normal operation
                         if current_ssd is not None and getattr(current_ssd, "partitions", None):
                             boundary = list(set(current_ssd.partitions[0].qubits) & set(qubits))
                         else:
                             boundary = list(qubits)
                         rank = 2 ** len(boundary)
+                        primitive = "Full"
                     conv_ssd = CESD(boundary_qubits=list(boundary), top_s=rank)
-                    primitive = None
-                    cost_val = 0.0
-                    try:
-                        res = self.conversion_engine.convert(conv_ssd)
-                        primitive = (
-                            res.primitive.name
-                            if hasattr(res.primitive, "name")
-                            else str(res.primitive)
-                        )
-                        cost_val = getattr(res, "cost", 0.0)
-                    except Exception:
-                        primitive = None
-                    if layer and primitive not in {"LW", "ST"}:
-                        primitive = layer.primitive
-                    primitive = primitive or "Full"
                     try:
                         if primitive == "B2B":
                             try:
@@ -384,17 +373,6 @@ class Scheduler:
                             sim_obj.ingest(rep)
                     except Exception:
                         sim_obj.load(circuit.num_qubits)
-                    circuit.ssd.conversions.append(
-                        ConversionLayer(
-                            boundary=tuple(boundary),
-                            source=current_backend,
-                            target=target,
-                            rank=rank,
-                            frontier=len(boundary),
-                            primitive=primitive,
-                            cost=Cost(time=cost_val, memory=0.0),
-                        )
-                    )
                 current_sim = sim_obj
                 current_backend = target
                 for k in list(sims.keys()):
