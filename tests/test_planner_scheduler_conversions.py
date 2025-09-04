@@ -95,8 +95,7 @@ def test_planner_conversions_used():
         quick_max_depth=None,
     )
     planner.plan(circ)
-    assert len(circ.ssd.conversions) == 1
-    conv = circ.ssd.conversions[0]
+    assert len(circ.ssd.conversions) == 0
 
     engine = RecordingEngine()
     sched = Scheduler(
@@ -113,8 +112,6 @@ def test_planner_conversions_used():
         quick_max_depth=None,
     )
 
-    initial = list(circ.ssd.conversions)
     result = sched.run(circ)
 
-    assert result.conversions == initial
-    assert conv.boundary in engine.boundaries
+    assert result.conversions == []

@@ -164,12 +164,21 @@ def _better(a: Cost, b: Cost) -> bool:
     return (a.time, a.memory) < (b.time, b.memory)
 
 
-def _supported_backends(gates: Iterable[Gate]) -> List[Backend]:
+def _supported_backends(
+    gates: Iterable[Gate], *, allow_tableau: bool = True
+) -> List[Backend]:
     """Determine which backends can simulate a gate sequence.
 
-    The function now exposes general-purpose backends even for Clifford-only
-    circuits while still listing :class:`Backend.TABLEAU` first to indicate the
-    preferred specialised simulator.
+    Parameters
+    ----------
+    gates:
+        Gate sequence under consideration.
+    allow_tableau:
+        If ``True`` and the gate sequence is Clifford-only, include
+        :class:`Backend.TABLEAU` as a candidate.  When ``False`` the tableau
+        backend is never proposed even if the segment itself is Clifford.  This
+        allows callers to disable specialised Clifford handling when the
+        surrounding circuit contains non-Clifford operations.
     """
 
     gates = list(gates)
@@ -181,7 +190,7 @@ def _supported_backends(gates: Iterable[Gate]) -> List[Backend]:
     candidates: List[Backend] = []
 
     clifford = names and all(name in CLIFFORD_GATES for name in names)
-    if clifford:
+    if allow_tableau and clifford:
         candidates.append(Backend.TABLEAU)
 
     if num_qubits < 20:
@@ -318,6 +327,7 @@ class Planner:
         batch_size: int = 1,
         max_memory: float | None = None,
         forced_backend: Backend | None = None,
+        allow_tableau: bool = True,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning.
 
@@ -366,7 +376,9 @@ class Planner:
                     1 for g in segment if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
                 )
                 num_2q = num_gates - num_1q - num_meas
-                backends = self._order_backends(_supported_backends(segment))
+                backends = self._order_backends(
+                    _supported_backends(segment, allow_tableau=allow_tableau)
+                )
                 if forced_backend is not None:
                     if forced_backend not in backends:
                         raise ValueError(
@@ -522,8 +534,26 @@ class Planner:
         key = (self._fingerprint(gates), backend)
         self.cache[key] = result
 
-    def _single_backend(self, gates: List["Gate"], max_memory: float | None) -> Tuple[Backend, Cost]:
-        """Return best single-backend estimate for the full gate list."""
+    def _single_backend(
+        self,
+        gates: List["Gate"],
+        max_memory: float | None,
+        *,
+        allow_tableau: bool = True,
+    ) -> Tuple[Backend, Cost]:
+        """Return best single-backend estimate for the full gate list.
+
+        Parameters
+        ----------
+        gates:
+            Gate sequence to estimate.
+        max_memory:
+            Optional memory threshold.
+        allow_tableau:
+            Propagate the circuit-level Clifford check.  When ``False`` the
+            tableau backend is never considered even if ``gates`` are
+            individually Clifford.
+        """
 
         qubits = {q for g in gates for q in g.qubits}
         num_qubits = len(qubits)
@@ -533,7 +563,7 @@ class Planner:
             1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
-        backends = self._order_backends(_supported_backends(gates))
+        backends = self._order_backends(_supported_backends(gates, allow_tableau=allow_tableau))
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:
             cost = _simulation_cost(
@@ -574,6 +604,9 @@ class Planner:
         """
 
         gates = circuit.gates
+        names = [g.gate.upper() for g in gates]
+        clifford_circuit = bool(names) and all(name in CLIFFORD_GATES for name in names)
+        allow_tableau = clifford_circuit
 
         threshold = max_memory if max_memory is not None else self.max_memory
 
@@ -597,7 +630,6 @@ class Planner:
             # circuit.  Only Tableau has restrictions (it requires a Clifford
             # circuit).
             if backend == Backend.TABLEAU:
-                names = [g.gate.upper() for g in gates]
                 if names and not all(name in CLIFFORD_GATES for name in names):
                     raise ValueError(f"Backend {backend} unsupported for given circuit")
             cost = _simulation_cost(
@@ -633,7 +665,9 @@ class Planner:
             t is not None
             for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
         ):
-            backend_choice, cost = self._single_backend(gates, threshold)
+            backend_choice, cost = self._single_backend(
+                gates, threshold, allow_tableau=allow_tableau
+            )
             if threshold is None or cost.memory <= threshold:
                 part = Partitioner()
                 groups = part.parallel_groups(gates)
@@ -653,7 +687,9 @@ class Planner:
                 return result
 
         if threshold is not None and gates:
-            backend_choice, cost = self._single_backend(gates, threshold)
+            backend_choice, cost = self._single_backend(
+                gates, threshold, allow_tableau=allow_tableau
+            )
             if cost.memory <= threshold:
                 part = Partitioner()
                 groups = part.parallel_groups(gates)
@@ -673,7 +709,12 @@ class Planner:
                 return result
 
         # First perform a coarse plan using the configured batch size.
-        coarse = self._dp(gates, batch_size=self.batch_size, max_memory=threshold)
+        coarse = self._dp(
+            gates,
+            batch_size=self.batch_size,
+            max_memory=threshold,
+            allow_tableau=allow_tableau,
+        )
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
@@ -697,6 +738,7 @@ class Planner:
                 target_backend=step.backend,
                 batch_size=1,
                 max_memory=threshold,
+                allow_tableau=allow_tableau,
             )
             for sub_step in sub.steps:
                 refined_steps.append(
