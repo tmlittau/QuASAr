@@ -44,7 +44,7 @@ class DummyScheduler:
     def run(self, circuit, plan, *, monitor=None, instrument=False):
         self.instrument_calls.append(instrument)
         self._data = [0] * 10000
-        return "done"
+        return "done", 0.0
 
 
 def test_run_quasar_records_memory():

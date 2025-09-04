@@ -287,11 +287,12 @@ class BenchmarkRunner:
     ) -> Dict[str, Any]:
         """Execute ``circuit`` using a QuASAr scheduler ``engine``.
 
-        Planning is performed prior to measurement so that only the actual
-        :meth:`quasar.scheduler.Scheduler.run` invocation is timed.  Both
-        phases are wrapped with :mod:`tracemalloc` to also capture peak memory
-        usage.  ``engine`` may either be a :class:`~quasar.scheduler.Scheduler`
-        or an object providing ``scheduler`` and ``planner`` attributes (e.g.,
+        Planning is performed prior to measurement so that only gate execution
+        reported by :meth:`quasar.scheduler.Scheduler.run` contributes to the
+        recorded runtime.  Both phases are wrapped with :mod:`tracemalloc` to
+        also capture peak memory usage.  ``engine`` may either be a
+        :class:`~quasar.scheduler.Scheduler` or an object providing
+        ``scheduler`` and ``planner`` attributes (e.g.,
         :class:`~quasar.simulation_engine.SimulationEngine`).  The optional
         ``backend`` argument forces both planning and execution to use a
         specific backend rather than selecting one automatically.
@@ -333,11 +334,10 @@ class BenchmarkRunner:
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()
 
-                start_run = time.perf_counter()
                 result = sim.extract_ssd()
                 result = result if result is not None else getattr(circuit, "ssd", None)
                 backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
-                run_time = time.perf_counter() - start_run
+                run_time = 0.0
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
             else:
@@ -355,8 +355,7 @@ class BenchmarkRunner:
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
                     tracemalloc.reset_peak()
 
-                start_run = time.perf_counter()
-                result = scheduler.run(circuit, plan, instrument=True)
+                result, run_time = scheduler.run(circuit, plan, instrument=True)
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
@@ -364,7 +363,6 @@ class BenchmarkRunner:
                     result.extract_state(0)
                 except Exception:
                     pass
-                run_time = time.perf_counter() - start_run
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
         except Exception as exc:  # pragma: no cover - exercised in tests
