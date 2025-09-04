@@ -183,6 +183,16 @@ class Scheduler:
             else:
                 plan.step_costs = [Cost(time=0.0, memory=0.0)]
             circuit.ssd.conversions = []
+            qubits = tuple(range(circuit.num_qubits))
+            history = tuple(g.gate for g in circuit.gates)
+            circuit.ssd.partitions = [
+                SSDPartition(
+                    subsystems=(qubits,),
+                    history=history,
+                    backend=backend_choice,
+                    cost=plan.step_costs[0],
+                )
+            ]
             return plan
 
         if self.planner is None:
@@ -210,6 +220,25 @@ class Scheduler:
             segment = circuit.gates[step.start : step.end]
             step_costs.append(self._estimate_cost(step.backend, segment))
         plan.step_costs = step_costs
+        parts: List[SSDPartition] = []
+        for step, cost in zip(plan.steps, step_costs):
+            segment = circuit.gates[step.start : step.end]
+            qubits = tuple(sorted({q for g in segment for q in g.qubits}))
+            history = tuple(g.gate for g in segment)
+            subsystems = (
+                tuple(tuple(sorted(grp)) for grp in step.parallel)
+                if step.parallel
+                else (qubits,)
+            )
+            parts.append(
+                SSDPartition(
+                    subsystems=subsystems,
+                    history=history,
+                    backend=step.backend,
+                    cost=cost,
+                )
+            )
+        circuit.ssd.partitions = parts
         return plan
 
     # ------------------------------------------------------------------

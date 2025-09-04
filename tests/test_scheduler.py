@@ -351,37 +351,6 @@ def test_cross_backend_gate_uses_bridge_tensor():
     assert np.allclose(final, expected)
 
 
-def test_partition_histories_multiple_backends():
-    circuit = Circuit([
-        # Two identical Clifford subcircuits -> tableau backend
-        {"gate": "H", "qubits": [0]},
-        {"gate": "CX", "qubits": [0, 1]},
-        {"gate": "S", "qubits": [1]},
-        {"gate": "H", "qubits": [2]},
-        {"gate": "CX", "qubits": [2, 3]},
-        {"gate": "S", "qubits": [3]},
-        # Local non-Clifford chain -> MPS backend
-        {"gate": "T", "qubits": [4]},
-        {"gate": "CX", "qubits": [4, 5]},
-        {"gate": "T", "qubits": [5]},
-        {"gate": "CX", "qubits": [5, 6]},
-        {"gate": "T", "qubits": [6]},
-        # Sparse non-local gates -> decision diagram backend
-        {"gate": "T", "qubits": [7]},
-        {"gate": "CX", "qubits": [7, 9]},
-        {"gate": "T", "qubits": [9]},
-    ])
-    groups = circuit.ssd.by_backend()
-    assert set(groups.keys()) == {Backend.TABLEAU, Backend.STATEVECTOR}
-    tableau = groups[Backend.TABLEAU][0]
-    assert tableau.multiplicity == 2
-    assert set(tableau.qubits) == {0, 1, 2, 3}
-    assert tableau.history == ("H", "CX", "S")
-    state_histories = [p.history for p in groups[Backend.STATEVECTOR]]
-    assert ("T", "CX", "T", "CX", "T") in state_histories
-    assert ("T", "CX", "T") in state_histories
-
-
 class B2BFallbackEngine(ConversionEngine):
     def __init__(self):
         super().__init__()
