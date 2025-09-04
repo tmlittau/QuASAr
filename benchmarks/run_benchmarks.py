@@ -1,7 +1,7 @@
 """Convenience wrapper for the benchmark command line interface.
 
-The CLI instantiates simulators via :class:`benchmarks.backends.BackendAdapter`
-which delegates to the actual QuASAr backend implementations.
+The CLI executes circuits through QuASAr's scheduler and can force
+individual backends via :mod:`quasar.cost.Backend`.
 """
 from benchmark_cli import main
 
