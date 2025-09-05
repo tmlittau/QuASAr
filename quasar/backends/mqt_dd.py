@@ -27,6 +27,7 @@ class DecisionDiagramBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
+    _benchmark_state: dd.VectorDD | None = field(default=None, init=False)
 
     _ALIASES: Dict[str, str] = field(
         default_factory=lambda: {"SDG": "sdg", "SXDG": "sxdg", "TDG": "tdg", "VDG": "vdg", "U1": "p"}
@@ -41,6 +42,7 @@ class DecisionDiagramBackend(Backend):
         self.package.inc_ref_vec(self.state)
         self.num_qubits = num_qubits
         self.history.clear()
+        self._benchmark_state = None
 
     def ingest(
         self,
@@ -72,6 +74,7 @@ class DecisionDiagramBackend(Backend):
             self.state = self.package.zero_state(self.num_qubits)
             self.package.inc_ref_vec(self.state)
         self.history.clear()
+        self._benchmark_state = None
 
     # ------------------------------------------------------------------
     def _standard_operation(
@@ -98,7 +101,7 @@ class DecisionDiagramBackend(Backend):
         if self._benchmark_mode:
             self._benchmark_ops.append((name, tuple(qubits), params))
             return
-
+        self._benchmark_state = None
         if self.package is None or self.state is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         if not isinstance(self.state, dd.VectorDD):
@@ -130,15 +133,27 @@ class DecisionDiagramBackend(Backend):
             self.apply_gate(name, qubits, params)
 
     # ------------------------------------------------------------------
-    def extract_ssd(self) -> SSD:
+    def run_benchmark(self) -> None:
+        """Apply queued gates and cache the resulting state."""
+
         self.run()
-        if self.package is None or self.state is None:
+        self._benchmark_state = self.state if isinstance(self.state, dd.VectorDD) else None
+        return None
+
+    # ------------------------------------------------------------------
+    def extract_ssd(self) -> SSD:
+        state = self._benchmark_state
+        if state is None:
+            self.run()
+            state = self.state
+            self._benchmark_state = state if isinstance(state, dd.VectorDD) else None
+        if self.package is None or state is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
-            state=(self.num_qubits, self.state),
+            state=(self.num_qubits, state),
         )
         return SSD([part])
 
