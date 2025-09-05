@@ -298,6 +298,7 @@ class Scheduler:
         current_backend = None
         current_sim = None
         i = 0
+        sim_steps: Dict[int, int] = {}
         while i < len(steps):
             step = steps[i]
             target = step.backend
@@ -433,10 +434,43 @@ class Scheduler:
                             current_sim.run_benchmark()
                             elapsed = time.perf_counter() - start_time
                             total_gate_time += elapsed
-                            _, _ = tracemalloc.get_traced_memory()
+                            _, peak = tracemalloc.get_traced_memory()
                             tracemalloc.stop()
+                            idx = sim_steps.pop(id(current_sim), None)
+                            if idx is not None:
+                                step_prev = steps[idx]
+                                est_cost_prev = est_costs[idx]
+                                observed = Cost(time=elapsed, memory=float(peak))
+                                coeff = {
+                                    Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                                    Backend.MPS: (
+                                        ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                                        "mps_mem",
+                                    ),
+                                    Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                                    Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
+                                }[current_backend]
+                                est = self.planner.estimator if self.planner is not None else None
+                                if est is not None:
+                                    updates: Dict[str, float] = {}
+                                    gate_keys, mem_key = coeff
+                                    if est_cost_prev.time > 0:
+                                        ratio = observed.time / est_cost_prev.time
+                                        for gk in gate_keys:
+                                            updates[gk] = est.coeff[gk] * ratio
+                                    if est_cost_prev.memory > 0 and observed.memory > 0:
+                                        updates[mem_key] = (
+                                            est.coeff[mem_key]
+                                            * observed.memory
+                                            / est_cost_prev.memory
+                                        )
+                                    if updates:
+                                        est.update_coefficients(updates)
+                                if monitor:
+                                    monitor(step_prev, observed, est_cost_prev)
                         else:
                             current_sim.run_benchmark()
+                            sim_steps.pop(id(current_sim), None)
                     current_ssd = current_sim.extract_ssd()
                     layer = None
                     if conv_idx < len(conv_layers):
@@ -509,14 +543,17 @@ class Scheduler:
 
             est_cost = est_costs[i]
 
-            if instrument:
+            timing_needed = instrument and not hasattr(current_sim, "run_benchmark")
+            if timing_needed:
                 tracemalloc.start()
                 start_time = time.perf_counter()
 
             for gate in segment:
                 current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
 
-            if instrument:
+            sim_steps[id(current_sim)] = i
+
+            if timing_needed:
                 elapsed = time.perf_counter() - start_time
                 total_gate_time += elapsed
                 _, peak = tracemalloc.get_traced_memory()
@@ -548,6 +585,7 @@ class Scheduler:
 
                 if monitor:
                     monitor(step, observed, est_cost)
+                sim_steps.pop(id(current_sim), None)
             i += 1
 
         if sims:
@@ -561,10 +599,44 @@ class Scheduler:
                         sim.run_benchmark()
                         elapsed = time.perf_counter() - start_time
                         total_gate_time += elapsed
-                        _, _ = tracemalloc.get_traced_memory()
+                        _, peak = tracemalloc.get_traced_memory()
                         tracemalloc.stop()
+                        idx = sim_steps.pop(id(sim), None)
+                        if idx is not None:
+                            step_prev = steps[idx]
+                            est_cost_prev = est_costs[idx]
+                            observed = Cost(time=elapsed, memory=float(peak))
+                            target = getattr(sim, "backend", step_prev.backend)
+                            coeff = {
+                                Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                                Backend.MPS: (
+                                    ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                                    "mps_mem",
+                                ),
+                                Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                                Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
+                            }[target]
+                            est = self.planner.estimator if self.planner is not None else None
+                            if est is not None:
+                                updates: Dict[str, float] = {}
+                                gate_keys, mem_key = coeff
+                                if est_cost_prev.time > 0:
+                                    ratio = observed.time / est_cost_prev.time
+                                    for gk in gate_keys:
+                                        updates[gk] = est.coeff[gk] * ratio
+                                if est_cost_prev.memory > 0 and observed.memory > 0:
+                                    updates[mem_key] = (
+                                        est.coeff[mem_key]
+                                        * observed.memory
+                                        / est_cost_prev.memory
+                                    )
+                                if updates:
+                                    est.update_coefficients(updates)
+                            if monitor:
+                                monitor(step_prev, observed, est_cost_prev)
                     else:
                         sim.run_benchmark()
+                        sim_steps.pop(id(sim), None)
                 ssd = sim.extract_ssd()
                 if ssd is None:
                     continue
