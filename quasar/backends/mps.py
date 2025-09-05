@@ -3,7 +3,7 @@ from __future__ import annotations
 """Matrix product state backend using Qiskit's MPS simulator."""
 
 from dataclasses import dataclass, field
-from typing import Dict, Sequence, List, Tuple
+from typing import Any, Dict, Sequence, List, Tuple
 import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.circuit.library import U2Gate, UGate, standard_gates
@@ -37,6 +37,7 @@ class MPSBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
+    _cached_state: np.ndarray | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:  # pragma: no cover - trivial
         available = AerSimulator().available_methods()
@@ -51,6 +52,7 @@ class MPSBackend(Backend):
         self.chi = int(kwargs.get("chi", 16))
         self.circuit = QuantumCircuit(num_qubits)
         self.history.clear()
+        self._cached_state = None
 
     def ingest(
         self,
@@ -80,6 +82,7 @@ class MPSBackend(Backend):
         be = data.reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
         self.circuit.initialize(be, mapping)
         self.history.clear()
+        self._cached_state = None
 
     # ------------------------------------------------------------------
     def _param(self, params: Dict[str, float] | None, idx: int) -> float:
@@ -142,6 +145,34 @@ class MPSBackend(Backend):
             if method is None:
                 raise NotImplementedError(f"Unsupported gate {name}")
             method(*qubits)
+        self._cached_state = None
+
+    # ------------------------------------------------------------------
+    def prepare_benchmark(self, circuit: Any | None = None) -> None:
+        """Prepare the backend for benchmarking.
+
+        Gates applied after this call are immediately appended to the
+        internal circuit and the simulation is executed exactly once during
+        :meth:`run_benchmark`.
+        """
+        if circuit is not None:
+            self.circuit = circuit.copy()
+            self.num_qubits = circuit.num_qubits
+        elif self.circuit is None:
+            if not self.num_qubits:
+                raise RuntimeError("Backend not initialised; call 'load' first")
+            self.circuit = QuantumCircuit(self.num_qubits)
+        self.history.clear()
+        self._benchmark_mode = False
+        self._benchmark_ops = []
+        self._cached_state = None
+
+    def run_benchmark(self) -> np.ndarray:
+        """Execute the prepared circuit once and cache the resulting state."""
+        self._benchmark_mode = False
+        state = self._run()
+        self._cached_state = state
+        return state
 
     # ------------------------------------------------------------------
     def _run(self) -> np.ndarray:
@@ -158,7 +189,8 @@ class MPSBackend(Backend):
         return np.asarray(vec).reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
 
     def extract_ssd(self) -> SSD:
-        state = self._run()
+        state = self._cached_state if self._cached_state is not None else self._run()
+        self._cached_state = state
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
@@ -170,7 +202,9 @@ class MPSBackend(Backend):
     # ------------------------------------------------------------------
     def statevector(self) -> np.ndarray:
         """Return a dense statevector corresponding to the circuit."""
-        return self._run()
+        if self._cached_state is None:
+            self._cached_state = self._run()
+        return self._cached_state
 
 
 class AerMPSBackend(MPSBackend):
