@@ -7,3 +7,4 @@ def test_planner_selects_tableau_for_ghz():
     engine = SimulationEngine()
     plan = engine.planner.plan(circuit)
     assert plan.final_backend == Backend.TABLEAU
+    assert {s.backend for s in plan.steps} == {Backend.TABLEAU}

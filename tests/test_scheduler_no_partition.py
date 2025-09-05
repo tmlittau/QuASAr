@@ -5,7 +5,7 @@ which use 2- and 3-qubit systems. They should fit into a single partition
 when processed by the scheduler or simulation engine.
 """
 
-from quasar import Circuit, SimulationEngine, Scheduler
+from quasar import Backend, Circuit, SimulationEngine, Scheduler
 from qiskit import QuantumCircuit
 import numpy as np
 
@@ -43,7 +43,8 @@ def test_bell_circuit_single_partition():
     circuit = build_bell_circuit()
     engine = SimulationEngine()
     result = engine.simulate(circuit)
-    assert len({p.backend for p in result.ssd.partitions}) == 1
+    backends = {p.backend for p in result.ssd.partitions}
+    assert backends == {Backend.TABLEAU}
     assert not result.ssd.conversions
 
 
@@ -51,7 +52,8 @@ def test_prepare_run_single_partition():
     circuit = build_bell_circuit()
     scheduler = Scheduler()
     scheduler.prepare_run(circuit)
-    assert len({p.backend for p in circuit.ssd.partitions}) == 1
+    backends = {p.backend for p in circuit.ssd.partitions}
+    assert backends == {Backend.TABLEAU}
 
 
 def test_three_qubit_ghz_single_partition():
@@ -59,7 +61,8 @@ def test_three_qubit_ghz_single_partition():
     scheduler = Scheduler()
     plan = scheduler.prepare_run(circuit)
     ssd = scheduler.run(circuit, plan)
-    assert len({p.backend for p in ssd.partitions}) == 1
+    backends = {p.backend for p in ssd.partitions}
+    assert backends == {Backend.TABLEAU}
     assert not ssd.conversions
 
 
@@ -79,7 +82,8 @@ def test_ten_qubit_circuit_single_partition():
     scheduler = Scheduler(quick_max_qubits=None, force_single_backend_below=12)
     plan = scheduler.prepare_run(circuit)
     ssd = scheduler.run(circuit, plan)
-    assert len(ssd.partitions) == 1
+    backends = {p.backend for p in ssd.partitions}
+    assert backends == {Backend.TABLEAU}
     assert not ssd.conversions
 
 
@@ -90,5 +94,6 @@ def test_fifteen_qubit_circuit_single_backend():
     circuit = Circuit.from_qiskit(qc)
     engine = SimulationEngine(scheduler=Scheduler(quick_max_qubits=15))
     result = engine.simulate(circuit)
-    assert len(result.ssd.partitions) == 1
+    backends = {p.backend for p in result.ssd.partitions}
+    assert backends == {Backend.TABLEAU}
     assert not result.ssd.conversions
