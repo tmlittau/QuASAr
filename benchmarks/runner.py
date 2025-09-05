@@ -87,8 +87,9 @@ class BenchmarkRunner:
                 tracemalloc.reset_peak()
 
                 start_run = time.perf_counter()
-                result = backend.run_benchmark(**kwargs)
+                backend.run_benchmark(**kwargs)
                 run_time = time.perf_counter() - start_run
+                result = None
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
             else:

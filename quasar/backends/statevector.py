@@ -35,6 +35,7 @@ class StatevectorBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
+    _benchmark_state: np.ndarray | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:  # pragma: no cover - trivial
         available = AerSimulator().available_methods()
@@ -161,8 +162,29 @@ class StatevectorBackend(Backend):
         # convert from Qiskit's big-endian to little-endian
         return np.asarray(vec).reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
 
+    def run_benchmark(self) -> None:
+        """Execute queued gates and store the resulting state for extraction.
+
+        The method replays any operations recorded during benchmark
+        preparation, runs the simulation via :meth:`_run`, and caches the
+        resulting state so that :meth:`extract_ssd` can return it without
+        triggering another simulation run.  No value is returned to avoid
+        materialising large arrays during benchmarking.
+        """
+
+        ops = getattr(self, "_benchmark_ops", [])
+        self._benchmark_mode = False
+        for name, qubits, params in ops:
+            self.apply_gate(name, qubits, params)
+        self._benchmark_ops = []
+        self._benchmark_state = self._run()
+
     def extract_ssd(self) -> SSD:
-        state = self._run()
+        if self._benchmark_state is not None:
+            state = self._benchmark_state
+            self._benchmark_state = None
+        else:
+            state = self._run()
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
