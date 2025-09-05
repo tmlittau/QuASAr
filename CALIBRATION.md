@@ -11,6 +11,16 @@ singular-value-decomposition (SVD) truncation step.  Separate
 coefficients for these components are produced by the calibration
 script.
 
+## Conversion overhead
+
+Backend switches incur additional fixed and ingestion costs.  The default
+coefficients `ingest_sv`, `ingest_tab`, `ingest_mps`, and `ingest_dd` are
+set to `2.0` to model the effort required to load a full register into a
+new representation.  A separate `conversion_base` value of `5.0` adds a
+constant penalty to every backend transition.  These parameters can be
+measured and adjusted using the calibration utilities in this project to
+better match the characteristics of the target hardware.
+
 ## Running the benchmarks
 
 Run the calibration script to measure the cost of the supported

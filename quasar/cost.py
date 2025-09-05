@@ -82,12 +82,12 @@ class CostEstimator:
             "full_extract": 1.0,
             "st_chi_cap": 16.0,
             # Ingestion cost per target backend
-            "ingest_sv": 1.0,
-            "ingest_tab": 1.0,
-            "ingest_mps": 1.0,
-            "ingest_dd": 1.0,
+            "ingest_sv": 2.0,
+            "ingest_tab": 2.0,
+            "ingest_mps": 2.0,
+            "ingest_dd": 2.0,
             # Fixed overhead applied to every backend switch
-            "conversion_base": 0.0,
+            "conversion_base": 5.0,
         }
         if coeff:
             self.coeff.update(coeff)
