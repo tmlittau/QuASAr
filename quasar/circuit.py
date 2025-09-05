@@ -30,6 +30,12 @@ class Circuit:
     ----------
     gates:
         Iterable of :class:`Gate` or dictionaries describing gates.
+
+    Attributes
+    ----------
+    sparsity:
+        Estimated sparsity of the circuit's state vector.  This is a heuristic
+        and should not be taken as an exact metric.
     """
 
     def __init__(self, gates: Iterable[Dict[str, Any] | Gate]):
@@ -39,6 +45,8 @@ class Circuit:
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
         self.cost_estimates = self._estimate_costs()
+        from .sparsity import sparsity_estimate
+        self.sparsity = sparsity_estimate(self)
 
     # ------------------------------------------------------------------
     # Construction helpers
