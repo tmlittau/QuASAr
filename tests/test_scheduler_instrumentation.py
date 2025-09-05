@@ -47,3 +47,31 @@ def test_run_skips_instrumentation_by_default(monkeypatch):
 
     assert perf_called["value"] is False
     assert tm_called["value"] is False
+
+
+def test_run_reports_instrumentation(monkeypatch):
+    scheduler = Scheduler(
+        backends={
+            Backend.STATEVECTOR: DummyBackend(),
+            Backend.TABLEAU: DummyBackend(),
+        }
+    )
+    circuit = Circuit([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "X", "qubits": [0]},
+    ])
+    plan = scheduler.prepare_run(circuit)
+
+    times = iter([0.0, 1.0, 2.0, 3.0])
+
+    monkeypatch.setattr(
+        "quasar.scheduler.time.perf_counter", lambda: next(times)
+    )
+    monkeypatch.setattr("quasar.scheduler.tracemalloc.start", lambda: None)
+    monkeypatch.setattr("quasar.scheduler.tracemalloc.stop", lambda: None)
+    monkeypatch.setattr(
+        "quasar.scheduler.tracemalloc.get_traced_memory", lambda: (0, 0)
+    )
+
+    _, run_cost = scheduler.run(circuit, plan, instrument=True)
+    assert run_cost.time > 0

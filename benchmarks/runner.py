@@ -357,7 +357,8 @@ class BenchmarkRunner:
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
                     tracemalloc.reset_peak()
 
-                result, run_time = scheduler.run(circuit, plan, instrument=True)
+                result, run_cost = scheduler.run(circuit, plan, instrument=True)
+                run_time = run_cost.time
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
@@ -367,6 +368,7 @@ class BenchmarkRunner:
                     pass
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
+                run_peak_memory = max(run_peak_memory, int(run_cost.memory))
         except Exception as exc:  # pragma: no cover - exercised in tests
             _, run_peak_memory = tracemalloc.get_traced_memory()
             tracemalloc.stop()
