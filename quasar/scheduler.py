@@ -320,19 +320,33 @@ class Scheduler:
                     jobs.append((sims[key_p], glist))
 
                 est_cost = est_costs[i]
+                benchmarkable = all(hasattr(sim, "run_benchmark") for sim, _ in jobs)
                 if instrument:
                     tracemalloc.start()
-                    start_time = time.perf_counter()
+                    if benchmarkable:
+                        for sim, glist in jobs:
+                            prep = getattr(sim, "prepare_benchmark", None)
+                            if callable(prep):
+                                prep()
+                            for g in glist:
+                                sim.apply_gate(g.gate, g.qubits, g.params)
+                        start_time = time.perf_counter()
 
-                def run_group(job):
-                    sim, glist = job
-                    for g in glist:
-                        sim.apply_gate(g.gate, g.qubits, g.params)
+                        def run_bench(job: tuple[object, List]) -> None:
+                            job[0].run_benchmark()
 
-                with ThreadPoolExecutor() as executor:
-                    executor.map(run_group, jobs)
+                        with ThreadPoolExecutor() as executor:
+                            executor.map(run_bench, jobs)
+                    else:
+                        start_time = time.perf_counter()
 
-                if instrument:
+                        def run_group(job):
+                            sim, glist = job
+                            for g in glist:
+                                sim.apply_gate(g.gate, g.qubits, g.params)
+
+                        with ThreadPoolExecutor() as executor:
+                            executor.map(run_group, jobs)
                     elapsed = time.perf_counter() - start_time
                     total_gate_time += elapsed
                     _, peak = tracemalloc.get_traced_memory()
@@ -363,6 +377,28 @@ class Scheduler:
 
                     if monitor:
                         monitor(step, observed, est_cost)
+                else:
+                    if benchmarkable:
+                        for sim, glist in jobs:
+                            prep = getattr(sim, "prepare_benchmark", None)
+                            if callable(prep):
+                                prep()
+                            for g in glist:
+                                sim.apply_gate(g.gate, g.qubits, g.params)
+
+                        def run_bench(job: tuple[object, List]) -> None:
+                            job[0].run_benchmark()
+
+                        with ThreadPoolExecutor() as executor:
+                            executor.map(run_bench, jobs)
+                    else:
+                        def run_group(job):
+                            sim, glist = job
+                            for g in glist:
+                                sim.apply_gate(g.gate, g.qubits, g.params)
+
+                        with ThreadPoolExecutor() as executor:
+                            executor.map(run_group, jobs)
                 current_sim = None
                 current_backend = None
                 i += 1
@@ -498,14 +534,21 @@ class Scheduler:
 
             est_cost = est_costs[i]
 
+            has_benchmark = hasattr(current_sim, "run_benchmark")
             if instrument:
                 tracemalloc.start()
-                start_time = time.perf_counter()
-
-            for gate in segment:
-                current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
-
-            if instrument:
+                if has_benchmark:
+                    prep = getattr(current_sim, "prepare_benchmark", None)
+                    if callable(prep):
+                        prep()
+                    for gate in segment:
+                        current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+                    start_time = time.perf_counter()
+                    current_sim.run_benchmark()
+                else:
+                    start_time = time.perf_counter()
+                    for gate in segment:
+                        current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
                 elapsed = time.perf_counter() - start_time
                 total_gate_time += elapsed
                 _, peak = tracemalloc.get_traced_memory()
@@ -537,6 +580,17 @@ class Scheduler:
 
                 if monitor:
                     monitor(step, observed, est_cost)
+            else:
+                if has_benchmark:
+                    prep = getattr(current_sim, "prepare_benchmark", None)
+                    if callable(prep):
+                        prep()
+                    for gate in segment:
+                        current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+                    current_sim.run_benchmark()
+                else:
+                    for gate in segment:
+                        current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
             i += 1
 
         if sims:

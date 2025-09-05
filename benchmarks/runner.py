@@ -75,13 +75,14 @@ class BenchmarkRunner:
         tracemalloc.start()
 
         try:
-            if hasattr(backend, "prepare_benchmark") and hasattr(backend, "run_benchmark"):
+            if hasattr(backend, "run_benchmark"):
                 start_prepare = time.perf_counter()
-                if hasattr(backend, "load") and getattr(circuit, "num_qubits", None) is not None:
-                    backend.load(circuit.num_qubits)
-                backend.prepare_benchmark(circuit)
-                for g in getattr(circuit, "gates", []):
-                    backend.apply_gate(g.gate, g.qubits, g.params)
+                if hasattr(backend, "prepare_benchmark"):
+                    if hasattr(backend, "load") and getattr(circuit, "num_qubits", None) is not None:
+                        backend.load(circuit.num_qubits)
+                    backend.prepare_benchmark(circuit)
+                    for g in getattr(circuit, "gates", []):
+                        backend.apply_gate(g.gate, g.qubits, g.params)
                 prepare_time = time.perf_counter() - start_prepare
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()

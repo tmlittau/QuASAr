@@ -119,6 +119,17 @@ class StimBackend(Backend):
         for name, qubits, params in ops:
             self.apply_gate(name, qubits, params)
 
+    def run_benchmark(self) -> SSD | Sequence[complex] | None:
+        """Execute queued operations and return a state representation."""
+        self.run()
+        try:
+            return self.statevector()
+        except Exception:
+            try:
+                return self.extract_ssd()
+            except Exception:
+                return None
+
     def extract_ssd(self) -> SSD:
         self.run()
         tableau = None
