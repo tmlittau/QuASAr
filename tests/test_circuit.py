@@ -33,3 +33,11 @@ def test_qubit_inference_from_one_based_indexing():
         {"gate": "CX", "qubits": [1, 2]},
     ])
     assert circ.num_qubits == 2
+
+
+def test_sparsity_attribute():
+    circ = Circuit.from_dict([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "X", "qubits": [1]},
+    ])
+    assert circ.sparsity == 0.5
