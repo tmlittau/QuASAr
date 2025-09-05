@@ -27,6 +27,7 @@ def test_statevector_roundtrip():
 def test_mps_roundtrip():
     b1 = _prepare_backend(MPSBackend())
     state = b1.extract_ssd().partitions[0].state
+    assert isinstance(state, (list, tuple))
     b2 = MPSBackend()
     b2.ingest(state)
     assert np.allclose(b1.statevector(), b2.statevector())
