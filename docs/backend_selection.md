@@ -4,7 +4,8 @@ QuASAr's planner compares simulation backends for each circuit fragment.  It
 examines basic structural metrics to guide this choice:
 
 1. **Clifford detection** – if all gates in a fragment are Clifford operations
-   the specialised TABLEAU backend is preferred.
+   the specialised TABLEAU backend is used exclusively, bypassing other
+   candidates.
 2. **Heuristic metrics** – overall circuit [symmetry](symmetry.md) and
    [sparsity](sparsity.md) scores are evaluated against configurable thresholds.
    When either score exceeds its threshold the planner includes the

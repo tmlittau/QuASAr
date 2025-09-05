@@ -49,9 +49,10 @@ argument to explicitly choose the simulation backend (e.g.,
 ``Backend.TABLEAU`` for Clifford circuits).  When ``backend`` is ``None`` (the
 default), the planner selects a backend automatically based on estimated cost.
 Supplying a :class:`~quasar.cost.Backend` instance fixes the simulator choice
-and disables this automatic selection.  Clifford circuits default to the
-specialised TABLEAU backend, though a general-purpose backend like
-``Backend.STATEVECTOR`` can be requested explicitly.
+and disables this automatic selection.  Clifford circuits bypass other
+simulators and default to the specialised TABLEAU backend, though a
+general-purpose backend like ``Backend.STATEVECTOR`` can be requested
+explicitly.
 
 ```python
 from quasar import Backend, Circuit, SimulationEngine

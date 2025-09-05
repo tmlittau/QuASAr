@@ -209,19 +209,17 @@ def _supported_backends(
     qubits = {q for g in gates for q in g.qubits}
     num_qubits = len(qubits)
 
-    candidates: List[Backend] = []
-
     clifford = names and all(name in CLIFFORD_GATES for name in names)
     if allow_tableau and clifford:
-        candidates.append(Backend.TABLEAU)
+        return [Backend.TABLEAU]
+
+    candidates: List[Backend] = []
 
     dd_metric = False
     if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
         dd_metric = True
     if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
         dd_metric = True
-    if allow_tableau and clifford:
-        dd_metric = False
 
     multi = [g for g in gates if len(g.qubits) > 1]
     local = multi and all(
