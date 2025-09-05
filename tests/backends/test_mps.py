@@ -35,23 +35,35 @@ def test_mps_benchmark_uses_cached_state(monkeypatch):
     monkeypatch.setattr(backend, "apply_gate", fail_apply)
 
     original_run = backend._run
-    calls = {"n": 0}
+    run_calls = {"n": 0}
 
-    def run_spy() -> np.ndarray:
-        calls["n"] += 1
+    def run_spy() -> object:
+        run_calls["n"] += 1
         return original_run()
 
     monkeypatch.setattr(backend, "_run", run_spy)
     state = backend.run_benchmark()
-    assert calls["n"] == 1
+    assert run_calls["n"] == 1
 
-    def fail_run() -> np.ndarray:  # pragma: no cover - should not run
+    def fail_run() -> object:  # pragma: no cover - should not run
         raise AssertionError("_run invoked despite cached state")
 
     monkeypatch.setattr(backend, "_run", fail_run)
 
     ssd = backend.extract_ssd()
-    np.testing.assert_allclose(ssd.partitions[0].state, state)
-    vec = backend.statevector()
-    np.testing.assert_allclose(vec, state)
+    assert ssd.partitions[0].state is state
+
+    conv_calls = {"n": 0}
+    original_conv = backend._mps_to_statevector
+
+    def conv_spy(mps: object) -> np.ndarray:
+        conv_calls["n"] += 1
+        return original_conv(mps)
+
+    monkeypatch.setattr(backend, "_mps_to_statevector", conv_spy)
+
+    vec1 = backend.statevector()
+    vec2 = backend.statevector()
+    assert conv_calls["n"] == 1
+    np.testing.assert_allclose(vec1, vec2)
 

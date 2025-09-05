@@ -9,6 +9,7 @@ from qiskit import QuantumCircuit
 from qiskit.circuit.library import U2Gate, UGate, standard_gates
 from qiskit.quantum_info import Statevector
 from qiskit_aer import AerSimulator
+from qiskit_aer.library import set_matrix_product_state
 
 from ..ssd import SSD, SSDPartition
 from ..cost import Backend as BackendType
@@ -37,7 +38,8 @@ class MPSBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
-    _cached_state: np.ndarray | None = field(default=None, init=False)
+    _cached_state: object | None = field(default=None, init=False)
+    _cached_statevector: np.ndarray | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:  # pragma: no cover - trivial
         available = AerSimulator().available_methods()
@@ -53,6 +55,7 @@ class MPSBackend(Backend):
         self.circuit = QuantumCircuit(num_qubits)
         self.history.clear()
         self._cached_state = None
+        self._cached_statevector = None
 
     def ingest(
         self,
@@ -83,6 +86,7 @@ class MPSBackend(Backend):
         self.circuit.initialize(be, mapping)
         self.history.clear()
         self._cached_state = None
+        self._cached_statevector = None
 
     # ------------------------------------------------------------------
     def _param(self, params: Dict[str, float] | None, idx: int) -> float:
@@ -146,6 +150,7 @@ class MPSBackend(Backend):
                 raise NotImplementedError(f"Unsupported gate {name}")
             method(*qubits)
         self._cached_state = None
+        self._cached_statevector = None
 
     # ------------------------------------------------------------------
     def prepare_benchmark(self, circuit: Any | None = None) -> None:
@@ -166,27 +171,27 @@ class MPSBackend(Backend):
         self._benchmark_mode = False
         self._benchmark_ops = []
         self._cached_state = None
+        self._cached_statevector = None
 
-    def run_benchmark(self) -> np.ndarray:
+    def run_benchmark(self) -> object:
         """Execute the prepared circuit once and cache the resulting state."""
         self._benchmark_mode = False
         state = self._run()
         self._cached_state = state
+        self._cached_statevector = None
         return state
 
     # ------------------------------------------------------------------
-    def _run(self) -> np.ndarray:
+    def _run(self) -> object:
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         sim = AerSimulator(method=self.method)
         if self.method == "matrix_product_state":
             sim.set_options(matrix_product_state_max_bond_dimension=self.chi)
         circuit = self.circuit.copy()
-        circuit.save_statevector()
+        circuit.save_matrix_product_state()
         result = sim.run(circuit).result()
-        vec = result.get_statevector()
-        n = self.num_qubits
-        return np.asarray(vec).reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
+        return result.data(0)["matrix_product_state"]
 
     def extract_ssd(self) -> SSD:
         state = self._cached_state if self._cached_state is not None else self._run()
@@ -200,11 +205,31 @@ class MPSBackend(Backend):
         return SSD([part])
 
     # ------------------------------------------------------------------
+    def _mps_to_statevector(self, mps: object) -> np.ndarray:
+        """Convert a matrix product state to a dense statevector."""
+        sim = AerSimulator(method="matrix_product_state")
+        circuit = QuantumCircuit(self.num_qubits)
+        set_matrix_product_state(circuit, mps)
+        circuit.save_statevector()
+        result = sim.run(circuit).result()
+        vec = result.get_statevector()
+        n = self.num_qubits
+        return (
+            np.asarray(vec)
+            .reshape([2] * n)
+            .transpose(*reversed(range(n)))
+            .reshape(-1)
+        )
+
     def statevector(self) -> np.ndarray:
         """Return a dense statevector corresponding to the circuit."""
+        if self._cached_statevector is not None:
+            return self._cached_statevector
         if self._cached_state is None:
             self._cached_state = self._run()
-        return self._cached_state
+        vec = self._mps_to_statevector(self._cached_state)
+        self._cached_statevector = vec
+        return vec
 
 
 class AerMPSBackend(MPSBackend):
