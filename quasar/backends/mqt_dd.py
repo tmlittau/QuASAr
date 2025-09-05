@@ -130,6 +130,19 @@ class DecisionDiagramBackend(Backend):
             self.apply_gate(name, qubits, params)
 
     # ------------------------------------------------------------------
+    def run_benchmark(self):
+        """Execute queued operations and return the resulting state."""
+
+        self.run()
+        try:
+            return self.statevector()
+        except Exception:
+            try:
+                return self.extract_ssd()
+            except Exception:
+                return None
+
+    # ------------------------------------------------------------------
     def extract_ssd(self) -> SSD:
         self.run()
         if self.package is None or self.state is None:

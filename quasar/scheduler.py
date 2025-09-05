@@ -328,6 +328,8 @@ class Scheduler:
                     sim, glist = job
                     for g in glist:
                         sim.apply_gate(g.gate, g.qubits, g.params)
+                    if hasattr(sim, "run"):
+                        sim.run()
 
                 with ThreadPoolExecutor() as executor:
                     executor.map(run_group, jobs)
@@ -504,6 +506,9 @@ class Scheduler:
 
             for gate in segment:
                 current_sim.apply_gate(gate.gate, gate.qubits, gate.params)
+
+            if hasattr(current_sim, "run"):
+                current_sim.run()
 
             if instrument:
                 elapsed = time.perf_counter() - start_time

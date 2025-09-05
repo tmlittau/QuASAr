@@ -88,6 +88,8 @@ class BenchmarkRunner:
 
                 start_run = time.perf_counter()
                 result = backend.run_benchmark(**kwargs)
+                if hasattr(backend, "run"):
+                    backend.run()
                 run_time = time.perf_counter() - start_run
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
