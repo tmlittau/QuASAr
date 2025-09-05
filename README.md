@@ -83,6 +83,18 @@ respectively.  Custom backend instances can be supplied to :class:`Scheduler`
 or :class:`SimulationEngine` via their ``backends`` argument to control the
 simulation method.
 
+## Sparsity heuristic
+
+Every :class:`~quasar.circuit.Circuit` computes a ``sparsity`` estimate for the
+state produced from ``|0…0>``.  The value lies in ``[0, 1]`` with ``0``
+representing a fully dense state and ``1`` indicating maximal sparsity.  The
+estimator performs a single ``O(num_gates)`` pass over the circuit, treating
+``H``, ``RX``, ``RY``, ``U``, ``U2`` and ``U3`` as branching gates.  Uncontrolled
+branching gates double the number of non‑zero amplitudes while controlled
+versions add one.  Consequently, an ``n``‑qubit W‑state yields a high sparsity
+of ``1 - n / 2**n`` whereas the quantum Fourier transform drives the estimate
+to ``0``.  See [docs/sparsity.md](docs/sparsity.md) for details.
+
 ## Configuration
 
 QuASAr exposes a small set of tunables that influence planning heuristics.  The
