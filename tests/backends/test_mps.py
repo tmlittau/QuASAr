@@ -22,3 +22,25 @@ def test_mps_controlled_gates_match_statevector_backend():
     sv.apply_gate("CRZ", [0, 1], crz_params)
     np.testing.assert_allclose(mps.statevector(), sv.statevector(), atol=1e-12)
 
+
+def test_run_benchmark_caches_state(monkeypatch):
+    backend = MPSBackend()
+    backend.load(1)
+    backend.prepare_benchmark()
+    backend.apply_gate("H", [0])
+
+    calls = {"count": 0}
+
+    def fake_run(self):
+        calls["count"] += 1
+        return np.array([1 / np.sqrt(2), 1 / np.sqrt(2)])
+
+    monkeypatch.setattr(MPSBackend, "_run", fake_run)
+
+    state = backend.run_benchmark()
+    assert calls["count"] == 1
+
+    ssd = backend.extract_ssd()
+    assert calls["count"] == 1
+    np.testing.assert_allclose(state, ssd.partitions[0].state)
+

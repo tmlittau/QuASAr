@@ -426,6 +426,14 @@ class Scheduler:
                 ):
                     sim_obj.load(circuit.num_qubits)
                 if current_sim is not None:
+                    if instrument and hasattr(current_sim, "run_benchmark"):
+                        tracemalloc.start()
+                        start_time = time.perf_counter()
+                        current_sim.run_benchmark()
+                        elapsed = time.perf_counter() - start_time
+                        total_gate_time += elapsed
+                        tracemalloc.get_traced_memory()
+                        tracemalloc.stop()
                     current_ssd = current_sim.extract_ssd()
                     layer = None
                     if conv_idx < len(conv_layers):
@@ -543,6 +551,14 @@ class Scheduler:
             parts: List[SSDPartition] = []
             used_qubits = set()
             for sim in sims.values():
+                if instrument and hasattr(sim, "run_benchmark"):
+                    tracemalloc.start()
+                    start_time = time.perf_counter()
+                    sim.run_benchmark()
+                    elapsed = time.perf_counter() - start_time
+                    total_gate_time += elapsed
+                    tracemalloc.get_traced_memory()
+                    tracemalloc.stop()
                 ssd = sim.extract_ssd()
                 if ssd is None:
                     continue

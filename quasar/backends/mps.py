@@ -37,6 +37,7 @@ class MPSBackend(Backend):
     _benchmark_ops: List[Tuple[str, Sequence[int], Dict[str, float] | None]] = field(
         default_factory=list, init=False
     )
+    _benchmark_state: np.ndarray | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:  # pragma: no cover - trivial
         available = AerSimulator().available_methods()
@@ -51,6 +52,7 @@ class MPSBackend(Backend):
         self.chi = int(kwargs.get("chi", 16))
         self.circuit = QuantumCircuit(num_qubits)
         self.history.clear()
+        self._benchmark_state = None
 
     def ingest(
         self,
@@ -80,6 +82,7 @@ class MPSBackend(Backend):
         be = data.reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
         self.circuit.initialize(be, mapping)
         self.history.clear()
+        self._benchmark_state = None
 
     # ------------------------------------------------------------------
     def _param(self, params: Dict[str, float] | None, idx: int) -> float:
@@ -157,20 +160,39 @@ class MPSBackend(Backend):
         n = self.num_qubits
         return np.asarray(vec).reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
 
+    # ------------------------------------------------------------------
+    def run_benchmark(self) -> np.ndarray:
+        """Replay queued operations and execute the circuit.
+
+        The resulting statevector is cached for subsequent
+        :meth:`extract_ssd` or :meth:`statevector` calls.
+        """
+
+        ops = self._benchmark_ops
+        self._benchmark_mode = False
+        for name, qubits, params in ops:
+            self.apply_gate(name, qubits, params)
+        self._benchmark_ops = []
+        self._benchmark_state = self._run()
+        return self._benchmark_state
+
     def extract_ssd(self) -> SSD:
-        state = self._run()
+        if self._benchmark_state is None:
+            self._benchmark_state = self._run()
         part = SSDPartition(
             subsystems=(tuple(range(self.num_qubits)),),
             history=tuple(self.history),
             backend=self.backend,
-            state=state,
+            state=self._benchmark_state,
         )
         return SSD([part])
 
     # ------------------------------------------------------------------
     def statevector(self) -> np.ndarray:
         """Return a dense statevector corresponding to the circuit."""
-        return self._run()
+        if self._benchmark_state is None:
+            self._benchmark_state = self._run()
+        return self._benchmark_state
 
 
 class AerMPSBackend(MPSBackend):
