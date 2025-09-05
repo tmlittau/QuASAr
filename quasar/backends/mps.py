@@ -59,33 +59,55 @@ class MPSBackend(Backend):
 
     def ingest(
         self,
-        state: Sequence[complex] | Statevector,
+        state: object,
         *,
         num_qubits: int | None = None,
         mapping: Sequence[int] | None = None,
     ) -> None:
+        """Ingest an initial state in either dense or MPS form."""
+        data: np.ndarray | None
+        n: int
         if isinstance(state, Statevector):
             data = state.data
             n = int(np.log2(len(data)))
         else:
-            data = np.asarray(state, dtype=complex)
-            n = int(np.log2(len(data)))
-        if 2**n != len(data):
-            raise TypeError("Statevector length is not a power of two")
+            try:
+                data = np.asarray(state, dtype=complex)
+            except (TypeError, ValueError):
+                data = None
+            if data is not None and data.ndim == 1:
+                n = int(np.log2(len(data)))
+                if 2**n != len(data):
+                    raise TypeError("Statevector length is not a power of two")
+            else:
+                data = None
+        if data is not None:
+            if num_qubits is None:
+                num_qubits = n
+            if mapping is None:
+                if n != num_qubits:
+                    raise ValueError("num_qubits does not match state size")
+                mapping = list(range(n))
+            if len(mapping) != n:
+                raise ValueError("Mapping length does not match state size")
+            self.num_qubits = num_qubits
+            self.circuit = QuantumCircuit(num_qubits)
+            be = data.reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
+            self.circuit.initialize(be, mapping)
+            self.history.clear()
+            self._cached_state = None
+            self._cached_statevector = None
+            return
+        # assume native MPS representation
+        if mapping is not None:
+            raise NotImplementedError("Mapping is not supported for MPS ingestion")
         if num_qubits is None:
-            num_qubits = n
-        if mapping is None:
-            if n != num_qubits:
-                raise ValueError("num_qubits does not match state size")
-            mapping = list(range(n))
-        if len(mapping) != n:
-            raise ValueError("Mapping length does not match state size")
+            num_qubits = len(state)  # type: ignore[arg-type]
         self.num_qubits = num_qubits
         self.circuit = QuantumCircuit(num_qubits)
-        be = data.reshape([2] * n).transpose(*reversed(range(n))).reshape(-1)
-        self.circuit.initialize(be, mapping)
+        set_matrix_product_state(self.circuit, state)
         self.history.clear()
-        self._cached_state = None
+        self._cached_state = state
         self._cached_statevector = None
 
     # ------------------------------------------------------------------
