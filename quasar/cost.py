@@ -12,11 +12,13 @@ from typing import Dict, Optional
 
 @dataclass
 class Cost:
-    """Simple container for time, memory and complexity estimates."""
+    """Simple container for runtime and memory measurements."""
 
     time: float
     memory: float
     log_depth: float = 0.0
+    conversion: float = 0.0
+    replay: float = 0.0
 
 
 class Backend(Enum):

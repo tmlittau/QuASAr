@@ -253,6 +253,56 @@ class Scheduler:
                 )
             )
         circuit.ssd.partitions = parts
+        if not hasattr(plan, "replay_ssd"):
+            plan.replay_ssd = {}
+        sims: Dict[tuple, object] = {}
+        for idx, step in enumerate(plan.steps):
+            segment = circuit.gates[step.start : step.end]
+            target = step.backend
+            qubits = frozenset(q for g in segment for q in g.qubits)
+            if len(segment) == 1 and len(segment[0].qubits) == 2:
+                gate = segment[0]
+                left_info = next(
+                    ((k, s) for k, s in sims.items() if gate.qubits[0] in k[0]),
+                    None,
+                )
+                right_info = next(
+                    ((k, s) for k, s in sims.items() if gate.qubits[1] in k[0]),
+                    None,
+                )
+                if left_info and right_info and left_info[1] != right_info[1]:
+                    if self.conversion_engine is None:
+                        self.conversion_engine = ConversionEngine()
+                    l_ssd = CESD(boundary_qubits=[gate.qubits[0]], top_s=2)
+                    r_ssd = CESD(boundary_qubits=[gate.qubits[1]], top_s=2)
+                    self.conversion_engine.build_bridge_tensor(l_ssd, r_ssd)
+                    layer = ConversionLayer(
+                        boundary=tuple(gate.qubits),
+                        source=left_info[0][1],
+                        target=right_info[0][1],
+                        rank=2,
+                        frontier=len(gate.qubits),
+                        primitive="BRIDGE",
+                        cost=Cost(time=0.0, memory=0.0),
+                    )
+                    plan.explicit_conversions.append(layer)
+                    circuit.ssd.conversions.append(layer)
+                    sim_obj = type(self.backends[target])()
+                    sim_obj.load(circuit.num_qubits)
+                    for g in circuit.gates[: step.start]:
+                        sim_obj.apply_gate(g.gate, g.qubits, g.params)
+                    try:
+                        plan.replay_ssd[idx] = sim_obj.statevector()
+                    except Exception:
+                        plan.replay_ssd[idx] = sim_obj.extract_ssd()
+                    sims.clear()
+                    sims[(frozenset(range(circuit.num_qubits)), target)] = object()
+                    continue
+            for k in list(sims.keys()):
+                if k[0] & qubits and k[1] != target:
+                    sims.pop(k)
+            sims[(qubits, target)] = object()
+
         return plan
 
     # ------------------------------------------------------------------
@@ -309,6 +359,8 @@ class Scheduler:
 
         sims: Dict[tuple, object] = {}
         total_gate_time = Cost(time=0.0, memory=0.0)
+        conversion_time = 0.0
+        replay_time = 0.0
         current_backend = None
         current_sim = None
         i = 0
@@ -402,28 +454,38 @@ class Scheduler:
                     and right_info
                     and left_info[1] is not right_info[1]
                 ):
-                    l_ssd = CESD(boundary_qubits=[gate.qubits[0]], top_s=2)
-                    r_ssd = CESD(boundary_qubits=[gate.qubits[1]], top_s=2)
-                    self.conversion_engine.build_bridge_tensor(l_ssd, r_ssd)
-                    circuit.ssd.conversions.append(
-                        ConversionLayer(
-                            boundary=tuple(gate.qubits),
-                            source=left_info[0][1],
-                            target=right_info[0][1],
-                            rank=2,
-                            frontier=len(gate.qubits),
-                            primitive="BRIDGE",
-                            cost=Cost(time=0.0, memory=0.0),
-                        )
-                    )
+                    prepared = plan.replay_ssd.get(i)
                     sim_obj = type(self.backends[target])()
                     sim_obj.load(circuit.num_qubits)
-                    for g in circuit.gates[: step.end]:
-                        sim_obj.apply_gate(g.gate, g.qubits, g.params)
+                    if instrument:
+                        tracemalloc.start()
+                        start_time = time.perf_counter()
+                    try:
+                        sim_obj.ingest(prepared, num_qubits=circuit.num_qubits)
+                    except Exception:
+                        if isinstance(prepared, SSD):
+                            if target == Backend.TABLEAU:
+                                rep = self.conversion_engine.convert_boundary_to_tableau(prepared)
+                            elif target == Backend.DECISION_DIAGRAM:
+                                rep = self.conversion_engine.convert_boundary_to_dd(prepared)
+                            else:
+                                rep = self.conversion_engine.convert_boundary_to_statevector(prepared)
+                            sim_obj.ingest(rep, num_qubits=circuit.num_qubits)
+                        else:
+                            sim_obj.load(circuit.num_qubits)
+                    if instrument:
+                        elapsed = time.perf_counter() - start_time
+                        _, peak = tracemalloc.get_traced_memory()
+                        tracemalloc.stop()
+                        conversion_time += elapsed
+                        total_gate_time.memory = max(total_gate_time.memory, float(peak))
                     sims.clear()
                     sims[(frozenset(range(circuit.num_qubits)), target)] = sim_obj
                     current_sim = sim_obj
                     current_backend = target
+                    for g in segment:
+                        current_sim.apply_gate(g.gate, g.qubits, g.params)
+                    conv_idx += 1
                     i += 1
                     continue
 
@@ -448,7 +510,7 @@ class Scheduler:
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
                         tracemalloc.stop()
-                        total_gate_time.time += elapsed
+                        conversion_time += elapsed
                         total_gate_time.memory = max(total_gate_time.memory, float(peak))
                     else:
                         current_ssd = current_sim.extract_ssd()
@@ -470,6 +532,9 @@ class Scheduler:
                         rank = 2 ** len(boundary)
                         primitive = "Full"
                     conv_ssd = CESD(boundary_qubits=list(boundary), top_s=rank)
+                    if instrument:
+                        tracemalloc.start()
+                        start_time = time.perf_counter()
                     try:
                         if primitive == "B2B":
                             try:
@@ -515,6 +580,13 @@ class Scheduler:
                             )
                     except Exception:
                         sim_obj.load(circuit.num_qubits)
+                    finally:
+                        if instrument:
+                            elapsed = time.perf_counter() - start_time
+                            _, peak = tracemalloc.get_traced_memory()
+                            tracemalloc.stop()
+                            conversion_time += elapsed
+                            total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 current_sim = sim_obj
                 current_backend = target
                 for k in list(sims.keys()):
@@ -576,7 +648,7 @@ class Scheduler:
                     elapsed = time.perf_counter() - start_time
                     _, peak = tracemalloc.get_traced_memory()
                     tracemalloc.stop()
-                    total_gate_time.time += elapsed
+                    conversion_time += elapsed
                     total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 else:
                     ssd = sim.extract_ssd()
@@ -589,9 +661,25 @@ class Scheduler:
                 if all(q not in used_qubits for q in part.qubits):
                     parts.append(part)
             ssd_res = SSD(parts, circuit.ssd.conversions)
-            return (ssd_res, total_gate_time) if instrument else ssd_res
+            if instrument:
+                run_cost = Cost(
+                    time=total_gate_time.time,
+                    memory=total_gate_time.memory,
+                    conversion=conversion_time,
+                    replay=replay_time,
+                )
+                return ssd_res, run_cost
+            return ssd_res
         ssd_res = circuit.ssd
-        return (ssd_res, total_gate_time) if instrument else ssd_res
+        if instrument:
+            run_cost = Cost(
+                time=total_gate_time.time,
+                memory=total_gate_time.memory,
+                conversion=conversion_time,
+                replay=replay_time,
+            )
+            return ssd_res, run_cost
+        return ssd_res
 
     # ------------------------------------------------------------------
     def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:
