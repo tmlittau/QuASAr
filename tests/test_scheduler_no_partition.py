@@ -70,6 +70,19 @@ def test_random_two_qubit_circuit_single_partition():
     assert len({p.backend for p in result.ssd.partitions}) == 1
 
 
+def test_ten_qubit_circuit_single_partition():
+    """A 10-qubit chain should remain a single partition after planning."""
+    qc = QuantumCircuit(10)
+    for i in range(9):
+        qc.cx(i, i + 1)
+    circuit = Circuit.from_qiskit(qc)
+    scheduler = Scheduler(quick_max_qubits=None, force_single_backend_below=12)
+    plan = scheduler.prepare_run(circuit)
+    ssd = scheduler.run(circuit, plan)
+    assert len(ssd.partitions) == 1
+    assert not ssd.conversions
+
+
 def test_fifteen_qubit_circuit_single_backend():
     qc = QuantumCircuit(15)
     for i in range(14):
