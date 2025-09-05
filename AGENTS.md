@@ -11,6 +11,7 @@
 - Follow existing style: PEP8 formatting, descriptive docstrings and type annotations.
 - Document new user‑facing behaviour in `docs/` or relevant notebooks.
 - Unsupported gates should be implemented natively without decomposing into other operations.
+- Backend `run` methods should return native representations; only convert to a statevector (or other format) when explicitly required by a conversion layer.
 
 ## Testing
 - Run the full test suite with:
