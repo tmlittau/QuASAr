@@ -1,5 +1,6 @@
 from benchmarks.runner import BenchmarkRunner
 from quasar.planner import PlanResult
+from quasar.cost import Cost
 
 
 class DummyBackend:
@@ -44,7 +45,7 @@ class DummyScheduler:
     def run(self, circuit, plan, *, monitor=None, instrument=False):
         self.instrument_calls.append(instrument)
         self._data = [0] * 10000
-        return "done", 0.0
+        return "done", Cost(time=0.0, memory=0.0)
 
 
 def test_run_quasar_records_memory():

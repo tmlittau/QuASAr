@@ -8,7 +8,7 @@ from benchmarks.circuits import ghz_circuit
 from benchmarks.runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.ssd import SSD, SSDPartition
-from quasar.cost import Backend
+from quasar.cost import Backend, Cost
 from quasar.planner import PlanResult
 
 
@@ -167,7 +167,7 @@ class DummyScheduler:
                 )
             ]
         )
-        return ssd, runtime
+        return ssd, Cost(time=runtime, memory=0.0)
 
 
 def test_run_quasar_multiple_aggregates_statistics():
@@ -201,7 +201,7 @@ class PlannerErrorScheduler:
         ssd = SSD([
             SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
         ])
-        return ssd, 0.0
+        return ssd, Cost(time=0.0, memory=0.0)
 
 
 def test_run_quasar_returns_failure_record_on_planner_error():

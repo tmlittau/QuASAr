@@ -250,7 +250,7 @@ class Scheduler:
         *,
         instrument: bool = False,
         backend: Backend | None = None,
-    ) -> SSD | tuple[SSD, float]:
+    ) -> SSD | tuple[SSD, Cost]:
         """Execute ``circuit`` according to a plan.
 
         When ``plan`` is ``None`` the method performs planning internally using
@@ -280,9 +280,9 @@ class Scheduler:
         SSD
             Descriptor of the simulated state after all gates have been
             executed.  When ``instrument`` is ``True`` a tuple of
-            ``(ssd, gate_time)`` is returned where ``gate_time`` records the
-            aggregated wall-clock time spent applying gates, excluding setup
-            and conversion overhead.
+            ``(ssd, cost)`` is returned where ``cost`` records the
+            aggregated wall-clock time and peak memory spent applying gates
+            and extracting state, excluding setup and conversion overhead.
         """
 
         if plan is None or plan.step_costs is None:
@@ -294,7 +294,7 @@ class Scheduler:
         est_costs = plan.step_costs or [Cost(time=0.0, memory=0.0)] * len(steps)
 
         sims: Dict[tuple, object] = {}
-        total_gate_time = 0.0
+        total_gate_time = Cost(time=0.0, memory=0.0)
         current_backend = None
         current_sim = None
         i = 0
@@ -334,9 +334,10 @@ class Scheduler:
 
                 if instrument:
                     elapsed = time.perf_counter() - start_time
-                    total_gate_time += elapsed
+                    total_gate_time.time += elapsed
                     _, peak = tracemalloc.get_traced_memory()
                     tracemalloc.stop()
+                    total_gate_time.memory = max(total_gate_time.memory, float(peak))
                     observed = Cost(time=elapsed, memory=float(peak))
 
                     coeff = {
@@ -426,7 +427,17 @@ class Scheduler:
                 ):
                     sim_obj.load(circuit.num_qubits)
                 if current_sim is not None:
-                    current_ssd = current_sim.extract_ssd()
+                    if instrument:
+                        tracemalloc.start()
+                        start_time = time.perf_counter()
+                        current_ssd = current_sim.extract_ssd()
+                        elapsed = time.perf_counter() - start_time
+                        _, peak = tracemalloc.get_traced_memory()
+                        tracemalloc.stop()
+                        total_gate_time.time += elapsed
+                        total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                    else:
+                        current_ssd = current_sim.extract_ssd()
                     layer = None
                     if conv_idx < len(conv_layers):
                         cand = conv_layers[conv_idx]
@@ -507,9 +518,10 @@ class Scheduler:
 
             if instrument:
                 elapsed = time.perf_counter() - start_time
-                total_gate_time += elapsed
+                total_gate_time.time += elapsed
                 _, peak = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
+                total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 observed = Cost(time=elapsed, memory=float(peak))
 
                 # Update cost model based on observation
@@ -543,7 +555,17 @@ class Scheduler:
             parts: List[SSDPartition] = []
             used_qubits = set()
             for sim in sims.values():
-                ssd = sim.extract_ssd()
+                if instrument:
+                    tracemalloc.start()
+                    start_time = time.perf_counter()
+                    ssd = sim.extract_ssd()
+                    elapsed = time.perf_counter() - start_time
+                    _, peak = tracemalloc.get_traced_memory()
+                    tracemalloc.stop()
+                    total_gate_time.time += elapsed
+                    total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                else:
+                    ssd = sim.extract_ssd()
                 if ssd is None:
                     continue
                 parts.extend(ssd.partitions)
