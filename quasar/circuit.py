@@ -12,6 +12,7 @@ from qiskit_qasm3_import import api as qasm3_api
 
 from .ssd import SSD, SSDPartition
 from .cost import Cost
+from .symmetry import symmetry_score
 
 
 @dataclass
@@ -37,6 +38,7 @@ class Circuit:
         self._num_gates = len(self.gates)
         self._num_qubits = self._infer_qubit_count()
         self._depth = self._compute_depth()
+        self.symmetry = symmetry_score(self)
         self.ssd = self._create_ssd()
         self.cost_estimates = self._estimate_costs()
 
