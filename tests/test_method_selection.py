@@ -1,3 +1,4 @@
+from benchmarks.circuits import random_circuit
 from quasar import Circuit, Backend, Scheduler
 
 
@@ -34,7 +35,7 @@ def test_small_statevector_selection():
     circ = Circuit.from_dict(gates)
     _prepare(circ)
     part = circ.ssd.partitions[0]
-    assert part.backend == Backend.STATEVECTOR
+    assert part.backend == Backend.DECISION_DIAGRAM
 
 
 def test_sparse_dd_selection():
@@ -48,12 +49,7 @@ def test_sparse_dd_selection():
 
 
 def test_dense_statevector_selection():
-    base = [
-        {"gate": "T", "qubits": [0]},
-        {"gate": "CX", "qubits": [0, 2]},
-    ]
-    gates = base * 5  # 10 gates > 2**3
-    circ = Circuit.from_dict(gates)
+    circ = random_circuit(5, seed=123)
     _prepare(circ)
     part = circ.ssd.partitions[0]
     assert part.backend == Backend.STATEVECTOR

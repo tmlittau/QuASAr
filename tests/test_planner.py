@@ -77,6 +77,7 @@ def test_planner_respects_caps():
 
 def test_conversion_cost_multiplier_discourages_switch():
     gates = [
+        {"gate": "H", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
         {"gate": "CX", "qubits": [0, 1]},
         {"gate": "T", "qubits": [0]},
