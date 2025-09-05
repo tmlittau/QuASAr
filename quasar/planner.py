@@ -168,7 +168,12 @@ def _better(a: Cost, b: Cost) -> bool:
 
 
 def _supported_backends(
-    gates: Iterable[Gate], *, allow_tableau: bool = True
+    gates: Iterable[Gate],
+    *,
+    symmetry: float | None = None,
+    sparsity: float | None = None,
+    circuit: "Circuit" | None = None,
+    allow_tableau: bool = True,
 ) -> List[Backend]:
     """Determine which backends can simulate a gate sequence.
 
@@ -176,6 +181,11 @@ def _supported_backends(
     ----------
     gates:
         Gate sequence under consideration.
+    symmetry, sparsity:
+        Optional heuristic metrics for the overall circuit.
+    circuit:
+        Circuit providing symmetry and sparsity values.  Explicit ``symmetry``
+        and ``sparsity`` arguments take precedence when supplied.
     allow_tableau:
         If ``True`` and the gate sequence is Clifford-only, include
         :class:`Backend.TABLEAU` as a candidate.  When ``False`` the tableau
@@ -183,6 +193,12 @@ def _supported_backends(
         allows callers to disable specialised Clifford handling when the
         surrounding circuit contains non-Clifford operations.
     """
+
+    if circuit is not None:
+        if symmetry is None:
+            symmetry = getattr(circuit, "symmetry", None)
+        if sparsity is None:
+            sparsity = getattr(circuit, "sparsity", None)
 
     gates = list(gates)
     names = [g.gate.upper() for g in gates]
@@ -196,7 +212,17 @@ def _supported_backends(
     if allow_tableau and clifford:
         candidates.append(Backend.TABLEAU)
 
+    dd_metric = False
+    if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
+        dd_metric = True
+    if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
+        dd_metric = True
+    if allow_tableau and clifford:
+        dd_metric = False
+
     if num_qubits < 20:
+        if dd_metric:
+            candidates.append(Backend.DECISION_DIAGRAM)
         candidates.append(Backend.STATEVECTOR)
         return candidates
 
@@ -205,7 +231,7 @@ def _supported_backends(
         len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
     )
 
-    if num_gates <= 2**num_qubits and not local:
+    if dd_metric or (num_gates <= 2**num_qubits and not local):
         candidates.append(Backend.DECISION_DIAGRAM)
     if local:
         candidates.append(Backend.MPS)
@@ -365,12 +391,15 @@ class Planner:
         max_memory: float | None = None,
         forced_backend: Backend | None = None,
         allow_tableau: bool = True,
+        symmetry: float | None = None,
+        sparsity: float | None = None,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning.
 
         When ``forced_backend`` is provided only that backend is considered
         during planning.  A ``ValueError`` is raised if the backend cannot
-        simulate a segment of the circuit.
+        simulate a segment of the circuit.  ``symmetry`` and ``sparsity`` are
+        forwarded to :func:`_supported_backends`.
         """
 
         n = len(gates)
@@ -399,7 +428,12 @@ class Planner:
                 )
                 num_2q = len(gates) - num_1q - num_meas
                 if forced_backend is not None:
-                    backends = _supported_backends(gates, allow_tableau=allow_tableau)
+                    backends = _supported_backends(
+                        gates,
+                        symmetry=symmetry,
+                        sparsity=sparsity,
+                        allow_tableau=allow_tableau,
+                    )
                     if forced_backend not in backends:
                         raise ValueError(
                             f"Backend {forced_backend} unsupported for given circuit segment"
@@ -430,7 +464,11 @@ class Planner:
                     )
                 else:
                     backend_choice, cost = self._single_backend(
-                        gates, max_memory, allow_tableau=allow_tableau
+                        gates,
+                        max_memory,
+                        symmetry=symmetry,
+                        sparsity=sparsity,
+                        allow_tableau=allow_tableau,
                     )
                     if max_memory is not None and cost.memory > max_memory:
                         pass  # fall through to full DP
@@ -490,7 +528,12 @@ class Planner:
                 )
                 num_2q = num_gates - num_1q - num_meas
                 backends = self._order_backends(
-                    _supported_backends(segment, allow_tableau=allow_tableau)
+                    _supported_backends(
+                        segment,
+                        symmetry=symmetry,
+                        sparsity=sparsity,
+                        allow_tableau=allow_tableau,
+                    )
                 )
                 if forced_backend is not None:
                     if forced_backend not in backends:
@@ -667,6 +710,8 @@ class Planner:
         gates: List["Gate"],
         max_memory: float | None,
         *,
+        symmetry: float | None = None,
+        sparsity: float | None = None,
         allow_tableau: bool = True,
     ) -> Tuple[Backend, Cost]:
         """Return best single-backend estimate for the full gate list.
@@ -677,6 +722,8 @@ class Planner:
             Gate sequence to estimate.
         max_memory:
             Optional memory threshold.
+        symmetry, sparsity:
+            Optional heuristic metrics for the overall circuit.
         allow_tableau:
             Propagate the circuit-level Clifford check.  When ``False`` the
             tableau backend is never considered even if ``gates`` are
@@ -694,7 +741,12 @@ class Planner:
         )
         num_2q = num_gates - num_1q - num_meas
         backends = self._order_backends(
-            _supported_backends(gates, allow_tableau=allow_tableau)
+            _supported_backends(
+                gates,
+                symmetry=symmetry,
+                sparsity=sparsity,
+                allow_tableau=allow_tableau,
+            )
         )
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:
@@ -789,7 +841,11 @@ class Planner:
             return result
         # Pre-compute the cost of executing the full circuit on a single backend
         single_backend_choice, single_cost = self._single_backend(
-            gates, threshold, allow_tableau=allow_tableau
+            gates,
+            threshold,
+            symmetry=circuit.symmetry,
+            sparsity=circuit.sparsity,
+            allow_tableau=allow_tableau,
         )
 
         quick = True
@@ -857,6 +913,8 @@ class Planner:
             batch_size=self.batch_size,
             max_memory=threshold,
             allow_tableau=allow_tableau,
+            symmetry=circuit.symmetry,
+            sparsity=circuit.sparsity,
         )
 
         dp_cost = (
@@ -912,6 +970,8 @@ class Planner:
                 batch_size=1,
                 max_memory=threshold,
                 allow_tableau=allow_tableau,
+                symmetry=circuit.symmetry,
+                sparsity=circuit.sparsity,
             )
             for sub_step in sub.steps:
                 refined_steps.append(

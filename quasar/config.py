@@ -17,6 +17,18 @@ def _int_from_env(name: str, default: int | None) -> int | None:
         return default
 
 
+def _float_from_env(name: str, default: float) -> float:
+    """Return a floating-point value parsed from the environment."""
+
+    val = os.getenv(name)
+    if val is None or not val.strip():
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
+
 def _order_from_env(name: str, default: List[Backend]) -> List[Backend]:
     val = os.getenv(name)
     if val is None or not val.strip():
@@ -61,6 +73,12 @@ class Config:
             "QUASAR_PARALLEL_BACKENDS",
             [Backend.STATEVECTOR, Backend.MPS],
         )
+    )
+    dd_symmetry_threshold: float = _float_from_env(
+        "QUASAR_DD_SYMMETRY_THRESHOLD", 0.3
+    )
+    dd_sparsity_threshold: float = _float_from_env(
+        "QUASAR_DD_SPARSITY_THRESHOLD", 0.8
     )
 
 

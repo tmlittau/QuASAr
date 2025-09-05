@@ -266,7 +266,12 @@ class SleepBackend:
         pass
 
 
-def test_parallel_execution_on_independent_subcircuits():
+def test_parallel_execution_on_independent_subcircuits(monkeypatch):
+    import quasar.config as config
+
+    monkeypatch.setattr(config.DEFAULT, "dd_symmetry_threshold", 2.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 2.0)
+
     circuit = Circuit([
         {"gate": "T", "qubits": [0]},
         {"gate": "T", "qubits": [1]},
