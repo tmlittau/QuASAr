@@ -136,15 +136,29 @@ class Scheduler:
 
         if names and all(name in CLIFFORD_GATES for name in names):
             return Backend.TABLEAU
-        if num_qubits < 20:
-            return Backend.STATEVECTOR
+
+        symmetry = getattr(circuit, "symmetry", None)
+        sparsity = getattr(circuit, "sparsity", None)
+        if symmetry is None or sparsity is None:
+            from .symmetry import symmetry_score
+            from .sparsity import sparsity_estimate
+
+            if symmetry is None:
+                symmetry = symmetry_score(circuit)
+            if sparsity is None:
+                sparsity = sparsity_estimate(circuit)
+
+        dd_metric = (
+            symmetry >= config.DEFAULT.dd_symmetry_threshold
+            or sparsity >= config.DEFAULT.dd_sparsity_threshold
+        )
 
         multi = [g for g in circuit.gates if len(g.qubits) > 1]
         local = multi and all(
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
 
-        if num_gates <= 2 ** num_qubits and not local:
+        if dd_metric:
             return Backend.DECISION_DIAGRAM
         if local:
             return Backend.MPS

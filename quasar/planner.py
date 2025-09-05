@@ -220,18 +220,12 @@ def _supported_backends(
     if allow_tableau and clifford:
         dd_metric = False
 
-    if num_qubits < 20:
-        if dd_metric:
-            candidates.append(Backend.DECISION_DIAGRAM)
-        candidates.append(Backend.STATEVECTOR)
-        return candidates
-
     multi = [g for g in gates if len(g.qubits) > 1]
     local = multi and all(
         len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
     )
 
-    if dd_metric or (num_gates <= 2**num_qubits and not local):
+    if dd_metric:
         candidates.append(Backend.DECISION_DIAGRAM)
     if local:
         candidates.append(Backend.MPS)

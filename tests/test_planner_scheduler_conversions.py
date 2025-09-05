@@ -90,9 +90,6 @@ def test_planner_conversions_used():
             coeff={"sv_gate_1q": 1e6, "sv_gate_2q": 1e6, "sv_meas": 1e6}
         ),
         conversion_cost_multiplier=0.0,
-        quick_max_qubits=None,
-        quick_max_gates=None,
-        quick_max_depth=None,
     )
     planner.plan(circ)
     assert len(circ.ssd.conversions) == 0
@@ -107,9 +104,6 @@ def test_planner_conversions_used():
             Backend.MPS: DummyStatevectorBackend(),
             Backend.DECISION_DIAGRAM: DummyStatevectorBackend(),
         },
-        quick_max_qubits=None,
-        quick_max_gates=None,
-        quick_max_depth=None,
     )
 
     plan = sched.prepare_run(circ)
