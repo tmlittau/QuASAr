@@ -36,6 +36,9 @@ class Circuit:
     sparsity:
         Estimated sparsity of the circuit's state vector.  This is a heuristic
         and should not be taken as an exact metric.
+    symmetry:
+        Heuristic symmetry score of the circuit's layers.  Higher values
+        indicate more repeated gate patterns.
     """
 
     def __init__(self, gates: Iterable[Dict[str, Any] | Gate]):
@@ -47,6 +50,8 @@ class Circuit:
         self.cost_estimates = self._estimate_costs()
         from .sparsity import sparsity_estimate
         self.sparsity = sparsity_estimate(self)
+        from .symmetry import symmetry_score
+        self.symmetry = symmetry_score(self)
 
     # ------------------------------------------------------------------
     # Construction helpers
