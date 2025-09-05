@@ -95,6 +95,18 @@ versions add one.  Consequently, an ``n``‑qubit W‑state yields a high sparsi
 of ``1 - n / 2**n`` whereas the quantum Fourier transform drives the estimate
 to ``0``.  See [docs/sparsity.md](docs/sparsity.md) for details.
 
+## Backend selection
+
+The planner selects a simulation backend for each circuit fragment based on
+simple heuristics.  [Symmetry](docs/symmetry.md) and
+[sparsity](docs/sparsity.md) scores are compared against thresholds to decide
+when to include the decision-diagram backend alongside dense simulators.
+These thresholds default to ``0.3`` and ``0.8`` respectively and can be tuned
+via the ``QUASAR_DD_SYMMETRY_THRESHOLD`` and
+``QUASAR_DD_SPARSITY_THRESHOLD`` environment variables.  A detailed overview
+of the decision flow is provided in
+[docs/backend_selection.md](docs/backend_selection.md).
+
 ## Configuration
 
 QuASAr exposes a small set of tunables that influence planning heuristics.  The
