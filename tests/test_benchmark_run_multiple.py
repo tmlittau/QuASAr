@@ -181,7 +181,7 @@ def test_run_quasar_multiple_aggregates_statistics():
     assert record["repetitions"] == 3
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
-    assert scheduler.plan_calls == [Backend.TABLEAU] * 3
+    assert scheduler.plan_calls == [Backend.TABLEAU]
     assert scheduler.run_calls == [(Backend.TABLEAU, True)] * 3
     assert record["backend"] == Backend.TABLEAU.name
 

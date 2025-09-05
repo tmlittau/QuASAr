@@ -10,12 +10,12 @@ cumulative cost up to a given gate index and acts as a backpointer to recover
 an optimal execution plan.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
 from .partitioner import CLIFFORD_GATES, Partitioner
-from .ssd import ConversionLayer
+from .ssd import ConversionLayer, SSD
 from . import config
 
 if True:  # pragma: no cover - used for type checking when available
@@ -71,6 +71,7 @@ class PlanResult:
     explicit_steps: Optional[List[PlanStep]] = None
     explicit_conversions: Optional[List["ConversionLayer"]] = None
     step_costs: Optional[List[Cost]] = None
+    replay_ssd: Dict[int, "SSD"] = field(default_factory=dict)
 
     # The ``steps`` property recovers the final plan lazily using the
     # backpointers contained in ``table``.  If ``explicit_steps`` is provided
@@ -158,6 +159,8 @@ def _add_cost(a: Cost, b: Cost) -> Cost:
         time=a.time + b.time,
         memory=max(a.memory, b.memory),
         log_depth=max(a.log_depth, b.log_depth),
+        conversion=a.conversion + b.conversion,
+        replay=a.replay + b.replay,
     )
 
 

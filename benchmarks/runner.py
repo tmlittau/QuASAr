@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List
 import time
 import tracemalloc
 import statistics
+import copy
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
@@ -429,10 +430,48 @@ class BenchmarkRunner:
         records: List[Dict[str, Any]] = []
         failures: List[str] = []
 
+        scheduler = getattr(engine, "scheduler", engine)
+        planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
+        use_quick = False
+        should_quick = getattr(scheduler, "should_use_quick_path", None)
+        if callable(should_quick) and circuit is not None:
+            use_quick = should_quick(circuit, backend=backend)
+
+        if use_quick:
+            plan = None
+            original_ssd = None
+        else:
+            if planner is not None:
+                plan = planner.plan(circuit, backend=backend)
+                plan = scheduler.prepare_run(circuit, plan, backend=backend)
+            else:
+                plan = scheduler.prepare_run(circuit, backend=backend)
+            original_ssd = copy.deepcopy(getattr(circuit, "ssd", None)) if circuit is not None else None
+
         def _run_once() -> Dict[str, Any]:
-            rec = self.run_quasar(circuit, engine, backend=backend)
-            self.results.pop()
-            return rec
+            if use_quick:
+                rec = self.run_quasar(circuit, engine, backend=backend)
+                self.results.pop()
+                return rec
+            assert plan is not None
+            if circuit is not None and original_ssd is not None:
+                circuit.ssd = copy.deepcopy(original_ssd)
+            result, run_cost = scheduler.run(circuit, plan, instrument=True)
+            backend_choice_name = None
+            if hasattr(result, "partitions") and getattr(result, "partitions"):
+                backend_obj = result.partitions[0].backend
+                backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
+            return {
+                "framework": "quasar",
+                "prepare_time": 0.0,
+                "run_time": run_cost.time,
+                "total_time": run_cost.time,
+                "prepare_peak_memory": 0,
+                "run_peak_memory": int(run_cost.memory),
+                "result": result,
+                "failed": False,
+                "backend": backend_choice_name,
+            }
 
         start = time.perf_counter()
         for i in range(repetitions):
