@@ -177,6 +177,7 @@ def _supported_backends(
     sparsity: float | None = None,
     circuit: "Circuit" | None = None,
     allow_tableau: bool = True,
+    estimator: CostEstimator | None = None,
 ) -> List[Backend]:
     """Determine which backends can simulate a gate sequence.
 
@@ -195,6 +196,10 @@ def _supported_backends(
         backend is never proposed even if the segment itself is Clifford.  This
         allows callers to disable specialised Clifford handling when the
         surrounding circuit contains non-Clifford operations.
+    estimator:
+        Optional cost estimator used to derive a Schmidt rank heuristic.  The
+        MPS backend is considered only if the estimated rank does not exceed
+        ``estimator.chi_max``.
     """
 
     if circuit is not None:
@@ -207,7 +212,7 @@ def _supported_backends(
     names = [g.gate.upper() for g in gates]
     num_gates = len(gates)
     qubits = {q for g in gates for q in g.qubits}
-    num_qubits = len(qubits)
+    num_qubits = (max(qubits) + 1) if qubits else 0
 
     clifford = names and all(name in CLIFFORD_GATES for name in names)
     if allow_tableau and clifford:
@@ -221,14 +226,16 @@ def _supported_backends(
     if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
         dd_metric = True
 
-    multi = [g for g in gates if len(g.qubits) > 1]
-    local = multi and all(
-        len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
-    )
+    mps_metric = False
+    if estimator is not None and all(len(g.qubits) <= 2 for g in gates):
+        chi_est = estimator.max_schmidt_rank(num_qubits, gates)
+        chi_threshold = estimator.chi_max
+        if chi_threshold is None or chi_est <= chi_threshold:
+            mps_metric = True
 
     if dd_metric:
         candidates.append(Backend.DECISION_DIAGRAM)
-    if local:
+    if mps_metric:
         candidates.append(Backend.MPS)
     candidates.append(Backend.STATEVECTOR)
 
@@ -428,6 +435,7 @@ class Planner:
                         symmetry=symmetry,
                         sparsity=sparsity,
                         allow_tableau=allow_tableau,
+                        estimator=self.estimator,
                     )
                     if forced_backend not in backends:
                         raise ValueError(
@@ -528,6 +536,7 @@ class Planner:
                         symmetry=symmetry,
                         sparsity=sparsity,
                         allow_tableau=allow_tableau,
+                        estimator=self.estimator,
                     )
                 )
                 if forced_backend is not None:
@@ -741,6 +750,7 @@ class Planner:
                 symmetry=symmetry,
                 sparsity=sparsity,
                 allow_tableau=allow_tableau,
+                estimator=self.estimator,
             )
         )
         candidates: List[Tuple[Backend, Cost]] = []

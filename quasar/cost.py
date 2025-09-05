@@ -7,7 +7,10 @@ from enum import Enum
 import json
 import math
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - for type checking only
+    from .circuit import Gate
 
 
 @dataclass
@@ -59,6 +62,7 @@ class CostEstimator:
         s_max: Optional[int] = None,
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
+        chi_max: Optional[int] = None,
     ):
         # Baseline coefficients; tuned empirically in a full system.
         self.coeff: Dict[str, float] = {
@@ -95,6 +99,14 @@ class CostEstimator:
         self.s_max = s_max
         self.r_max = r_max
         self.q_max = q_max
+        if chi_max is None:
+            try:  # Lazy import to avoid circular dependency with config
+                from . import config as _config  # type: ignore
+
+                chi_max = _config.DEFAULT.mps_chi_threshold
+            except Exception:  # pragma: no cover - fallback when config unavailable
+                chi_max = None
+        self.chi_max = chi_max
 
     # ------------------------------------------------------------------
     def update_coefficients(self, updates: Dict[str, float]) -> None:
@@ -112,6 +124,40 @@ class CostEstimator:
         with Path(path).open() as fh:
             coeff = json.load(fh)
         return cls(coeff=coeff)
+
+    # ------------------------------------------------------------------
+    # Entanglement heuristics
+    # ------------------------------------------------------------------
+    def max_schmidt_rank(
+        self, num_qubits: int, gates: Iterable["Gate"]
+    ) -> int:
+        """Return an upper bound on the maximal Schmidt rank.
+
+        The routine tracks a simple bond dimension across a linear ordering of
+        qubits.  Each two-qubit gate acting on qubits ``a`` and ``b`` doubles the
+        bond dimension of all cuts between ``a`` and ``b``.  The largest bond
+        encountered is returned as a crude predictor for MPS efficiency.
+        """
+
+        bonds = [1] * max(0, num_qubits - 1)
+        limit = 2 ** num_qubits
+        for gate in gates:
+            qubits = getattr(gate, "qubits", [])
+            if len(qubits) < 2:
+                continue
+            q0, q1 = min(qubits), max(qubits)
+            for i in range(q0, q1):
+                bonds[i] = min(bonds[i] * 2, limit)
+        return max(bonds, default=1)
+
+    def entanglement_entropy(self, num_qubits: int, gates: Iterable["Gate"]) -> float:
+        """Estimate maximal bipartite entanglement entropy.
+
+        This simply computes ``log2`` of :meth:`max_schmidt_rank`.
+        """
+
+        chi = self.max_schmidt_rank(num_qubits, gates)
+        return math.log2(chi) if chi > 0 else 0.0
 
     def statevector(
         self,
