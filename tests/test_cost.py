@@ -1,4 +1,4 @@
-from quasar import Backend, CostEstimator
+from quasar import Backend, Circuit, CostEstimator, Gate
 import math
 
 
@@ -179,3 +179,16 @@ def test_st_chi_cap_override():
     assert res_default.primitive == "ST"
     assert res_custom.primitive == "ST"
     assert res_custom.cost.time < res_default.cost.time
+
+
+def test_max_schmidt_rank_and_entropy():
+    gates = [
+        Gate("CX", [0, 2]),
+        Gate("CX", [1, 3]),
+    ]
+    circ = Circuit(gates)
+    est = CostEstimator()
+    chi = est.max_schmidt_rank(circ.num_qubits, circ.gates)
+    assert chi == 4
+    entropy = est.entanglement_entropy(circ.num_qubits, circ.gates)
+    assert entropy == math.log2(chi)
