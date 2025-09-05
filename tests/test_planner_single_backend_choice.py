@@ -42,9 +42,6 @@ def test_single_backend_when_cheapest(gates):
     circ = Circuit.from_dict(gates)
     planner = Planner(
         OverheadEstimator(),
-        quick_max_qubits=None,
-        quick_max_gates=None,
-        quick_max_depth=None,
     )
     result = planner.plan(circ)
     assert len(result.steps) == 1

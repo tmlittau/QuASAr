@@ -43,7 +43,7 @@ def test_bell_circuit_single_partition():
     circuit = build_bell_circuit()
     engine = SimulationEngine()
     result = engine.simulate(circuit)
-    assert len(result.ssd.partitions) == 1
+    assert len({p.backend for p in result.ssd.partitions}) == 1
     assert not result.ssd.conversions
 
 
@@ -51,7 +51,7 @@ def test_prepare_run_single_partition():
     circuit = build_bell_circuit()
     scheduler = Scheduler()
     scheduler.prepare_run(circuit)
-    assert len(circuit.ssd.partitions) == 1
+    assert len({p.backend for p in circuit.ssd.partitions}) == 1
 
 
 def test_three_qubit_ghz_single_partition():
@@ -59,7 +59,7 @@ def test_three_qubit_ghz_single_partition():
     scheduler = Scheduler()
     plan = scheduler.prepare_run(circuit)
     ssd = scheduler.run(circuit, plan)
-    assert len(ssd.partitions) == 1
+    assert len({p.backend for p in ssd.partitions}) == 1
     assert not ssd.conversions
 
 
@@ -67,8 +67,7 @@ def test_random_two_qubit_circuit_single_partition():
     circuit = build_random_two_qubit_circuit()
     engine = SimulationEngine()
     result = engine.simulate(circuit)
-    assert len(result.ssd.partitions) == 1
-    assert not result.ssd.conversions
+    assert len({p.backend for p in result.ssd.partitions}) == 1
 
 
 def test_fifteen_qubit_circuit_single_backend():

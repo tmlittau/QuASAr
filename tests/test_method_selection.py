@@ -3,12 +3,7 @@ from quasar import Circuit, Backend, Scheduler
 
 
 def _prepare(circ: Circuit):
-    scheduler = Scheduler(
-        quick_max_qubits=None,
-        quick_max_gates=None,
-        quick_max_depth=None,
-        force_single_backend_below=None,
-    )
+    scheduler = Scheduler()
     plan = scheduler.prepare_run(circ)
     return scheduler, plan
 

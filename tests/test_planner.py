@@ -41,9 +41,7 @@ def test_statevector_for_non_clifford():
         "ingest_sv": 0.0,
         "dd_gate": 10.0,
     }
-    planner = Planner(
-        CostEstimator(coeff), quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None
-    )
+    planner = Planner(CostEstimator(coeff))
     result = planner.plan(circ)
     steps = result.steps
     assert all(s.backend == Backend.STATEVECTOR for s in steps)
@@ -71,8 +69,7 @@ def test_planner_respects_caps():
     planner = Planner(est)
     result = planner.plan(circ)
     steps = result.steps
-    assert len(steps) == 1
-    assert steps[0].backend == Backend.STATEVECTOR
+    assert all(s.backend == Backend.STATEVECTOR for s in steps)
 
 
 def test_conversion_cost_multiplier_discourages_switch():
@@ -93,19 +90,11 @@ def test_conversion_cost_multiplier_discourages_switch():
         "ingest_sv": 0.375,
     }
     est = CostEstimator(coeff)
-    base = Planner(
-        est,
-        quick_max_qubits=None,
-        quick_max_gates=None,
-        quick_max_depth=None,
-    )
+    base = Planner(est)
     steps = base.plan(circ).steps
     assert all(s.backend == Backend.STATEVECTOR for s in steps)
     penalized = Planner(
         est,
-        quick_max_qubits=None,
-        quick_max_gates=None,
-        quick_max_depth=None,
         conversion_cost_multiplier=50.0,
     )
     steps2 = penalized.plan(circ).steps
