@@ -377,10 +377,15 @@ class Planner:
         except ValueError:
             return len(self.backend_order)
 
-    def _order_backends(self, backends: List[Backend]) -> List[Backend]:
-        return sorted(
-            backends, key=lambda b: (b != Backend.TABLEAU, self._backend_rank(b))
-        )
+    def _order_backends(
+        self, backends: List[Backend], *, dd_metric: bool = False
+    ) -> List[Backend]:
+        def rank(b: Backend) -> int:
+            if dd_metric and b == Backend.DECISION_DIAGRAM:
+                return -1
+            return self._backend_rank(b)
+
+        return sorted(backends, key=lambda b: (b != Backend.TABLEAU, rank(b)))
 
     # ------------------------------------------------------------------
     def _dp(
@@ -403,6 +408,11 @@ class Planner:
         simulate a segment of the circuit.  ``symmetry`` and ``sparsity`` are
         forwarded to :func:`_supported_backends`.
         """
+        dd_metric = False
+        if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
+            dd_metric = True
+        if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
+            dd_metric = True
 
         n = len(gates)
         if n == 0:
@@ -537,7 +547,8 @@ class Planner:
                         sparsity=sparsity,
                         allow_tableau=allow_tableau,
                         estimator=self.estimator,
-                    )
+                    ),
+                    dd_metric=dd_metric,
                 )
                 if forced_backend is not None:
                     if forced_backend not in backends:
@@ -744,6 +755,11 @@ class Planner:
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
+        dd_metric = False
+        if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
+            dd_metric = True
+        if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
+            dd_metric = True
         backends = self._order_backends(
             _supported_backends(
                 gates,
@@ -751,7 +767,8 @@ class Planner:
                 sparsity=sparsity,
                 allow_tableau=allow_tableau,
                 estimator=self.estimator,
-            )
+            ),
+            dd_metric=dd_metric,
         )
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:

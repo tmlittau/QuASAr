@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple, TYPE_CHECKING, Set
 
 from .ssd import SSD, SSDPartition, ConversionLayer
 from .cost import Backend, CostEstimator, Cost
+from . import config
 
 if TYPE_CHECKING:  # pragma: no cover
     from .circuit import Circuit, Gate
@@ -55,10 +56,20 @@ class Partitioner:
         current_backend: Backend | None = None
         current_cost: Cost | None = None
 
+        symmetry = getattr(circuit, "symmetry", None)
+        sparsity = getattr(circuit, "sparsity", None)
+        dd_metric = False
+        if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
+            dd_metric = True
+        if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
+            dd_metric = True
+
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]
             trial_qubits = current_qubits | set(gate.qubits)
-            backend_trial, cost_trial = self._choose_backend(trial_gates, len(trial_qubits))
+            backend_trial, cost_trial = self._choose_backend(
+                trial_gates, len(trial_qubits), dd_metric=dd_metric
+            )
 
             # If we've already committed to a statevector simulation, keep it
             # for the remainder of the fragment to avoid flip-flopping to less
@@ -207,7 +218,9 @@ class Partitioner:
         return result
 
     # ------------------------------------------------------------------
-    def _choose_backend(self, gates: List['Gate'], num_qubits: int) -> Tuple[Backend, 'Cost']:
+    def _choose_backend(
+        self, gates: List['Gate'], num_qubits: int, *, dd_metric: bool = False
+    ) -> Tuple[Backend, 'Cost']:
         """Select the best simulation backend for a partition."""
 
         names = [g.gate.upper() for g in gates]
@@ -223,6 +236,13 @@ class Partitioner:
             cost = self.estimator.tableau(num_qubits, num_gates)
             return backend, cost
 
+        if dd_metric:
+            backend = Backend.DECISION_DIAGRAM
+            cost = self.estimator.decision_diagram(
+                num_gates=num_gates, frontier=num_qubits
+            )
+            return backend, cost
+
         if num_qubits < 20:
             backend = Backend.STATEVECTOR
             cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
@@ -235,7 +255,9 @@ class Partitioner:
 
         if num_gates <= 2 ** num_qubits and not local:
             backend = Backend.DECISION_DIAGRAM
-            cost = self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+            cost = self.estimator.decision_diagram(
+                num_gates=num_gates, frontier=num_qubits
+            )
             return backend, cost
 
         if local:
