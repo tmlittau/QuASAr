@@ -217,6 +217,12 @@ class Circuit:
         self.gates = new_gates
         self._num_gates = len(new_gates)
         self._depth = self._compute_depth()
+        from .sparsity import sparsity_estimate
+        from .symmetry import symmetry_score, rotation_diversity
+        self.sparsity = sparsity_estimate(self)
+        self.symmetry = symmetry_score(self)
+        self.rotation_diversity = rotation_diversity(self)
+        self.cost_estimates = self._estimate_costs()
         return new_gates
 
     # ------------------------------------------------------------------

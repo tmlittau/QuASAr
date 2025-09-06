@@ -117,3 +117,25 @@ def test_classical_simplification_can_be_disabled():
     circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["X", "CX"]
     assert circ.classical_state == [None, None]
+
+
+def test_metrics_recomputed_after_simplification():
+    circ = Circuit.from_dict([
+        {"gate": "X", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+    # Capture initial metrics
+    initial_costs = circ.cost_estimates.copy()
+    assert circ.depth > 0
+
+    circ.simplify_classical_controls()
+
+    # After simplification, multi-qubit gate is removed and metrics refresh
+    assert circ.gates == []
+    assert circ.depth == 0
+    assert circ.symmetry == 0
+    assert circ.rotation_diversity == 0
+    assert circ.sparsity == 0.75
+    # Cost estimates must be recomputed
+    assert circ.cost_estimates != initial_costs
+    assert circ.cost_estimates == circ._estimate_costs()
