@@ -106,14 +106,14 @@ def test_rx_branching():
     assert circ.classical_state == [1, None]
 
 
-def test_classical_simplification_can_be_disabled(monkeypatch):
-    from quasar.config import DEFAULT as CONFIG
-
-    monkeypatch.setattr(CONFIG, "use_classical_simplification", False)
-    circ = Circuit.from_dict([
-        {"gate": "X", "qubits": [0]},
-        {"gate": "CX", "qubits": [0, 1]},
-    ])
+def test_classical_simplification_can_be_disabled():
+    circ = Circuit.from_dict(
+        [
+            {"gate": "X", "qubits": [0]},
+            {"gate": "CX", "qubits": [0, 1]},
+        ],
+        use_classical_simplification=False,
+    )
     circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["X", "CX"]
     assert circ.classical_state == [None, None]

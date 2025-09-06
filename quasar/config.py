@@ -111,9 +111,6 @@ class Config:
     dd_rotation_diversity_threshold: int = _int_from_env(
         "QUASAR_DD_ROTATION_DIVERSITY_THRESHOLD", 16
     )
-    use_classical_simplification: bool = _bool_from_env(
-        "QUASAR_CLASSICAL_SIMPLIFY", True
-    )
     backend_selection_log: str | None = os.getenv("QUASAR_BACKEND_SELECTION_LOG")
 
 

@@ -4,12 +4,11 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "benchmarks"))
 
 from benchmarks import benchmark_cli
-from quasar.config import DEFAULT as CONFIG
 
 
 def test_benchmark_cli_respects_disable_flag(monkeypatch, tmp_path):
-    def fake_run_suite(circuit_fn, qubits, repetitions):
-        assert not CONFIG.use_classical_simplification
+    def fake_run_suite(circuit_fn, qubits, repetitions, *, use_classical_simplification=True):
+        assert not use_classical_simplification
         return []
 
     def fake_save_results(results, output):
@@ -17,8 +16,6 @@ def test_benchmark_cli_respects_disable_flag(monkeypatch, tmp_path):
 
     monkeypatch.setattr(benchmark_cli, "run_suite", fake_run_suite)
     monkeypatch.setattr(benchmark_cli, "save_results", fake_save_results)
-    monkeypatch.setattr(CONFIG, "use_classical_simplification", True)
-
     monkeypatch.setattr(
         sys,
         "argv",

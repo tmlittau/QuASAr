@@ -15,7 +15,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.cost import Backend
-from quasar.config import DEFAULT as CONFIG
 import circuits as circuit_lib
 
 
@@ -46,6 +45,8 @@ def run_suite(
     circuit_fn: Callable[[int], object],
     qubits: Iterable[int],
     repetitions: int,
+    *,
+    use_classical_simplification: bool = True,
 ) -> List[dict]:
     """Execute ``circuit_fn`` for each qubit count using a fixed backend.
 
@@ -58,6 +59,8 @@ def run_suite(
     results = []
     for n in qubits:
         circuit = circuit_fn(n)
+        if hasattr(circuit, "use_classical_simplification"):
+            circuit.use_classical_simplification = use_classical_simplification
         runner = BenchmarkRunner()
         rec = runner.run_quasar_multiple(
             circuit,
@@ -128,11 +131,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.disable_classical_simplify:
-        CONFIG.use_classical_simplification = False
-
     circuit_fn = resolve_circuit(args.circuit)
-    results = run_suite(circuit_fn, args.qubits, args.repetitions)
+    results = run_suite(
+        circuit_fn,
+        args.qubits,
+        args.repetitions,
+        use_classical_simplification=not args.disable_classical_simplify,
+    )
     save_results(results, args.output)
 
 
