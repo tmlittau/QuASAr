@@ -58,13 +58,17 @@ assert plan.final_backend == Backend.MPS
 ## Telemetry
 
 Backend decisions made on the quick path can be recorded for later analysis.
-Enable logging by setting the environment variable
-``QUASAR_BACKEND_SELECTION_LOG`` or by overriding
+Set ``QUASAR_VERBOSE_SELECTION=1`` to emit the evaluated metrics and candidate
+ranking to standard output; the planner prints similar information for each
+segment it analyses.  For persistent logs set the environment variable
+``QUASAR_BACKEND_SELECTION_LOG`` or override
 ``config.DEFAULT.backend_selection_log`` with a filesystem path.  Each quick
 selection appends a CSV row with
 
-``sparsity,nnz,rotation,backend,score``
+``sparsity,nnz,rotation,locality,backend,score,ranking``
 
+where ``locality`` is ``1`` when all multi‑qubit gates act on adjacent qubits
+and ``ranking`` lists candidates in descending preference separated by ``>``.
 Use the helper script to aggregate results across benchmark runs:
 
 ```bash
