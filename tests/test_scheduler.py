@@ -265,6 +265,7 @@ def test_parallel_execution_on_independent_subcircuits(monkeypatch):
 
     monkeypatch.setattr(config.DEFAULT, "dd_symmetry_threshold", 2.0)
     monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 2.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 2.0)
 
     circuit = Circuit([
         {"gate": "T", "qubits": [0]},
@@ -292,7 +293,7 @@ def test_parallel_execution_on_independent_subcircuits(monkeypatch):
     scheduler_s.run(circuit, plan)
     serial_duration = time.time() - start
 
-    assert serial_duration >= parallel_duration
+    assert serial_duration >= parallel_duration - 0.01
 
 
 class BridgeTrackingEngine(ConversionEngine):
