@@ -58,8 +58,6 @@ class Circuit:
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         # Track classical state: 0/1 for classical qubits, ``None`` for quantum.
         self.classical_state: List[int | None] = [0] * (max_index + 1)
-        # Simplify any purely classical control sequences before downstream use.
-        self.gates = self.simplify_classical_controls()
         self._num_gates = len(self.gates)
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
@@ -136,17 +134,43 @@ class Circuit:
         for gate in self.gates:
             name = gate.gate.upper()
 
-            # Handle common two-qubit controlled gates with a classical control
-            if len(gate.qubits) == 2 and name in {"CX", "CY", "CZ"}:
-                ctrl, tgt = gate.qubits
-                ctrl_state = self.classical_state[ctrl]
-                if ctrl_state is not None:
-                    if ctrl_state == 0:
+            # Generic handling for gates with classical controls
+            if name.startswith("C") and len(gate.qubits) > 1:
+                controls = gate.qubits[:-1]
+                target = gate.qubits[-1]
+                ctrl_states = [self.classical_state[c] for c in controls]
+
+                # Any quantum control prevents simplification
+                if any(state is None for state in ctrl_states):
+                    self.update_classical_state(gate)
+                    new_gates.append(gate)
+                    continue
+
+                # Classical controls evaluated to 0 – gate never fires
+                if any(state == 0 for state in ctrl_states):
+                    continue
+
+                # All controls are classical 1 – reduce to single-qubit gate
+                base = name.lstrip("C")
+                reduced = Gate(base, [target], gate.params)
+                tgt_state = self.classical_state[target]
+                if tgt_state is not None:
+                    if base in {"X", "Y"}:
+                        self.update_classical_state(reduced)
                         continue
-                    # control is 1: reduce to single-qubit gate on target
-                    reduced = Gate(name[1:], [tgt], gate.params)
-                    gate = reduced
-                    name = gate.gate
+                    if base in phase_only:
+                        continue
+                    if base in {"RX", "RY"}:
+                        params = reduced.params.values()
+                        angle = float(next(iter(params), 0.0))
+                        if _is_multiple_of_pi(angle):
+                            if int(round(angle / math.pi)) % 2 == 1:
+                                eq_gate = Gate("X" if base == "RX" else "Y", [target])
+                                self.update_classical_state(eq_gate)
+                            continue
+                self.update_classical_state(reduced)
+                new_gates.append(reduced)
+                continue
 
             if len(gate.qubits) == 1:
                 q = gate.qubits[0]
@@ -176,6 +200,8 @@ class Circuit:
             new_gates.append(gate)
 
         self.gates = new_gates
+        self._num_gates = len(new_gates)
+        self._depth = self._compute_depth()
         return new_gates
 
     # ------------------------------------------------------------------

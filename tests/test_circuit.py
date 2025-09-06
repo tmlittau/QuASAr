@@ -51,6 +51,7 @@ def test_classical_gate_simplification():
         {"gate": "H", "qubits": [0]},
         {"gate": "X", "qubits": [0]},
     ])
+    circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["H", "X"]
     assert circ.classical_state == [None]
 
@@ -60,8 +61,39 @@ def test_controlled_classical_simplification():
         {"gate": "X", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
     ])
+    circ.simplify_classical_controls()
     assert circ.gates == []
     assert circ.classical_state == [1, 1]
+
+
+def test_controlled_gate_dropped_when_control_zero():
+    circ = Circuit.from_dict([
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+    circ.simplify_classical_controls()
+    assert circ.gates == []
+    assert circ.classical_state == [0, 0]
+
+
+def test_controlled_gate_with_quantum_control_kept():
+    circ = Circuit.from_dict([
+        {"gate": "H", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+    circ.simplify_classical_controls()
+    assert [g.gate for g in circ.gates] == ["H", "CX"]
+    assert circ.classical_state == [None, None]
+
+
+def test_multi_controlled_classical_simplification():
+    circ = Circuit.from_dict([
+        {"gate": "X", "qubits": [0]},
+        {"gate": "X", "qubits": [1]},
+        {"gate": "CCX", "qubits": [0, 1, 2]},
+    ])
+    circ.simplify_classical_controls()
+    assert circ.gates == []
+    assert circ.classical_state == [1, 1, 1]
 
 
 def test_rx_branching():
@@ -69,5 +101,6 @@ def test_rx_branching():
         {"gate": "RX", "qubits": [0], "params": {"param0": math.pi}},
         {"gate": "RX", "qubits": [1], "params": {"param0": math.pi / 2}},
     ])
+    circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["RX"]
     assert circ.classical_state == [1, None]

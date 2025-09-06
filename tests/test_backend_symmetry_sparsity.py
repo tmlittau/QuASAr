@@ -17,6 +17,7 @@ def test_w_state_selects_decision_diagram_via_sparsity():
 
 def test_high_rotation_diversity_stays_dense(monkeypatch):
     circ = qft_circuit(5)
+    circ.classical_state = [None] * circ.num_qubits
     monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 0.0)
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 10_000_000)
     monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 3)
@@ -28,6 +29,7 @@ def test_high_rotation_diversity_stays_dense(monkeypatch):
 
 def test_high_nnz_stays_dense(monkeypatch):
     circ = qft_circuit(5)
+    circ.classical_state = [None] * circ.num_qubits
     monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 0.0)
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 1)
     monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 1000)
