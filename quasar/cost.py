@@ -184,6 +184,45 @@ class CostEstimator:
         scale = fidelity ** max(depth, 1)
         return max(1, int(chi * scale))
 
+    def chi_from_memory(self, num_qubits: int, max_memory: float) -> int:
+        """Return the largest bond dimension fitting in ``max_memory``.
+
+        Parameters
+        ----------
+        num_qubits:
+            Number of qubits in the simulated register.
+        max_memory:
+            Memory budget available to the MPS tensors.
+
+        Returns
+        -------
+        int
+            Maximum admissible bond dimension.  ``0`` indicates that even
+            ``χ=1`` would exceed ``max_memory``.
+        """
+
+        coeff = self.coeff["mps_mem"] * num_qubits
+        if max_memory <= 0 or coeff <= 0:
+            return 0
+        chi = int(math.sqrt(max_memory / coeff))
+        return chi if chi >= 1 else 0
+
+    def chi_for_constraints(
+        self,
+        num_qubits: int,
+        gates: Iterable["Gate"],
+        fidelity: float,
+        max_memory: float | None = None,
+    ) -> int:
+        """Estimate MPS bond dimension under fidelity and memory constraints."""
+
+        chi = self.chi_for_fidelity(num_qubits, gates, fidelity)
+        if max_memory is not None:
+            chi_mem = self.chi_from_memory(num_qubits, max_memory)
+            if chi_mem < chi:
+                return 0
+        return chi if chi >= 1 else 0
+
     def statevector(
         self,
         num_qubits: int,

@@ -15,9 +15,10 @@ examines basic structural metrics to guide this choice:
 3. **Entanglement heuristic** – an upper bound on the maximal Schmidt rank is
    derived from the gate sequence.  This estimate combines with the fidelity
    target ``mps_target_fidelity`` (default ``1.0`` and overrideable via
-   ``QUASAR_MPS_TARGET_FIDELITY``) to determine the bond dimension ``χ``
-   required for matrix‑product state simulation.  The MPS backend is only
-   considered when this derived ``χ`` fits within the available memory.
+   ``QUASAR_MPS_TARGET_FIDELITY``) to determine the bond dimension ``χ`` for
+   matrix‑product state simulation.  The resulting ``χ`` is further capped by
+   the memory threshold supplied to the planner; if even ``χ = 1`` exceeds the
+   available memory the MPS backend is skipped.
 4. **Fallback** – remaining candidates such as the dense STATEVECTOR simulator
    are considered based on estimated runtime and memory cost.
 
