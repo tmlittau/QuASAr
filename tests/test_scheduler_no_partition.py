@@ -75,6 +75,7 @@ def test_random_two_qubit_circuit_single_partition():
 
 def test_fifteen_qubit_circuit_single_backend():
     qc = QuantumCircuit(15)
+    qc.h(0)
     for i in range(14):
         qc.cx(i, i + 1)
     circuit = Circuit.from_qiskit(qc)

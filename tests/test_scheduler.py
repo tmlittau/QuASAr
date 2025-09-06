@@ -267,10 +267,10 @@ def test_parallel_execution_on_independent_subcircuits(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 2.0)
 
     circuit = Circuit([
-        {"gate": "T", "qubits": [0]},
-        {"gate": "T", "qubits": [1]},
         {"gate": "H", "qubits": [0]},
+        {"gate": "T", "qubits": [0]},
         {"gate": "H", "qubits": [1]},
+        {"gate": "T", "qubits": [1]},
     ])
     scheduler_p = Scheduler(
         backends={Backend.STATEVECTOR: SleepBackend()},
