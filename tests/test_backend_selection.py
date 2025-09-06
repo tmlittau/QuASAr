@@ -46,3 +46,18 @@ def test_mps_target_fidelity_controls_selection(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "mps_target_fidelity", 0.9)
     plan = engine.planner.plan(circuit, max_memory=26000, use_cache=False)
     assert plan.final_backend == Backend.MPS
+
+
+def test_memory_threshold_limits_mps(monkeypatch):
+    circuit = qft_circuit(5)
+    circuit.symmetry = 0.0
+    circuit.sparsity = 0.0
+    est = CostEstimator(coeff={"sv_gate_1q": 50.0, "sv_gate_2q": 50.0})
+    engine = SimulationEngine(estimator=est)
+
+    monkeypatch.setattr(config.DEFAULT, "mps_target_fidelity", 0.9)
+    plan = engine.planner.plan(circuit, max_memory=1000, use_cache=False)
+    assert plan.final_backend == Backend.MPS
+
+    plan = engine.planner.plan(circuit, max_memory=4, use_cache=False)
+    assert Backend.MPS not in {s.backend for s in plan.steps}

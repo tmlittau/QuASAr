@@ -765,14 +765,10 @@ class Planner:
 
         if self.estimator is not None:
             fidelity = config.DEFAULT.mps_target_fidelity
-            chi_cap = self.estimator.chi_for_fidelity(num_qubits, gates, fidelity)
-            if chi_cap > 0:
-                mps_cost = self.estimator.mps(
-                    num_qubits, num_1q + num_meas, num_2q, chi_cap
-                )
-                if threshold is not None and mps_cost.memory > threshold:
-                    chi_cap = None
-            self.estimator.chi_max = chi_cap
+            chi_cap = self.estimator.chi_for_constraints(
+                num_qubits, gates, fidelity, threshold
+            )
+            self.estimator.chi_max = chi_cap if chi_cap > 0 else None
 
         if backend is not None:
             # Allow explicitly requested backends as long as they can simulate the
