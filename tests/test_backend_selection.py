@@ -30,3 +30,19 @@ def test_planner_selects_dd_when_sparsity_weighted(monkeypatch):
     engine = SimulationEngine()
     plan = engine.planner.plan(circuit)
     assert plan.final_backend == Backend.DECISION_DIAGRAM
+
+
+def test_mps_target_fidelity_controls_selection(monkeypatch):
+    circuit = qft_circuit(7)
+    circuit.symmetry = 0.0
+    circuit.sparsity = 0.0
+    est = CostEstimator(coeff={"sv_gate_1q": 50.0, "sv_gate_2q": 50.0})
+    engine = SimulationEngine(estimator=est)
+
+    monkeypatch.setattr(config.DEFAULT, "mps_target_fidelity", 1.0)
+    plan = engine.planner.plan(circuit, max_memory=26000, use_cache=False)
+    assert Backend.MPS not in {s.backend for s in plan.steps}
+
+    monkeypatch.setattr(config.DEFAULT, "mps_target_fidelity", 0.9)
+    plan = engine.planner.plan(circuit, max_memory=26000, use_cache=False)
+    assert plan.final_backend == Backend.MPS
