@@ -178,6 +178,7 @@ def _supported_backends(
     circuit: "Circuit" | None = None,
     allow_tableau: bool = True,
     estimator: CostEstimator | None = None,
+    max_memory: float | None = None,
 ) -> List[Backend]:
     """Determine which backends can simulate a gate sequence.
 
@@ -197,9 +198,11 @@ def _supported_backends(
         allows callers to disable specialised Clifford handling when the
         surrounding circuit contains non-Clifford operations.
     estimator:
-        Optional cost estimator used to derive a Schmidt rank heuristic.  The
-        MPS backend is considered only if the estimated rank does not exceed
+        Optional cost estimator providing an MPS bond dimension via
         ``estimator.chi_max``.
+    max_memory:
+        Optional memory threshold used to exclude backends that exceed the
+        limit for the estimated cost.
     """
 
     if circuit is not None:
@@ -230,10 +233,20 @@ def _supported_backends(
 
     mps_metric = False
     if estimator is not None and all(len(g.qubits) <= 2 for g in gates):
-        chi_est = estimator.max_schmidt_rank(num_qubits, gates)
-        chi_threshold = estimator.chi_max
-        if chi_threshold is None or chi_est <= chi_threshold:
-            mps_metric = True
+        chi_cap = estimator.chi_max
+        if chi_cap is not None and chi_cap >= 1:
+            num_meas = sum(
+                1 for g in gates if len(g.qubits) == 1 and g.gate.upper() in {"MEASURE", "RESET"}
+            )
+            num_1q = sum(
+                1
+                for g in gates
+                if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            )
+            num_2q = num_gates - num_1q - num_meas
+            cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi_cap)
+            if max_memory is None or cost.memory <= max_memory:
+                mps_metric = True
 
     if dd_metric:
         candidates.append(Backend.DECISION_DIAGRAM)
@@ -448,6 +461,7 @@ class Planner:
                         sparsity=sparsity,
                         allow_tableau=allow_tableau,
                         estimator=self.estimator,
+                        max_memory=max_memory,
                     )
                     if forced_backend not in backends:
                         raise ValueError(
@@ -549,6 +563,7 @@ class Planner:
                         sparsity=sparsity,
                         allow_tableau=allow_tableau,
                         estimator=self.estimator,
+                        max_memory=max_memory,
                     ),
                     dd_metric=dd_metric,
                 )
@@ -769,6 +784,7 @@ class Planner:
                 sparsity=sparsity,
                 allow_tableau=allow_tableau,
                 estimator=self.estimator,
+                max_memory=max_memory,
             ),
             dd_metric=dd_metric,
         )
@@ -834,6 +850,17 @@ class Planner:
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
+
+        if self.estimator is not None:
+            fidelity = config.DEFAULT.mps_target_fidelity
+            chi_cap = self.estimator.chi_for_fidelity(num_qubits, gates, fidelity)
+            if chi_cap > 0:
+                mps_cost = self.estimator.mps(
+                    num_qubits, num_1q + num_meas, num_2q, chi_cap
+                )
+                if threshold is not None and mps_cost.memory > threshold:
+                    chi_cap = None
+            self.estimator.chi_max = chi_cap
 
         if backend is not None:
             # Allow explicitly requested backends as long as they can simulate the

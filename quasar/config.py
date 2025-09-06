@@ -74,7 +74,9 @@ class Config:
             [Backend.STATEVECTOR, Backend.MPS],
         )
     )
-    mps_chi_threshold: int = _int_from_env("QUASAR_MPS_CHI_THRESHOLD", 64)
+    mps_target_fidelity: float = _float_from_env(
+        "QUASAR_MPS_TARGET_FIDELITY", 1.0
+    )
     dd_symmetry_threshold: float = _float_from_env(
         "QUASAR_DD_SYMMETRY_THRESHOLD", 0.3
     )

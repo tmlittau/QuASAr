@@ -13,10 +13,11 @@ examines basic structural metrics to guide this choice:
    ``dd_symmetry_weight`` and ``dd_sparsity_weight`` control each metric's
    contribution.
 3. **Entanglement heuristic** – an upper bound on the maximal Schmidt rank is
-   derived from the gate sequence.  If this estimate does not exceed the
-   ``mps_chi_threshold`` (``64`` by default, configurable via the
-   ``QUASAR_MPS_CHI_THRESHOLD`` environment variable) the MPS backend is
-   considered.
+   derived from the gate sequence.  This estimate combines with the fidelity
+   target ``mps_target_fidelity`` (default ``1.0`` and overrideable via
+   ``QUASAR_MPS_TARGET_FIDELITY``) to determine the bond dimension ``χ``
+   required for matrix‑product state simulation.  The MPS backend is only
+   considered when this derived ``χ`` fits within the available memory.
 4. **Fallback** – remaining candidates such as the dense STATEVECTOR simulator
    are considered based on estimated runtime and memory cost.
 
@@ -24,8 +25,9 @@ The weights and threshold of step 2 default to ``1.0`` for both symmetry and
 sparsity with a ``dd_metric_threshold`` of ``0.8``.  They may be tuned via the
 ``QUASAR_DD_SYMMETRY_WEIGHT``, ``QUASAR_DD_SPARSITY_WEIGHT`` and
 ``QUASAR_DD_METRIC_THRESHOLD`` environment variables or by overriding
-``config.DEFAULT`` at runtime.  The MPS threshold mentioned in step 3 defaults
-to ``64`` and is configurable through ``QUASAR_MPS_CHI_THRESHOLD``.
+``config.DEFAULT`` at runtime.  Lowering ``mps_target_fidelity`` reduces the
+required bond dimension and can therefore make the MPS backend applicable to
+more circuits.
 
 This lightweight heuristic steers the planner towards specialised backends for
 circuits exhibiting repeated structure, large zero‑amplitude regions or limited

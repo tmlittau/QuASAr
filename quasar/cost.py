@@ -13,6 +13,20 @@ if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .circuit import Gate
 
 
+def _circuit_depth(gates: Iterable["Gate"]) -> int:
+    """Return a lightweight depth estimate for ``gates``."""
+
+    qubit_levels: Dict[int, int] = {}
+    depth = 0
+    for gate in gates:
+        start = max((qubit_levels.get(q, 0) for q in gate.qubits), default=0)
+        level = start + 1
+        for q in gate.qubits:
+            qubit_levels[q] = level
+        depth = max(depth, level)
+    return depth
+
+
 @dataclass
 class Cost:
     """Simple container for runtime and memory measurements."""
@@ -99,13 +113,6 @@ class CostEstimator:
         self.s_max = s_max
         self.r_max = r_max
         self.q_max = q_max
-        if chi_max is None:
-            try:  # Lazy import to avoid circular dependency with config
-                from . import config as _config  # type: ignore
-
-                chi_max = _config.DEFAULT.mps_chi_threshold
-            except Exception:  # pragma: no cover - fallback when config unavailable
-                chi_max = None
         self.chi_max = chi_max
 
     # ------------------------------------------------------------------
@@ -158,6 +165,24 @@ class CostEstimator:
 
         chi = self.max_schmidt_rank(num_qubits, gates)
         return math.log2(chi) if chi > 0 else 0.0
+
+    def chi_for_fidelity(
+        self, num_qubits: int, gates: Iterable["Gate"], fidelity: float
+    ) -> int:
+        """Estimate bond dimension needed to achieve ``fidelity``.
+
+        The heuristic derives the maximal Schmidt rank across the circuit and
+        scales it by the target fidelity and the circuit depth.  Lower desired
+        fidelities therefore permit smaller bond dimensions.
+        """
+
+        gates = list(gates)
+        chi = self.max_schmidt_rank(num_qubits, gates)
+        if fidelity >= 1.0 or chi <= 1:
+            return chi
+        depth = _circuit_depth(gates)
+        scale = fidelity ** max(depth, 1)
+        return max(1, int(chi * scale))
 
     def statevector(
         self,
