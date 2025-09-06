@@ -42,6 +42,7 @@ class Scheduler:
     parallel_backends: List[Backend] = field(
         default_factory=lambda: list(config.DEFAULT.parallel_backends)
     )
+    backend_selection_log: str | None = config.DEFAULT.backend_selection_log
     # Fractional tolerance before triggering a replan due to cost mismatch
     replan_tolerance: float = 0.05
 
@@ -131,60 +132,63 @@ class Scheduler:
 
         names = [g.gate.upper() for g in circuit.gates]
         num_qubits = circuit.num_qubits
-        num_gates = len(circuit.gates)
-
-        if names and all(name in CLIFFORD_GATES for name in names):
-            return Backend.TABLEAU
 
         sparsity = getattr(circuit, "sparsity", None)
         rotation = getattr(circuit, "rotation_diversity", None)
-        if sparsity is None or rotation is None:
-            from .sparsity import sparsity_estimate, adaptive_dd_sparsity_threshold
-            from .symmetry import rotation_diversity
-
-            if sparsity is None:
-                sparsity = sparsity_estimate(circuit)
-            if rotation is None:
-                rotation = rotation_diversity(circuit)
-        else:
-            from .sparsity import adaptive_dd_sparsity_threshold
+        from .sparsity import sparsity_estimate, adaptive_dd_sparsity_threshold
+        from .symmetry import rotation_diversity
+        if sparsity is None:
+            sparsity = sparsity_estimate(circuit)
+        if rotation is None:
+            rotation = rotation_diversity(circuit)
 
         nnz_estimate = int((1 - sparsity) * (2 ** num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+        s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
+        nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
+        rot_score = 1 - rotation / config.DEFAULT.dd_rotation_diversity_threshold
+        weight_sum = (
+            config.DEFAULT.dd_sparsity_weight
+            + config.DEFAULT.dd_nnz_weight
+            + config.DEFAULT.dd_rotation_weight
+        )
+        weighted = (
+            config.DEFAULT.dd_sparsity_weight * s_score
+            + config.DEFAULT.dd_nnz_weight * nnz_score
+            + config.DEFAULT.dd_rotation_weight * rot_score
+        )
+        metric = weighted / weight_sum if weight_sum else 0.0
         passes = (
             sparsity >= s_thresh
             and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
             and rotation <= config.DEFAULT.dd_rotation_diversity_threshold
         )
-
-        dd_metric = False
-        if passes:
-            s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
-            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-            rot_score = 1 - rotation / config.DEFAULT.dd_rotation_diversity_threshold
-            weight_sum = (
-                config.DEFAULT.dd_sparsity_weight
-                + config.DEFAULT.dd_nnz_weight
-                + config.DEFAULT.dd_rotation_weight
-            )
-            weighted = (
-                config.DEFAULT.dd_sparsity_weight * s_score
-                + config.DEFAULT.dd_nnz_weight * nnz_score
-                + config.DEFAULT.dd_rotation_weight * rot_score
-            )
-            metric = weighted / weight_sum if weight_sum else 0.0
-            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
+        dd_metric = passes and metric >= config.DEFAULT.dd_metric_threshold
 
         multi = [g for g in circuit.gates if len(g.qubits) > 1]
         local = multi and all(
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
 
-        if dd_metric:
-            return Backend.DECISION_DIAGRAM
-        if local:
-            return Backend.MPS
-        return Backend.STATEVECTOR
+        if names and all(name in CLIFFORD_GATES for name in names):
+            backend_choice = Backend.TABLEAU
+        elif dd_metric:
+            backend_choice = Backend.DECISION_DIAGRAM
+        elif local:
+            backend_choice = Backend.MPS
+        else:
+            backend_choice = Backend.STATEVECTOR
+
+        if self.backend_selection_log:
+            try:
+                with open(self.backend_selection_log, "a", encoding="utf8") as f:
+                    f.write(
+                        f"{sparsity:.6f},{nnz_estimate},{rotation:.6f},{backend_choice.name},{metric:.6f}\n"
+                    )
+            except OSError:
+                pass
+
+        return backend_choice
 
     # ------------------------------------------------------------------
     def prepare_run(

@@ -54,3 +54,19 @@ engine = SimulationEngine()
 plan = engine.planner.plan(qft_circuit(5))
 assert plan.final_backend == Backend.MPS
 ```
+
+## Telemetry
+
+Backend decisions made on the quick path can be recorded for later analysis.
+Enable logging by setting the environment variable
+``QUASAR_BACKEND_SELECTION_LOG`` or by overriding
+``config.DEFAULT.backend_selection_log`` with a filesystem path.  Each quick
+selection appends a CSV row with
+
+``sparsity,nnz,rotation,backend,score``
+
+Use the helper script to aggregate results across benchmark runs:
+
+```bash
+python tools/analyze_backend_selection.py logs/*.csv
+```
