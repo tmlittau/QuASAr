@@ -66,6 +66,25 @@ Benchmark results can be explored with the Jupyter notebooks in
 jupyter notebook benchmarks/notebooks/comparison.ipynb
 ```
 
+## Inspecting backend-selection logs
+
+The script `verbose_selection_demo.py` runs small sample circuits with
+the scheduler's verbose logging enabled and checks that the reported
+metrics match the chosen backend:
+
+```bash
+python benchmarks/verbose_selection_demo.py
+```
+
+Running it prints lines such as
+
+```
+[backend-selection] sparsity=... rotation_diversity=... nnz=... locality=... candidates=... selected=...
+```
+
+These metrics explain why a particular backend was selected for each
+sample circuit.
+
 ## Adding circuit families
 
 New circuit generators are added to
