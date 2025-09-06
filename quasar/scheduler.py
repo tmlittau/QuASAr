@@ -43,6 +43,7 @@ class Scheduler:
         default_factory=lambda: list(config.DEFAULT.parallel_backends)
     )
     backend_selection_log: str | None = config.DEFAULT.backend_selection_log
+    verbose_selection: bool = config.DEFAULT.verbose_selection
     # Fractional tolerance before triggering a replan due to cost mismatch
     replan_tolerance: float = 0.05
 
@@ -173,24 +174,52 @@ class Scheduler:
         dd_metric = passes and metric >= config.DEFAULT.dd_metric_threshold
 
         multi = [g for g in circuit.gates if len(g.qubits) > 1]
-        local = multi and all(
+        local = bool(multi) and all(
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
 
+        candidates: List[Backend]
         if names and all(name in CLIFFORD_GATES for name in names):
-            backend_choice = Backend.TABLEAU
-        elif dd_metric:
-            backend_choice = Backend.DECISION_DIAGRAM
-        elif local:
-            backend_choice = Backend.MPS
+            candidates = [Backend.TABLEAU]
         else:
-            backend_choice = Backend.STATEVECTOR
+            candidates = []
+            if dd_metric:
+                candidates.append(Backend.DECISION_DIAGRAM)
+            if local:
+                candidates.append(Backend.MPS)
+            candidates.append(Backend.STATEVECTOR)
+
+        def backend_rank(b: Backend) -> int:
+            try:
+                return self.backend_order.index(b)
+            except ValueError:
+                return len(self.backend_order)
+
+        def order_backends(backends: List[Backend]) -> List[Backend]:
+            def rank(b: Backend) -> int:
+                if dd_metric and b == Backend.DECISION_DIAGRAM:
+                    return -1
+                return backend_rank(b)
+
+            return sorted(backends, key=lambda b: (b != Backend.TABLEAU, rank(b)))
+
+        ranking = order_backends(candidates)
+        backend_choice = ranking[0]
+
+        ranking_str = ">".join(b.name for b in ranking)
+        if self.verbose_selection:
+            print(
+                "[backend-selection] "
+                f"sparsity={sparsity:.6f} rotation_diversity={rotation:.6f} "
+                f"nnz={nnz_estimate} locality={local} candidates={ranking_str} "
+                f"selected={backend_choice.name}"
+            )
 
         if self.backend_selection_log:
             try:
                 with open(self.backend_selection_log, "a", encoding="utf8") as f:
                     f.write(
-                        f"{sparsity:.6f},{nnz_estimate},{phase_rot:.6f},{amp_rot:.6f},{backend_choice.name},{metric:.6f}\n"
+                        f"{sparsity:.6f},{nnz_estimate},{phase_rot:.6f},{amp_rot:.6f},{int(local)},{backend_choice.name},{metric:.6f},{ranking_str}\n"
                     )
             except OSError:
                 pass

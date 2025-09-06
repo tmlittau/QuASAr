@@ -230,6 +230,10 @@ def _supported_backends(
     phase_rot = phase_rotation_diversity if phase_rotation_diversity is not None else 0
     amp_rot = amplitude_rotation_diversity if amplitude_rotation_diversity is not None else 0
     nnz = int((1 - sparse) * (2 ** num_qubits))
+    multi = [g for g in gates if len(g.qubits) > 1]
+    local = bool(multi) and all(
+        len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
+    )
     from .sparsity import adaptive_dd_sparsity_threshold
 
     s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
@@ -282,6 +286,36 @@ def _supported_backends(
     if mps_metric:
         candidates.append(Backend.MPS)
     candidates.append(Backend.STATEVECTOR)
+
+    order = list(config.DEFAULT.preferred_backend_order)
+
+    def rank(b: Backend) -> int:
+        try:
+            idx = order.index(b)
+        except ValueError:
+            idx = len(order)
+        if dd_metric and b == Backend.DECISION_DIAGRAM:
+            return -1
+        return idx
+
+    ranking = sorted(candidates, key=lambda b: (b != Backend.TABLEAU, rank(b)))
+    ranking_str = ">".join(b.name for b in ranking)
+
+    if config.DEFAULT.verbose_selection:
+        print(
+            "[backend-selection] "
+            f"sparsity={sparse:.6f} rotation_diversity={rot:.6f} nnz={nnz} "
+            f"locality={local} candidates={ranking_str}"
+        )
+
+    if config.DEFAULT.backend_selection_log:
+        try:
+            with open(config.DEFAULT.backend_selection_log, "a", encoding="utf8") as f:
+                f.write(
+                    f"{sparse:.6f},{nnz},{rot:.6f},{int(local)},{ranking_str}\n"
+                )
+        except OSError:
+            pass
 
     return candidates
 
