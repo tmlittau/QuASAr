@@ -76,17 +76,20 @@ class Config:
     mps_target_fidelity: float = _float_from_env(
         "QUASAR_MPS_TARGET_FIDELITY", 1.0
     )
-    dd_symmetry_threshold: float = _float_from_env(
-        "QUASAR_DD_SYMMETRY_THRESHOLD", 0.3
-    )
     dd_sparsity_threshold: float = _float_from_env(
         "QUASAR_DD_SPARSITY_THRESHOLD", 0.8
     )
-    dd_symmetry_weight: float = _float_from_env(
-        "QUASAR_DD_SYMMETRY_WEIGHT", 1.0
+    dd_nnz_threshold: int = _int_from_env(
+        "QUASAR_DD_NNZ_THRESHOLD", 1_000_000
     )
     dd_sparsity_weight: float = _float_from_env(
         "QUASAR_DD_SPARSITY_WEIGHT", 1.0
+    )
+    dd_nnz_weight: float = _float_from_env(
+        "QUASAR_DD_NNZ_WEIGHT", 1.0
+    )
+    dd_rotation_weight: float = _float_from_env(
+        "QUASAR_DD_ROTATION_WEIGHT", 1.0
     )
     dd_metric_threshold: float = _float_from_env(
         "QUASAR_DD_METRIC_THRESHOLD", 0.8

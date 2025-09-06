@@ -6,15 +6,22 @@ examines basic structural metrics to guide this choice:
 1. **Clifford detection** – if all gates in a fragment are Clifford operations
    the specialised TABLEAU backend is used exclusively, bypassing other
    candidates.
-2. **Heuristic metrics** – overall circuit [symmetry](symmetry.md),
-   [sparsity](sparsity.md) and *rotation diversity* are consulted.  Symmetry and
-   sparsity form a weighted sum; when this exceeds ``dd_metric_threshold`` and
-   the number of distinct phase rotations stays below
-   ``dd_rotation_diversity_threshold`` the planner includes the decision‑diagram
-   backend as a candidate.  The weights ``dd_symmetry_weight`` and
-   ``dd_sparsity_weight`` control each metric's contribution.  Decision diagrams
-   benefit from repeated phase angles; circuits with highly diverse rotations
-   tend to blow up the decision structure, hence the diversity guard.
+2. **Heuristic metrics** – overall circuit [sparsity](sparsity.md), an
+   estimate of the number of non‑zero amplitudes (*nnz*), and *rotation
+   diversity* are consulted.  Each metric is normalised by its corresponding
+   threshold – ``adaptive_dd_sparsity_threshold(n_qubits)``,
+   ``dd_nnz_threshold`` and ``dd_rotation_diversity_threshold`` – and combined
+   using weights ``dd_sparsity_weight``, ``dd_nnz_weight`` and
+   ``dd_rotation_weight``.  The combined score is
+
+   ``(w_s*(s/s_thr) + w_n*(1 - nnz/nnz_thr) + w_r*(1 - rot/rot_thr)) / (w_s+w_n+w_r)``
+
+   where ``s`` is the sparsity, ``nnz`` the non‑zero estimate and ``rot`` the
+   rotation diversity.  Normalising each term by its threshold keeps the score
+   in the ``[0,1]`` range, maintaining comparability with dense backends.  The
+   score must exceed ``dd_metric_threshold`` for the decision‑diagram backend to
+   be considered.  Circuits with a high diversity of rotations are suppressed
+   regardless of score to avoid decision‑diagram blow‑ups.
 3. **Entanglement heuristic** – an upper bound on the maximal Schmidt rank is
    derived from the gate sequence.  This estimate combines with the fidelity
    target ``mps_target_fidelity`` (default ``1.0`` and overrideable via
@@ -25,15 +32,13 @@ examines basic structural metrics to guide this choice:
 4. **Fallback** – remaining candidates such as the dense STATEVECTOR simulator
    are considered based on estimated runtime and memory cost.
 
-The weights and thresholds of step 2 default to ``1.0`` for both symmetry and
-sparsity with a ``dd_metric_threshold`` of ``0.8`` and a
-``dd_rotation_diversity_threshold`` of ``16`` distinct phase angles.  They may
-be tuned via the ``QUASAR_DD_SYMMETRY_WEIGHT``, ``QUASAR_DD_SPARSITY_WEIGHT``,
-``QUASAR_DD_METRIC_THRESHOLD`` and
-``QUASAR_DD_ROTATION_DIVERSITY_THRESHOLD`` environment variables or by
-overriding ``config.DEFAULT`` at runtime.  Lowering ``mps_target_fidelity``
-reduces the required bond dimension and can therefore make the MPS backend
-applicable to more circuits.
+The default weights for sparsity, nnz and rotation are ``1.0`` each with a
+``dd_metric_threshold`` of ``0.8`` and a ``dd_rotation_diversity_threshold`` of
+``16`` distinct phase angles.  These values – along with
+``dd_sparsity_threshold`` and ``dd_nnz_threshold`` – may be tuned via the
+``QUASAR_DD_*`` environment variables or by overriding ``config.DEFAULT`` at
+runtime.  Lowering ``mps_target_fidelity`` reduces the required bond dimension
+and can therefore make the MPS backend applicable to more circuits.
 
 This lightweight heuristic steers the planner towards specialised backends for
 circuits exhibiting repeated structure, large zero‑amplitude regions or limited

@@ -1,10 +1,26 @@
 """Heuristics for estimating circuit sparsity."""
-
 from __future__ import annotations
 
 from .circuit import Circuit, Gate
+from . import config
 
 BRANCHING_GATES = {"H", "RY", "RX", "U", "U2", "U3"}
+
+
+def adaptive_dd_sparsity_threshold(n_qubits: int) -> float:
+    """Return the sparsity threshold required for DD simulation.
+
+    The base threshold ``config.DEFAULT.dd_sparsity_threshold`` is gradually
+    relaxed for larger circuits to maintain comparability with dense
+    backends.  This simple heuristic avoids demanding unrealistically high
+    sparsity on wide circuits where dense simulation is already expensive.
+    """
+
+    base = config.DEFAULT.dd_sparsity_threshold
+    if n_qubits <= 10:
+        return base
+    # Linear relaxation beyond 10 qubits, clamped at zero.
+    return max(0.0, base - 0.01 * (n_qubits - 10))
 
 
 def is_controlled(gate: Gate) -> bool:
