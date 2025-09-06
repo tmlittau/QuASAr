@@ -6,12 +6,20 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List
 import json
 import os
+import math
 
 from qiskit.circuit import QuantumCircuit
 from qiskit_qasm3_import import api as qasm3_api
 
 from .ssd import SSD, SSDPartition
 from .cost import Cost
+
+
+def _is_multiple_of_pi(angle: float) -> bool:
+    """Return True if ``angle`` is (approximately) an integer multiple of π."""
+    if angle == 0:
+        return True
+    return math.isclose(angle / math.pi, round(angle / math.pi), abs_tol=1e-9)
 
 
 @dataclass
@@ -39,12 +47,20 @@ class Circuit:
     symmetry:
         Heuristic symmetry score of the circuit's layers.  Higher values
         indicate more repeated gate patterns.
+    classical_state:
+        Current classical values for each qubit. A value of ``None`` denotes a
+        quantum superposition.
     """
 
     def __init__(self, gates: Iterable[Dict[str, Any] | Gate]):
         self.gates: List[Gate] = [g if isinstance(g, Gate) else Gate(**g) for g in gates]
-        self._num_gates = len(self.gates)
         self._num_qubits = self._infer_qubit_count()
+        max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
+        # Track classical state: 0/1 for classical qubits, ``None`` for quantum.
+        self.classical_state: List[int | None] = [0] * (max_index + 1)
+        # Simplify any purely classical control sequences before downstream use.
+        self.gates = self.simplify_classical_controls()
+        self._num_gates = len(self.gates)
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
         self.cost_estimates = self._estimate_costs()
@@ -53,6 +69,114 @@ class Circuit:
         from .symmetry import symmetry_score, rotation_diversity
         self.symmetry = symmetry_score(self)
         self.rotation_diversity = rotation_diversity(self)
+
+    # ------------------------------------------------------------------
+    # Classical state tracking and simplification
+    # ------------------------------------------------------------------
+    def update_classical_state(self, gate: Gate) -> None:
+        """Update ``classical_state`` given ``gate``.
+
+        Classical bits are flipped for ``X``/``Y`` gates, phase gates leave the
+        state untouched and branching gates like ``H`` or non-π ``RX``/``RY``
+        rotations promote the qubit to a fully quantum (``None``) state.
+        Any multi-qubit gate is assumed to create entanglement, marking all
+        participating qubits as quantum.
+        """
+
+        if len(gate.qubits) != 1:
+            for q in gate.qubits:
+                self.classical_state[q] = None
+            return
+
+        q = gate.qubits[0]
+        name = gate.gate.upper()
+        state = self.classical_state[q]
+
+        phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ"}
+
+        if state is None:
+            if name == "H":
+                self.classical_state[q] = None
+            elif name in {"RX", "RY"}:
+                params = gate.params.values()
+                angle = float(next(iter(params), 0.0))
+                if not _is_multiple_of_pi(angle):
+                    self.classical_state[q] = None
+            return
+
+        if name in {"X", "Y"}:
+            self.classical_state[q] = 1 - state
+        elif name in phase_only:
+            pass
+        elif name == "H":
+            self.classical_state[q] = None
+        elif name in {"RX", "RY"}:
+            params = gate.params.values()
+            angle = float(next(iter(params), 0.0))
+            if _is_multiple_of_pi(angle):
+                if int(round(angle / math.pi)) % 2 == 1:
+                    self.classical_state[q] = 1 - state
+            else:
+                self.classical_state[q] = None
+        else:
+            self.classical_state[q] = None
+
+    def simplify_classical_controls(self) -> List[Gate]:
+        """Remove gates acting purely on classical bits and reduce controlled gates.
+
+        Returns
+        -------
+        List[Gate]
+            The simplified gate sequence.
+        """
+
+        new_gates: List[Gate] = []
+        phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ"}
+
+        for gate in self.gates:
+            name = gate.gate.upper()
+
+            # Handle common two-qubit controlled gates with a classical control
+            if len(gate.qubits) == 2 and name in {"CX", "CY", "CZ"}:
+                ctrl, tgt = gate.qubits
+                ctrl_state = self.classical_state[ctrl]
+                if ctrl_state is not None:
+                    if ctrl_state == 0:
+                        continue
+                    # control is 1: reduce to single-qubit gate on target
+                    reduced = Gate(name[1:], [tgt], gate.params)
+                    gate = reduced
+                    name = gate.gate
+
+            if len(gate.qubits) == 1:
+                q = gate.qubits[0]
+                state = self.classical_state[q]
+
+                if state is not None:
+                    if name in {"X", "Y"}:
+                        self.update_classical_state(gate)
+                        continue
+                    if name in phase_only:
+                        continue
+                    if name in {"RX", "RY"}:
+                        params = gate.params.values()
+                        angle = float(next(iter(params), 0.0))
+                        if _is_multiple_of_pi(angle):
+                            if int(round(angle / math.pi)) % 2 == 1:
+                                eq_gate = Gate("X" if name == "RX" else "Y", [q])
+                                self.update_classical_state(eq_gate)
+                            continue
+
+                self.update_classical_state(gate)
+                new_gates.append(gate)
+                continue
+
+            # Multi-qubit gate (either reduced control or entangling)
+            self.update_classical_state(gate)
+            new_gates.append(gate)
+
+        self.gates = new_gates
+        return new_gates
 
     # ------------------------------------------------------------------
     # Construction helpers

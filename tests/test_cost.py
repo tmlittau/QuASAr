@@ -183,6 +183,8 @@ def test_st_chi_cap_override():
 
 def test_max_schmidt_rank_and_entropy():
     gates = [
+        Gate("H", [0]),
+        Gate("H", [1]),
         Gate("CX", [0, 2]),
         Gate("CX", [1, 3]),
     ]

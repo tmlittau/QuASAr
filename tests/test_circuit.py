@@ -1,4 +1,5 @@
 import json
+import math
 
 from quasar import Circuit, SSD
 
@@ -41,3 +42,32 @@ def test_sparsity_attribute():
         {"gate": "X", "qubits": [1]},
     ])
     assert circ.sparsity == 0.5
+
+
+def test_classical_gate_simplification():
+    circ = Circuit.from_dict([
+        {"gate": "X", "qubits": [0]},
+        {"gate": "Z", "qubits": [0]},
+        {"gate": "H", "qubits": [0]},
+        {"gate": "X", "qubits": [0]},
+    ])
+    assert [g.gate for g in circ.gates] == ["H", "X"]
+    assert circ.classical_state == [None]
+
+
+def test_controlled_classical_simplification():
+    circ = Circuit.from_dict([
+        {"gate": "X", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+    assert circ.gates == []
+    assert circ.classical_state == [1, 1]
+
+
+def test_rx_branching():
+    circ = Circuit.from_dict([
+        {"gate": "RX", "qubits": [0], "params": {"param0": math.pi}},
+        {"gate": "RX", "qubits": [1], "params": {"param0": math.pi / 2}},
+    ])
+    assert [g.gate for g in circ.gates] == ["RX"]
+    assert circ.classical_state == [1, None]
