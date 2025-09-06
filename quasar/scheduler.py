@@ -206,6 +206,7 @@ class Scheduler:
         ranking = order_backends(candidates)
         backend_choice = ranking[0]
 
+        rotation = max(phase_rot, amp_rot)
         ranking_str = ">".join(b.name for b in ranking)
         if self.verbose_selection:
             print(
