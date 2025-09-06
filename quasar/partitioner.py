@@ -58,11 +58,14 @@ class Partitioner:
 
         symmetry = getattr(circuit, "symmetry", None)
         sparsity = getattr(circuit, "sparsity", None)
+        rotation = getattr(circuit, "rotation_diversity", None)
         dd_metric = False
         if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
             dd_metric = True
         if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
             dd_metric = True
+        if rotation is not None and rotation > config.DEFAULT.dd_rotation_diversity_threshold:
+            dd_metric = False
 
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]

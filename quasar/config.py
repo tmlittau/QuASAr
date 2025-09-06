@@ -91,6 +91,9 @@ class Config:
     dd_metric_threshold: float = _float_from_env(
         "QUASAR_DD_METRIC_THRESHOLD", 0.8
     )
+    dd_rotation_diversity_threshold: int = _int_from_env(
+        "QUASAR_DD_ROTATION_DIVERSITY_THRESHOLD", 16
+    )
 
 
 # Global configuration instance used when modules import ``quasar.config``.

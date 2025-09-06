@@ -138,19 +138,24 @@ class Scheduler:
 
         symmetry = getattr(circuit, "symmetry", None)
         sparsity = getattr(circuit, "sparsity", None)
-        if symmetry is None or sparsity is None:
-            from .symmetry import symmetry_score
+        rotation = getattr(circuit, "rotation_diversity", None)
+        if symmetry is None or sparsity is None or rotation is None:
+            from .symmetry import symmetry_score, rotation_diversity
             from .sparsity import sparsity_estimate
 
             if symmetry is None:
                 symmetry = symmetry_score(circuit)
             if sparsity is None:
                 sparsity = sparsity_estimate(circuit)
+            if rotation is None:
+                rotation = rotation_diversity(circuit)
 
         dd_metric = (
             symmetry >= config.DEFAULT.dd_symmetry_threshold
             or sparsity >= config.DEFAULT.dd_sparsity_threshold
         )
+        if rotation is not None and rotation > config.DEFAULT.dd_rotation_diversity_threshold:
+            dd_metric = False
 
         multi = [g for g in circuit.gates if len(g.qubits) > 1]
         local = multi and all(

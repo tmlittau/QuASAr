@@ -61,3 +61,15 @@ def test_memory_threshold_limits_mps(monkeypatch):
 
     plan = engine.planner.plan(circuit, max_memory=4, use_cache=False)
     assert Backend.MPS not in {s.backend for s in plan.steps}
+
+
+def test_rotation_diversity_discourages_dd(monkeypatch):
+    circuit = qft_circuit(5)
+    monkeypatch.setattr(config.DEFAULT, "dd_symmetry_weight", 2.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_sparsity_weight", 0.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 0.5)
+    monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 3)
+    engine = SimulationEngine()
+    plan = engine.planner.plan(circuit)
+    assert plan.final_backend == Backend.STATEVECTOR
+    assert Backend.DECISION_DIAGRAM not in {s.backend for s in plan.steps}
