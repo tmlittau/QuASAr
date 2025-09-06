@@ -175,7 +175,8 @@ def _supported_backends(
     *,
     sparsity: float | None = None,
     circuit: "Circuit" | None = None,
-    rotation_diversity: int | None = None,
+    phase_rotation_diversity: int | None = None,
+    amplitude_rotation_diversity: int | None = None,
     allow_tableau: bool = True,
     estimator: CostEstimator | None = None,
     max_memory: float | None = None,
@@ -190,7 +191,7 @@ def _supported_backends(
         Optional sparsity metric for the overall circuit.
     circuit:
         Circuit providing heuristic metrics.  Explicit ``sparsity`` and
-        ``rotation_diversity`` arguments take precedence when supplied.
+        rotation-diversity arguments take precedence when supplied.
     allow_tableau:
         If ``True`` and the gate sequence is Clifford-only, include
         :class:`Backend.TABLEAU` as a candidate.  When ``False`` the tableau
@@ -208,8 +209,10 @@ def _supported_backends(
     if circuit is not None:
         if sparsity is None:
             sparsity = getattr(circuit, "sparsity", None)
-        if rotation_diversity is None:
-            rotation_diversity = getattr(circuit, "rotation_diversity", None)
+        if phase_rotation_diversity is None:
+            phase_rotation_diversity = getattr(circuit, "phase_rotation_diversity", None)
+        if amplitude_rotation_diversity is None:
+            amplitude_rotation_diversity = getattr(circuit, "amplitude_rotation_diversity", None)
 
     gates = list(gates)
     names = [g.gate.upper() for g in gates]
@@ -224,7 +227,8 @@ def _supported_backends(
     candidates: List[Backend] = []
 
     sparse = sparsity if sparsity is not None else 0.0
-    rot = rotation_diversity if rotation_diversity is not None else 0
+    phase_rot = phase_rotation_diversity if phase_rotation_diversity is not None else 0
+    amp_rot = amplitude_rotation_diversity if amplitude_rotation_diversity is not None else 0
     nnz = int((1 - sparse) * (2 ** num_qubits))
     multi = [g for g in gates if len(g.qubits) > 1]
     local = bool(multi) and all(
@@ -236,22 +240,26 @@ def _supported_backends(
     passes = (
         sparse >= s_thresh
         and nnz <= config.DEFAULT.dd_nnz_threshold
-        and rot <= config.DEFAULT.dd_rotation_diversity_threshold
+        and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
+        and amp_rot <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
     )
     dd_metric = False
     if passes:
         s_score = sparse / s_thresh if s_thresh > 0 else 0.0
         nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
-        rot_score = 1 - rot / config.DEFAULT.dd_rotation_diversity_threshold
+        phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
+        amp_score = 1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
         weight_sum = (
             config.DEFAULT.dd_sparsity_weight
             + config.DEFAULT.dd_nnz_weight
-            + config.DEFAULT.dd_rotation_weight
+            + config.DEFAULT.dd_phase_rotation_weight
+            + config.DEFAULT.dd_amplitude_rotation_weight
         )
         weighted = (
             config.DEFAULT.dd_sparsity_weight * s_score
             + config.DEFAULT.dd_nnz_weight * nnz_score
-            + config.DEFAULT.dd_rotation_weight * rot_score
+            + config.DEFAULT.dd_phase_rotation_weight * phase_score
+            + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
         )
         metric = weighted / weight_sum if weight_sum else 0.0
         dd_metric = metric >= config.DEFAULT.dd_metric_threshold
@@ -461,14 +469,15 @@ class Planner:
         allow_tableau: bool = True,
         symmetry: float | None = None,
         sparsity: float | None = None,
-        rotation_diversity: int | None = None,
+        phase_rotation_diversity: int | None = None,
+        amplitude_rotation_diversity: int | None = None,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning.
 
         When ``forced_backend`` is provided only that backend is considered
         during planning.  A ``ValueError`` is raised if the backend cannot
-        simulate a segment of the circuit.  ``sparsity`` and
-        ``rotation_diversity`` are forwarded to :func:`_supported_backends`.
+        simulate a segment of the circuit.  ``sparsity`` and rotation metrics
+        are forwarded to :func:`_supported_backends`.
         """
         from .sparsity import adaptive_dd_sparsity_threshold
         nnz_estimate = None
@@ -477,28 +486,42 @@ class Planner:
         s_thresh = adaptive_dd_sparsity_threshold(len({q for g in gates for q in g.qubits}))
         passes = (
             (sparsity is not None and sparsity >= s_thresh)
-            and (nnz_estimate is not None and nnz_estimate <= config.DEFAULT.dd_nnz_threshold)
             and (
-                rotation_diversity is None
-                or rotation_diversity <= config.DEFAULT.dd_rotation_diversity_threshold
+                nnz_estimate is not None and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
+            )
+            and (
+                (phase_rotation_diversity is None
+                 or phase_rotation_diversity <= config.DEFAULT.dd_phase_rotation_diversity_threshold)
+                and (
+                    amplitude_rotation_diversity is None
+                    or amplitude_rotation_diversity
+                    <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+                )
             )
         )
         dd_metric = False
         if passes:
             s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
             nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-            rot_score = 1 - (
-                (rotation_diversity or 0) / config.DEFAULT.dd_rotation_diversity_threshold
+            phase_score = 1 - (
+                (phase_rotation_diversity or 0)
+                / config.DEFAULT.dd_phase_rotation_diversity_threshold
+            )
+            amp_score = 1 - (
+                (amplitude_rotation_diversity or 0)
+                / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
             )
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
                 + config.DEFAULT.dd_nnz_weight
-                + config.DEFAULT.dd_rotation_weight
+                + config.DEFAULT.dd_phase_rotation_weight
+                + config.DEFAULT.dd_amplitude_rotation_weight
             )
             weighted = (
                 config.DEFAULT.dd_sparsity_weight * s_score
                 + config.DEFAULT.dd_nnz_weight * nnz_score
-                + config.DEFAULT.dd_rotation_weight * rot_score
+                + config.DEFAULT.dd_phase_rotation_weight * phase_score
+                + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
             )
             metric = weighted / weight_sum if weight_sum else 0.0
             dd_metric = metric >= config.DEFAULT.dd_metric_threshold
@@ -555,7 +578,8 @@ class Planner:
                     _supported_backends(
                         segment,
                         sparsity=sparsity,
-                        rotation_diversity=rotation_diversity,
+                        phase_rotation_diversity=phase_rotation_diversity,
+                        amplitude_rotation_diversity=amplitude_rotation_diversity,
                         allow_tableau=allow_tableau,
                         estimator=self.estimator,
                         max_memory=max_memory,
@@ -738,7 +762,8 @@ class Planner:
         max_memory: float | None,
         *,
         sparsity: float | None = None,
-        rotation_diversity: int | None = None,
+        phase_rotation_diversity: int | None = None,
+        amplitude_rotation_diversity: int | None = None,
         allow_tableau: bool = True,
     ) -> Tuple[Backend, Cost]:
         """Return best single-backend estimate for the full gate list.
@@ -751,8 +776,8 @@ class Planner:
             Optional memory threshold.
         symmetry, sparsity:
             Optional heuristic metrics for the overall circuit.
-        rotation_diversity:
-            Optional count of distinct rotation angles used by the circuit.
+        phase_rotation_diversity, amplitude_rotation_diversity:
+            Optional counts of distinct rotation angles used by the circuit.
         allow_tableau:
             Propagate the circuit-level Clifford check.  When ``False`` the
             tableau backend is never considered even if ``gates`` are
@@ -775,22 +800,34 @@ class Planner:
         passes = (
             (sparsity or 0.0) >= s_thresh
             and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
-            and (rotation_diversity or 0) <= config.DEFAULT.dd_rotation_diversity_threshold
+            and (phase_rotation_diversity or 0)
+            <= config.DEFAULT.dd_phase_rotation_diversity_threshold
+            and (amplitude_rotation_diversity or 0)
+            <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
         )
         dd_metric = False
         if passes:
             s_score = (sparsity or 0.0) / s_thresh if s_thresh > 0 else 0.0
             nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-            rot_score = 1 - (rotation_diversity or 0) / config.DEFAULT.dd_rotation_diversity_threshold
+            phase_score = 1 - (
+                (phase_rotation_diversity or 0)
+                / config.DEFAULT.dd_phase_rotation_diversity_threshold
+            )
+            amp_score = 1 - (
+                (amplitude_rotation_diversity or 0)
+                / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+            )
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
                 + config.DEFAULT.dd_nnz_weight
-                + config.DEFAULT.dd_rotation_weight
+                + config.DEFAULT.dd_phase_rotation_weight
+                + config.DEFAULT.dd_amplitude_rotation_weight
             )
             weighted = (
                 config.DEFAULT.dd_sparsity_weight * s_score
                 + config.DEFAULT.dd_nnz_weight * nnz_score
-                + config.DEFAULT.dd_rotation_weight * rot_score
+                + config.DEFAULT.dd_phase_rotation_weight * phase_score
+                + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
             )
             metric = weighted / weight_sum if weight_sum else 0.0
             dd_metric = metric >= config.DEFAULT.dd_metric_threshold
@@ -798,7 +835,8 @@ class Planner:
             _supported_backends(
                 gates,
                 sparsity=sparsity,
-                rotation_diversity=rotation_diversity,
+                phase_rotation_diversity=phase_rotation_diversity,
+                amplitude_rotation_diversity=amplitude_rotation_diversity,
                 allow_tableau=allow_tableau,
                 estimator=self.estimator,
                 max_memory=max_memory,
@@ -908,7 +946,8 @@ class Planner:
             gates,
             threshold,
             sparsity=circuit.sparsity,
-            rotation_diversity=circuit.rotation_diversity,
+            phase_rotation_diversity=circuit.phase_rotation_diversity,
+            amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
             allow_tableau=allow_tableau,
         )
 
@@ -953,7 +992,8 @@ class Planner:
             max_memory=threshold,
             allow_tableau=allow_tableau,
             sparsity=circuit.sparsity,
-            rotation_diversity=circuit.rotation_diversity,
+            phase_rotation_diversity=circuit.phase_rotation_diversity,
+            amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
         )
         pre_cost = (
             pre.table[-1][pre.final_backend].cost if pre.table else Cost(0.0, 0.0)
@@ -990,7 +1030,8 @@ class Planner:
             max_memory=threshold,
             allow_tableau=allow_tableau,
             sparsity=circuit.sparsity,
-            rotation_diversity=circuit.rotation_diversity,
+            phase_rotation_diversity=circuit.phase_rotation_diversity,
+            amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
         )
 
         dp_cost = (
@@ -1047,7 +1088,8 @@ class Planner:
                 max_memory=threshold,
                 allow_tableau=allow_tableau,
                 sparsity=circuit.sparsity,
-                rotation_diversity=circuit.rotation_diversity,
+                phase_rotation_diversity=circuit.phase_rotation_diversity,
+                amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
             )
             for sub_step in sub.steps:
                 refined_steps.append(

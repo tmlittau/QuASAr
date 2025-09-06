@@ -102,14 +102,20 @@ class Config:
     dd_nnz_weight: float = _float_from_env(
         "QUASAR_DD_NNZ_WEIGHT", 1.0
     )
-    dd_rotation_weight: float = _float_from_env(
-        "QUASAR_DD_ROTATION_WEIGHT", 1.0
+    dd_phase_rotation_weight: float = _float_from_env(
+        "QUASAR_DD_PHASE_ROTATION_WEIGHT", 1.0
+    )
+    dd_amplitude_rotation_weight: float = _float_from_env(
+        "QUASAR_DD_AMPLITUDE_ROTATION_WEIGHT", 1.0
     )
     dd_metric_threshold: float = _float_from_env(
         "QUASAR_DD_METRIC_THRESHOLD", 0.8
     )
-    dd_rotation_diversity_threshold: int = _int_from_env(
-        "QUASAR_DD_ROTATION_DIVERSITY_THRESHOLD", 16
+    dd_phase_rotation_diversity_threshold: int = _int_from_env(
+        "QUASAR_DD_PHASE_ROTATION_DIVERSITY_THRESHOLD", 16
+    )
+    dd_amplitude_rotation_diversity_threshold: int = _int_from_env(
+        "QUASAR_DD_AMPLITUDE_ROTATION_DIVERSITY_THRESHOLD", 16
     )
     backend_selection_log: str | None = os.getenv("QUASAR_BACKEND_SELECTION_LOG")
     verbose_selection: bool = _bool_from_env("QUASAR_VERBOSE_SELECTION", False)

@@ -31,7 +31,8 @@ controlled-phase rotations that drive `nnz` to `2**n`, producing a sparsity of
 The planner combines the sparsity score with an estimate of the number of
 non-zero amplitudes to form part of the decision-diagram metric.  Weights
 ``dd_sparsity_weight`` and ``dd_nnz_weight``—together with
-``dd_rotation_weight`` and ``dd_metric_threshold``—determine when the
-decision-diagram backend is considered.  These values may be overridden via
+``dd_phase_rotation_weight``, ``dd_amplitude_rotation_weight`` and
+``dd_metric_threshold``—determine when the decision-diagram backend is
+considered.  These values may be overridden via
 the ``QUASAR_DD_*`` environment variables.
 

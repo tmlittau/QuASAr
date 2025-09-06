@@ -20,6 +20,7 @@ def test_supported_backends_qft_rotation_diversity():
     backends = _supported_backends(
         circ.gates,
         sparsity=circ.sparsity,
-        rotation_diversity=circ.rotation_diversity,
+        phase_rotation_diversity=circ.phase_rotation_diversity,
+        amplitude_rotation_diversity=circ.amplitude_rotation_diversity,
     )
     assert Backend.DECISION_DIAGRAM not in backends

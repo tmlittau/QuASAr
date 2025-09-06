@@ -5,7 +5,8 @@ import quasar.config as config
 def test_conversion_layer_inserted(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 0.0)
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 10_000_000)
-    monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 1000)
+    monkeypatch.setattr(config.DEFAULT, "dd_phase_rotation_diversity_threshold", 1000)
+    monkeypatch.setattr(config.DEFAULT, "dd_amplitude_rotation_diversity_threshold", 1000)
     monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 0.0)
     # Construct a circuit that starts Clifford-only and then introduces
     # non-Clifford gates on the same qubits, forcing a backend switch and

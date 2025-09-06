@@ -15,4 +15,4 @@ def test_backend_selection_logging(tmp_path):
     backend = sched.select_backend(circuit)
     assert backend == Backend.TABLEAU
     content = log_file.read_text().strip().split(",")
-    assert content[4] == "TABLEAU"
+    assert content[5] == Backend.TABLEAU.name
