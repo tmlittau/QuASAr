@@ -206,25 +206,27 @@ class Scheduler:
         :meth:`run` to execute without invoking the planner again.
         """
 
+        gates = circuit.simplify_classical_controls()
+
         backend_choice = self.select_backend(circuit, backend=backend)
         if plan is None and backend_choice is not None:
             # Quick path – execute the entire circuit on a single backend
             plan = PlanResult(
                 table=[],
                 final_backend=backend_choice,
-                gates=circuit.gates,
-                explicit_steps=[PlanStep(0, len(circuit.gates), backend_choice)],
+                gates=gates,
+                explicit_steps=[PlanStep(0, len(gates), backend_choice)],
             )
             plan.explicit_conversions = []
             if self.planner is not None:
                 plan.step_costs = [
-                    self._estimate_cost(backend_choice, circuit.gates)
+                    self._estimate_cost(backend_choice, gates)
                 ]
             else:
                 plan.step_costs = [Cost(time=0.0, memory=0.0)]
             circuit.ssd.conversions = []
             qubits = tuple(range(circuit.num_qubits))
-            history = tuple(g.gate for g in circuit.gates)
+            history = tuple(g.gate for g in gates)
             circuit.ssd.partitions = [
                 SSDPartition(
                     subsystems=(qubits,),
@@ -246,7 +248,7 @@ class Scheduler:
             self.conversion_engine = ConversionEngine()
 
         if plan is None:
-            plan = self.planner.cache_lookup(circuit.gates, backend)
+            plan = self.planner.cache_lookup(gates, backend)
             if plan is None:
                 plan = self.planner.plan(circuit, backend=backend)
 
@@ -256,12 +258,12 @@ class Scheduler:
 
         step_costs: List[Cost] = []
         for step in plan.steps:
-            segment = circuit.gates[step.start : step.end]
+            segment = gates[step.start : step.end]
             step_costs.append(self._estimate_cost(step.backend, segment))
         plan.step_costs = step_costs
         parts: List[SSDPartition] = []
         for step, cost in zip(plan.steps, step_costs):
-            segment = circuit.gates[step.start : step.end]
+            segment = gates[step.start : step.end]
             qubits = tuple(sorted({q for g in segment for q in g.qubits}))
             history = tuple(g.gate for g in segment)
             subsystems = (
@@ -282,7 +284,7 @@ class Scheduler:
             plan.replay_ssd = {}
         sims: Dict[tuple, object] = {}
         for idx, step in enumerate(plan.steps):
-            segment = circuit.gates[step.start : step.end]
+            segment = gates[step.start : step.end]
             target = step.backend
             qubits = frozenset(q for g in segment for q in g.qubits)
             if len(segment) == 1 and len(segment[0].qubits) == 2:
@@ -314,7 +316,7 @@ class Scheduler:
                     circuit.ssd.conversions.append(layer)
                     sim_obj = type(self.backends[target])()
                     sim_obj.load(circuit.num_qubits)
-                    for g in circuit.gates[: step.start]:
+                    for g in gates[: step.start]:
                         sim_obj.apply_gate(g.gate, g.qubits, g.params)
                     try:
                         plan.replay_ssd[idx] = sim_obj.statevector()
@@ -377,6 +379,8 @@ class Scheduler:
         if plan is None or plan.step_costs is None:
             plan = self.prepare_run(circuit, plan, backend=backend)
 
+        gates = circuit.simplify_classical_controls()
+
         steps: List[PlanStep] = list(plan.steps)
         conv_layers = list(getattr(plan, "conversions", []))
         conv_idx = 0
@@ -392,7 +396,7 @@ class Scheduler:
         while i < len(steps):
             step = steps[i]
             target = step.backend
-            segment = circuit.gates[step.start : step.end]
+            segment = gates[step.start : step.end]
 
             if step.parallel and len(step.parallel) > 1 and target in self.parallel_backends:
                 groups: List[List] = [[] for _ in step.parallel]
