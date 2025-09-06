@@ -316,11 +316,14 @@ class BridgePlanner(Planner):
 
 
 def test_cross_backend_gate_uses_bridge_tensor():
-    circuit = Circuit([
-        {"gate": "H", "qubits": [0]},
-        {"gate": "H", "qubits": [1]},
-        {"gate": "CX", "qubits": [0, 1]},
-    ])
+    circuit = Circuit(
+        [
+            {"gate": "H", "qubits": [0]},
+            {"gate": "H", "qubits": [1]},
+            {"gate": "CX", "qubits": [0, 1]},
+        ],
+        use_classical_simplification=False,
+    )
     engine = BridgeTrackingEngine()
     scheduler = Scheduler(
         conversion_engine=engine,
