@@ -29,6 +29,20 @@ def _float_from_env(name: str, default: float) -> float:
         return default
 
 
+def _bool_from_env(name: str, default: bool) -> bool:
+    """Return a boolean value parsed from the environment."""
+
+    val = os.getenv(name)
+    if val is None or not val.strip():
+        return default
+    val = val.strip().lower()
+    if val in {"1", "true", "yes", "on"}:
+        return True
+    if val in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _order_from_env(name: str, default: List[Backend]) -> List[Backend]:
     val = os.getenv(name)
     if val is None or not val.strip():
@@ -96,6 +110,9 @@ class Config:
     )
     dd_rotation_diversity_threshold: int = _int_from_env(
         "QUASAR_DD_ROTATION_DIVERSITY_THRESHOLD", 16
+    )
+    use_classical_simplification: bool = _bool_from_env(
+        "QUASAR_CLASSICAL_SIMPLIFY", True
     )
     backend_selection_log: str | None = os.getenv("QUASAR_BACKEND_SELECTION_LOG")
 

@@ -84,3 +84,15 @@ def test_classical_control_zero_skips_gate() -> None:
     ])
     assert history == []
     assert circ.classical_state == [0, 0]
+
+
+def test_scheduler_respects_disable_flag(monkeypatch) -> None:
+    from quasar.config import DEFAULT as CONFIG
+
+    monkeypatch.setattr(CONFIG, "use_classical_simplification", False)
+    history, circ = run_circuit([
+        {"gate": "X", "qubits": [0]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ])
+    assert history == ["X", "CX"]
+    assert circ.classical_state == [None, None]

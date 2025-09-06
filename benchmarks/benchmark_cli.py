@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.cost import Backend
+from quasar.config import DEFAULT as CONFIG
 import circuits as circuit_lib
 
 
@@ -120,7 +121,15 @@ def main() -> None:
     )
     parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions per configuration")
     parser.add_argument("--output", required=True, type=Path, help="Output file path without extension")
+    parser.add_argument(
+        "--disable-classical-simplify",
+        action="store_true",
+        help="Disable classical control simplification",
+    )
     args = parser.parse_args()
+
+    if args.disable_classical_simplify:
+        CONFIG.use_classical_simplification = False
 
     circuit_fn = resolve_circuit(args.circuit)
     results = run_suite(circuit_fn, args.qubits, args.repetitions)

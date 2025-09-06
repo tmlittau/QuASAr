@@ -13,6 +13,7 @@ from qiskit_qasm3_import import api as qasm3_api
 
 from .ssd import SSD, SSDPartition
 from .cost import Cost
+from .config import DEFAULT as CONFIG
 
 
 def _is_multiple_of_pi(angle: float) -> bool:
@@ -57,7 +58,10 @@ class Circuit:
         self._num_qubits = self._infer_qubit_count()
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         # Track classical state: 0/1 for classical qubits, ``None`` for quantum.
-        self.classical_state: List[int | None] = [0] * (max_index + 1)
+        if CONFIG.use_classical_simplification:
+            self.classical_state: List[int | None] = [0] * (max_index + 1)
+        else:
+            self.classical_state = [None] * (max_index + 1)
         self._num_gates = len(self.gates)
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
@@ -80,6 +84,9 @@ class Circuit:
         Any multi-qubit gate is assumed to create entanglement, marking all
         participating qubits as quantum.
         """
+
+        if not CONFIG.use_classical_simplification:
+            return
 
         if len(gate.qubits) != 1:
             for q in gate.qubits:
@@ -127,6 +134,9 @@ class Circuit:
         List[Gate]
             The simplified gate sequence.
         """
+
+        if not CONFIG.use_classical_simplification:
+            return self.gates
 
         new_gates: List[Gate] = []
         phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ"}

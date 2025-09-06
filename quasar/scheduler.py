@@ -206,7 +206,10 @@ class Scheduler:
         :meth:`run` to execute without invoking the planner again.
         """
 
-        gates = circuit.simplify_classical_controls()
+        if config.DEFAULT.use_classical_simplification:
+            gates = circuit.simplify_classical_controls()
+        else:
+            gates = circuit.gates
 
         backend_choice = self.select_backend(circuit, backend=backend)
         if plan is None and backend_choice is not None:
@@ -379,7 +382,10 @@ class Scheduler:
         if plan is None or plan.step_costs is None:
             plan = self.prepare_run(circuit, plan, backend=backend)
 
-        gates = circuit.simplify_classical_controls()
+        if config.DEFAULT.use_classical_simplification:
+            gates = circuit.simplify_classical_controls()
+        else:
+            gates = circuit.gates
 
         steps: List[PlanStep] = list(plan.steps)
         conv_layers = list(getattr(plan, "conversions", []))
