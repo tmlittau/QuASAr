@@ -36,7 +36,6 @@ class Scheduler:
     quick_max_qubits: int | None = config.DEFAULT.quick_max_qubits
     quick_max_gates: int | None = config.DEFAULT.quick_max_gates
     quick_max_depth: int | None = config.DEFAULT.quick_max_depth
-    force_single_backend_below: int | None = config.DEFAULT.force_single_backend_below
     backend_order: List[Backend] = field(
         default_factory=lambda: list(config.DEFAULT.preferred_backend_order)
     )
@@ -214,7 +213,6 @@ class Scheduler:
                 quick_max_qubits=self.quick_max_qubits,
                 quick_max_gates=self.quick_max_gates,
                 quick_max_depth=self.quick_max_depth,
-                force_single_backend_below=self.force_single_backend_below,
                 backend_order=self.backend_order,
             )
         if self.conversion_engine is None:

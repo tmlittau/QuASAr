@@ -320,9 +320,6 @@ class Planner:
         quick_max_qubits: int | None = config.DEFAULT.quick_max_qubits,
         quick_max_gates: int | None = config.DEFAULT.quick_max_gates,
         quick_max_depth: int | None = config.DEFAULT.quick_max_depth,
-        force_single_backend_below: (
-            int | None
-        ) = config.DEFAULT.force_single_backend_below,
         backend_order: Optional[List[Backend]] = None,
         conversion_cost_multiplier: float = 1.0,
     ):
@@ -357,11 +354,6 @@ class Planner:
             Factor applied to conversion time estimates.  Values greater than
             one discourage backend switches while values below one encourage
             them.  Defaults to ``1.0``.
-        force_single_backend_below:
-            If not ``None`` and either the circuit's qubit count or depth does
-            not exceed this value, planning returns a single step without
-            considering backend switches.  Defaults to
-            ``config.DEFAULT.force_single_backend_below``.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -371,7 +363,6 @@ class Planner:
         self.quick_max_qubits = quick_max_qubits
         self.quick_max_gates = quick_max_gates
         self.quick_max_depth = quick_max_depth
-        self.force_single_backend_below = force_single_backend_below
         self.backend_order = (
             list(backend_order)
             if backend_order is not None
@@ -436,85 +427,6 @@ class Planner:
                 {init: DPEntry(cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None)}
             ]
             return PlanResult(table=table, final_backend=init, gates=gates)
-
-        if self.force_single_backend_below is not None:
-            qubits = {q for g in gates for q in g.qubits}
-            num_qubits = len(qubits)
-            depth = _circuit_depth(gates)
-            if (
-                num_qubits <= self.force_single_backend_below
-                or depth <= self.force_single_backend_below
-            ):
-                num_meas = sum(
-                    1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"}
-                )
-                num_1q = sum(
-                    1
-                    for g in gates
-                    if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
-                )
-                num_2q = len(gates) - num_1q - num_meas
-                if forced_backend is not None:
-                    backends = _supported_backends(
-                        gates,
-                        symmetry=symmetry,
-                        sparsity=sparsity,
-                        allow_tableau=allow_tableau,
-                        estimator=self.estimator,
-                        max_memory=max_memory,
-                    )
-                    if forced_backend not in backends:
-                        raise ValueError(
-                            f"Backend {forced_backend} unsupported for given circuit segment"
-                        )
-                    backend_choice = forced_backend
-                    cost = _simulation_cost(
-                        self.estimator,
-                        backend_choice,
-                        num_qubits,
-                        num_1q,
-                        num_2q,
-                        num_meas,
-                    )
-                    if max_memory is not None and cost.memory > max_memory:
-                        raise ValueError("Requested backend exceeds memory threshold")
-                    part = Partitioner()
-                    groups = part.parallel_groups(gates)
-                    parallel = tuple(g[0] for g in groups) if groups else ()
-                    step = PlanStep(
-                        start=0, end=n, backend=backend_choice, parallel=parallel
-                    )
-                    return PlanResult(
-                        table=[],
-                        final_backend=backend_choice,
-                        gates=gates,
-                        explicit_steps=[step],
-                        explicit_conversions=[],
-                    )
-                else:
-                    backend_choice, cost = self._single_backend(
-                        gates,
-                        max_memory,
-                        symmetry=symmetry,
-                        sparsity=sparsity,
-                        allow_tableau=allow_tableau,
-                    )
-                    if max_memory is not None and cost.memory > max_memory:
-                        pass  # fall through to full DP
-                    else:
-                        part = Partitioner()
-                        groups = part.parallel_groups(gates)
-                        parallel = tuple(g[0] for g in groups) if groups else ()
-                        step = PlanStep(
-                            start=0, end=n, backend=backend_choice, parallel=parallel
-                        )
-                        return PlanResult(
-                            table=[],
-                            final_backend=backend_choice,
-                            gates=gates,
-                            explicit_steps=[step],
-                            explicit_conversions=[],
-                        )
 
         # Pre-compute prefix and future qubit sets to derive boundary sizes.
         prefix_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
@@ -932,33 +844,45 @@ class Planner:
                     self.cache_insert(gates, result, single_backend_choice)
                 return result
 
-        if self.force_single_backend_below is not None and (
-            num_qubits <= self.force_single_backend_below
-            or depth <= self.force_single_backend_below
+        # Lightweight pre-pass comparing single backend to coarse partitioning
+        pre_batch = max(1, len(gates) // 4)
+        pre = self._dp(
+            gates,
+            batch_size=pre_batch,
+            max_memory=threshold,
+            allow_tableau=allow_tableau,
+            symmetry=circuit.symmetry,
+            sparsity=circuit.sparsity,
+        )
+        pre_cost = (
+            pre.table[-1][pre.final_backend].cost if pre.table else Cost(0.0, 0.0)
+        )
+        overhead = Cost(time=len(gates) * 1e-6, memory=0.0)
+        if _better(single_cost, _add_cost(pre_cost, overhead)) and (
+            threshold is None or single_cost.memory <= threshold
         ):
-            if threshold is None or single_cost.memory <= threshold:
-                part = Partitioner()
-                groups = part.parallel_groups(gates)
-                parallel = tuple(g[0] for g in groups) if groups else ()
-                step = PlanStep(
-                    start=0,
-                    end=len(gates),
-                    backend=single_backend_choice,
-                    parallel=parallel,
-                )
-                result = PlanResult(
-                    table=[],
-                    final_backend=single_backend_choice,
-                    gates=gates,
-                    explicit_steps=[step],
-                    explicit_conversions=[],
-                )
-                circuit.ssd.conversions = []
-                if use_cache:
-                    self.cache_insert(gates, result, single_backend_choice)
-                return result
+            part = Partitioner()
+            groups = part.parallel_groups(gates)
+            parallel = tuple(g[0] for g in groups) if groups else ()
+            step = PlanStep(
+                start=0,
+                end=len(gates),
+                backend=single_backend_choice,
+                parallel=parallel,
+            )
+            result = PlanResult(
+                table=[],
+                final_backend=single_backend_choice,
+                gates=gates,
+                explicit_steps=[step],
+                explicit_conversions=[],
+            )
+            circuit.ssd.conversions = []
+            if use_cache:
+                self.cache_insert(gates, result, single_backend_choice)
+            return result
 
-        # First perform a coarse plan using the configured batch size.
+        # Perform a coarse plan using the configured batch size for refinement
         coarse = self._dp(
             gates,
             batch_size=self.batch_size,

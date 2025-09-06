@@ -610,23 +610,3 @@ def test_runtime_excludes_planning_overhead():
 
     assert prepare_duration >= 0.1
     assert run_duration < 0.1
-
-
-def test_scheduler_force_single_backend_below():
-    circuit = Circuit([
-        {"gate": "H", "qubits": [0]},
-        {"gate": "CX", "qubits": [0, 1]},
-        {"gate": "CX", "qubits": [1, 2]},
-        {"gate": "CX", "qubits": [2, 3]},
-    ])
-    scheduler = Scheduler(
-        quick_max_qubits=3,
-        quick_max_gates=100,
-        quick_max_depth=3,
-        force_single_backend_below=5,
-    )
-    plan = scheduler.prepare_run(circuit)
-    assert len(plan.steps) == 1
-    assert plan.conversions == []
-    result = scheduler.run(circuit, plan)
-    assert result.conversions == []
