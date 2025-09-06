@@ -128,7 +128,8 @@ def test_metrics_recomputed_after_simplification():
     assert circ.gates == []
     assert circ.depth == 0
     assert circ.symmetry == 0
-    assert circ.rotation_diversity == 0
+    assert circ.phase_rotation_diversity == 0
+    assert circ.amplitude_rotation_diversity == 0
     assert circ.sparsity == 0.75
     assert circ.cost_estimates != initial_costs
     assert circ.cost_estimates == circ._estimate_costs()

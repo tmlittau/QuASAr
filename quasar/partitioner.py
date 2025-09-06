@@ -57,34 +57,44 @@ class Partitioner:
         current_cost: Cost | None = None
 
         sparsity = getattr(circuit, "sparsity", None)
-        rotation = getattr(circuit, "rotation_diversity", None)
+        phase_rot = getattr(circuit, "phase_rotation_diversity", None)
+        amp_rot = getattr(circuit, "amplitude_rotation_diversity", None)
         from .sparsity import adaptive_dd_sparsity_threshold, sparsity_estimate
-        from .symmetry import rotation_diversity as rot_div
+        from .symmetry import (
+            phase_rotation_diversity as rot_phase,
+            amplitude_rotation_diversity as rot_amp,
+        )
         if sparsity is None:
             sparsity = sparsity_estimate(circuit)
-        if rotation is None:
-            rotation = rot_div(circuit)
+        if phase_rot is None:
+            phase_rot = rot_phase(circuit)
+        if amp_rot is None:
+            amp_rot = rot_amp(circuit)
         nnz_estimate = int((1 - sparsity) * (2 ** circuit.num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(circuit.num_qubits)
         passes = (
             sparsity >= s_thresh
             and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
-            and rotation <= config.DEFAULT.dd_rotation_diversity_threshold
+            and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
+            and amp_rot <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
         )
         dd_metric = False
         if passes:
             s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
             nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-            rot_score = 1 - rotation / config.DEFAULT.dd_rotation_diversity_threshold
+            phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
+            amp_score = 1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
                 + config.DEFAULT.dd_nnz_weight
-                + config.DEFAULT.dd_rotation_weight
+                + config.DEFAULT.dd_phase_rotation_weight
+                + config.DEFAULT.dd_amplitude_rotation_weight
             )
             weighted = (
                 config.DEFAULT.dd_sparsity_weight * s_score
                 + config.DEFAULT.dd_nnz_weight * nnz_score
-                + config.DEFAULT.dd_rotation_weight * rot_score
+                + config.DEFAULT.dd_phase_rotation_weight * phase_score
+                + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
             )
             metric = weighted / weight_sum if weight_sum else 0.0
             dd_metric = metric >= config.DEFAULT.dd_metric_threshold

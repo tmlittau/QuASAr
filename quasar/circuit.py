@@ -76,9 +76,16 @@ class Circuit:
             self.cost_estimates = self._estimate_costs()
             from .sparsity import sparsity_estimate
             self.sparsity = sparsity_estimate(self)
-            from .symmetry import symmetry_score, rotation_diversity
+            from .symmetry import (
+                symmetry_score,
+                phase_rotation_diversity,
+                amplitude_rotation_diversity,
+            )
             self.symmetry = symmetry_score(self)
-            self.rotation_diversity = rotation_diversity(self)
+            self.phase_rotation_diversity = phase_rotation_diversity(self)
+            self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
+            # Backward compatibility
+            self.rotation_diversity = self.phase_rotation_diversity
 
     # ------------------------------------------------------------------
     # Classical state tracking and simplification
@@ -222,10 +229,16 @@ class Circuit:
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
         from .sparsity import sparsity_estimate
-        from .symmetry import symmetry_score, rotation_diversity
+        from .symmetry import (
+            symmetry_score,
+            phase_rotation_diversity,
+            amplitude_rotation_diversity,
+        )
         self.sparsity = sparsity_estimate(self)
         self.symmetry = symmetry_score(self)
-        self.rotation_diversity = rotation_diversity(self)
+        self.phase_rotation_diversity = phase_rotation_diversity(self)
+        self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
+        self.rotation_diversity = self.phase_rotation_diversity
         self.cost_estimates = self._estimate_costs()
         return new_gates
 

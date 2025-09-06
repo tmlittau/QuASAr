@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections import Counter
 
 
-PHASE_GATES = {"RZ", "P", "PHASE", "CP", "CRZ"}
+PHASE_ROTATION_GATES = {"RZ", "P", "PHASE", "CP", "CRZ"}
+AMPLITUDE_ROTATION_GATES = {"RY", "CRY", "RX", "CRX"}
 
 from .circuit import Circuit
 
@@ -42,40 +43,36 @@ def symmetry_score(circuit: Circuit) -> float:
     return min(repeats / circuit.depth, 1.0)
 
 
-def rotation_diversity(circuit: Circuit) -> int:
-    """Count distinct rotation parameters for phase-type gates.
 
-    The heuristic scans ``circuit`` for phase and Z-rotation gates, gathering
-    the numeric rotation parameters they apply.  The returned value is the
-    number of unique parameters encountered, providing a rough measure of how
-    many different phase angles the circuit uses.
-
-    Parameters
-    ----------
-    circuit:
-        Circuit to analyse.
-
-    Returns
-    -------
-    int
-        Number of distinct rotation parameters across all phase-type gates.
-    """
+def _rotation_diversity(circuit: Circuit, gate_set: set[str]) -> int:
+    """Count distinct rotation parameters for the given ``gate_set``."""
 
     values = set()
     for gate in circuit.gates:
         name = gate.gate.upper()
-        if name not in PHASE_GATES:
+        if name not in gate_set:
             continue
         val = None
-        if name == "CP":
-            param = gate.params.get("k")
+        for param in gate.params.values():
             if isinstance(param, (int, float)):
                 val = float(param)
-        else:
-            for param in gate.params.values():
-                if isinstance(param, (int, float)):
-                    val = float(param)
-                    break
+                break
         if val is not None:
             values.add(round(val, 12))
     return len(values)
+
+
+def phase_rotation_diversity(circuit: Circuit) -> int:
+    """Count distinct phase/Z rotation parameters."""
+
+    return _rotation_diversity(circuit, PHASE_ROTATION_GATES)
+
+
+def amplitude_rotation_diversity(circuit: Circuit) -> int:
+    """Count distinct X/Y rotation parameters."""
+
+    return _rotation_diversity(circuit, AMPLITUDE_ROTATION_GATES)
+
+
+# Backward compatibility: old name refers to phase rotations only
+rotation_diversity = phase_rotation_diversity
