@@ -220,11 +220,13 @@ def _supported_backends(
 
     candidates: List[Backend] = []
 
-    dd_metric = False
-    if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
-        dd_metric = True
-    if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
-        dd_metric = True
+    sym = symmetry if symmetry is not None else 0.0
+    sparse = sparsity if sparsity is not None else 0.0
+    score = (
+        config.DEFAULT.dd_symmetry_weight * sym
+        + config.DEFAULT.dd_sparsity_weight * sparse
+    )
+    dd_metric = score >= config.DEFAULT.dd_metric_threshold
 
     mps_metric = False
     if estimator is not None and all(len(g.qubits) <= 2 for g in gates):

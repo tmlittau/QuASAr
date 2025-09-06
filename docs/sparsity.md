@@ -28,3 +28,11 @@ grows.
 controlled-phase rotations that drive `nnz` to `2**n`, producing a sparsity of
 `0`—a maximally dense state.
 
+The planner combines the sparsity score with overall circuit symmetry to
+derive a weighted decision-diagram metric.  The weights
+``dd_sparsity_weight`` and ``dd_symmetry_weight`` along with the
+``dd_metric_threshold`` determine when the decision-diagram backend is
+considered.  These values may be overridden via the environment variables
+``QUASAR_DD_SPARSITY_WEIGHT``, ``QUASAR_DD_SYMMETRY_WEIGHT`` and
+``QUASAR_DD_METRIC_THRESHOLD``.
+
