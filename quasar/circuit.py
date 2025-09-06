@@ -52,12 +52,21 @@ class Circuit:
         quantum superposition.
     """
 
-    def __init__(self, gates: Iterable[Dict[str, Any] | Gate]):
+    def __init__(
+        self,
+        gates: Iterable[Dict[str, Any] | Gate],
+        *,
+        use_classical_simplification: bool = True,
+    ):
+        self.use_classical_simplification = use_classical_simplification
         self.gates: List[Gate] = [g if isinstance(g, Gate) else Gate(**g) for g in gates]
         self._num_qubits = self._infer_qubit_count()
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         # Track classical state: 0/1 for classical qubits, ``None`` for quantum.
-        self.classical_state: List[int | None] = [0] * (max_index + 1)
+        if self.use_classical_simplification:
+            self.classical_state: List[int | None] = [0] * (max_index + 1)
+        else:
+            self.classical_state = [None] * (max_index + 1)
         self._num_gates = len(self.gates)
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
@@ -80,6 +89,9 @@ class Circuit:
         Any multi-qubit gate is assumed to create entanglement, marking all
         participating qubits as quantum.
         """
+
+        if not self.use_classical_simplification:
+            return
 
         if len(gate.qubits) != 1:
             for q in gate.qubits:
@@ -127,6 +139,9 @@ class Circuit:
         List[Gate]
             The simplified gate sequence.
         """
+
+        if not self.use_classical_simplification:
+            return self.gates
 
         new_gates: List[Gate] = []
         phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ"}
@@ -208,22 +223,37 @@ class Circuit:
     # Construction helpers
     # ------------------------------------------------------------------
     @classmethod
-    def from_dict(cls, gates: Iterable[Dict[str, Any]]):
+    def from_dict(
+        cls,
+        gates: Iterable[Dict[str, Any]],
+        *,
+        use_classical_simplification: bool = True,
+    ):
         """Build a circuit from an iterable of gate dictionaries."""
-        return cls(gates)
+        return cls(gates, use_classical_simplification=use_classical_simplification)
 
     @classmethod
-    def from_json(cls, path: str):
+    def from_json(
+        cls,
+        path: str,
+        *,
+        use_classical_simplification: bool = True,
+    ):
         """Load a circuit from a JSON file.
 
         The JSON file must contain a list of gate dictionaries.
         """
         with open(path, "r", encoding="utf8") as f:
             data = json.load(f)
-        return cls(data)
+        return cls(data, use_classical_simplification=use_classical_simplification)
 
     @classmethod
-    def from_qiskit(cls, circuit: QuantumCircuit) -> "Circuit":
+    def from_qiskit(
+        cls,
+        circuit: QuantumCircuit,
+        *,
+        use_classical_simplification: bool = True,
+    ) -> "Circuit":
         """Build a :class:`Circuit` from a Qiskit ``QuantumCircuit``.
 
         Parameters
@@ -240,10 +270,15 @@ class Circuit:
                 for i, val in enumerate(op.params):
                     params[f"param{i}"] = float(val) if isinstance(val, (int, float)) else val
             gates.append({"gate": op.name.upper(), "qubits": qubits, "params": params})
-        return cls(gates)
+        return cls(gates, use_classical_simplification=use_classical_simplification)
 
     @classmethod
-    def from_qasm(cls, path_or_str: str) -> "Circuit":
+    def from_qasm(
+        cls,
+        path_or_str: str,
+        *,
+        use_classical_simplification: bool = True,
+    ) -> "Circuit":
         """Build a :class:`Circuit` from an OpenQASM 3 string or file.
 
         Parameters
@@ -258,7 +293,7 @@ class Circuit:
         else:
             qasm = path_or_str
         qc = qasm3_api.parse(qasm)
-        return cls.from_qiskit(qc)
+        return cls.from_qiskit(qc, use_classical_simplification=use_classical_simplification)
 
     # ------------------------------------------------------------------
     def _infer_qubit_count(self) -> int:

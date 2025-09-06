@@ -45,6 +45,8 @@ def run_suite(
     circuit_fn: Callable[[int], object],
     qubits: Iterable[int],
     repetitions: int,
+    *,
+    use_classical_simplification: bool = True,
 ) -> List[dict]:
     """Execute ``circuit_fn`` for each qubit count using a fixed backend.
 
@@ -57,6 +59,8 @@ def run_suite(
     results = []
     for n in qubits:
         circuit = circuit_fn(n)
+        if hasattr(circuit, "use_classical_simplification"):
+            circuit.use_classical_simplification = use_classical_simplification
         runner = BenchmarkRunner()
         rec = runner.run_quasar_multiple(
             circuit,
@@ -120,10 +124,20 @@ def main() -> None:
     )
     parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions per configuration")
     parser.add_argument("--output", required=True, type=Path, help="Output file path without extension")
+    parser.add_argument(
+        "--disable-classical-simplify",
+        action="store_true",
+        help="Disable classical control simplification",
+    )
     args = parser.parse_args()
 
     circuit_fn = resolve_circuit(args.circuit)
-    results = run_suite(circuit_fn, args.qubits, args.repetitions)
+    results = run_suite(
+        circuit_fn,
+        args.qubits,
+        args.repetitions,
+        use_classical_simplification=not args.disable_classical_simplify,
+    )
     save_results(results, args.output)
 
 
