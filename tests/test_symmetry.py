@@ -13,5 +13,9 @@ def test_random_circuit_symmetry_low():
     assert random_circuit(5, seed=123).symmetry < 0.05
 
 
-def test_qft_rotation_diversity_count():
-    assert qft_circuit(5).rotation_diversity == 4
+def test_qft_phase_rotation_diversity_count():
+    assert qft_circuit(5).phase_rotation_diversity == 4
+
+
+def test_w_state_amplitude_rotation_diversity_count():
+    assert w_state_circuit(5).amplitude_rotation_diversity == 4

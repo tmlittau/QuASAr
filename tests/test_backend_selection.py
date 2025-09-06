@@ -67,7 +67,8 @@ def test_rotation_diversity_discourages_dd(monkeypatch):
     circuit = qft_circuit(5)
     monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 0.0)
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 10_000_000)
-    monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 3)
+    monkeypatch.setattr(config.DEFAULT, "dd_phase_rotation_diversity_threshold", 3)
+    monkeypatch.setattr(config.DEFAULT, "dd_amplitude_rotation_diversity_threshold", 3)
     engine = SimulationEngine()
     plan = engine.planner.plan(circuit)
     assert plan.final_backend == Backend.STATEVECTOR
