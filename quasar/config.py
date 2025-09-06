@@ -118,6 +118,7 @@ class Config:
         "QUASAR_DD_AMPLITUDE_ROTATION_DIVERSITY_THRESHOLD", 16
     )
     backend_selection_log: str | None = os.getenv("QUASAR_BACKEND_SELECTION_LOG")
+    verbose_selection: bool = _bool_from_env("QUASAR_VERBOSE_SELECTION", False)
 
 
 # Global configuration instance used when modules import ``quasar.config``.
