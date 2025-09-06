@@ -51,7 +51,6 @@ def test_classical_gate_simplification():
         {"gate": "H", "qubits": [0]},
         {"gate": "X", "qubits": [0]},
     ])
-    circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["H", "X"]
     assert circ.classical_state == [None]
 
@@ -61,7 +60,6 @@ def test_controlled_classical_simplification():
         {"gate": "X", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
     ])
-    circ.simplify_classical_controls()
     assert circ.gates == []
     assert circ.classical_state == [1, 1]
 
@@ -70,7 +68,6 @@ def test_controlled_gate_dropped_when_control_zero():
     circ = Circuit.from_dict([
         {"gate": "CX", "qubits": [0, 1]},
     ])
-    circ.simplify_classical_controls()
     assert circ.gates == []
     assert circ.classical_state == [0, 0]
 
@@ -80,7 +77,6 @@ def test_controlled_gate_with_quantum_control_kept():
         {"gate": "H", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
     ])
-    circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["H", "CX"]
     assert circ.classical_state == [None, None]
 
@@ -91,7 +87,6 @@ def test_multi_controlled_classical_simplification():
         {"gate": "X", "qubits": [1]},
         {"gate": "CCX", "qubits": [0, 1, 2]},
     ])
-    circ.simplify_classical_controls()
     assert circ.gates == []
     assert circ.classical_state == [1, 1, 1]
 
@@ -101,7 +96,6 @@ def test_rx_branching():
         {"gate": "RX", "qubits": [0], "params": {"param0": math.pi}},
         {"gate": "RX", "qubits": [1], "params": {"param0": math.pi / 2}},
     ])
-    circ.simplify_classical_controls()
     assert [g.gate for g in circ.gates] == ["RX"]
     assert circ.classical_state == [1, None]
 
@@ -123,19 +117,18 @@ def test_metrics_recomputed_after_simplification():
     circ = Circuit.from_dict([
         {"gate": "X", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
-    ])
-    # Capture initial metrics
+    ], use_classical_simplification=False)
+    circ.classical_state = [0] * circ.num_qubits
     initial_costs = circ.cost_estimates.copy()
     assert circ.depth > 0
 
+    circ.use_classical_simplification = True
     circ.simplify_classical_controls()
 
-    # After simplification, multi-qubit gate is removed and metrics refresh
     assert circ.gates == []
     assert circ.depth == 0
     assert circ.symmetry == 0
     assert circ.rotation_diversity == 0
     assert circ.sparsity == 0.75
-    # Cost estimates must be recomputed
     assert circ.cost_estimates != initial_costs
     assert circ.cost_estimates == circ._estimate_costs()

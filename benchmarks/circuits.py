@@ -25,11 +25,11 @@ def ghz_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` GHZ state preparation circuit."""
     gates: List[Gate] = []
     if n_qubits <= 0:
-        return Circuit(gates)
+        return Circuit(gates, use_classical_simplification=False)
     gates.append(Gate("H", [0]))
     for i in range(1, n_qubits):
         gates.append(Gate("CX", [i - 1, i]))
-    return Circuit(gates)
+    return Circuit(gates, use_classical_simplification=False)
 
 
 def _qft_spec(n: int) -> dict:
@@ -45,14 +45,14 @@ def _qft_spec(n: int) -> dict:
 def qft_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
     spec = _qft_spec(n_qubits)
-    return Circuit(spec["gates"])
+    return Circuit(spec["gates"], use_classical_simplification=False)
 
 
 def qft_on_ghz_circuit(n_qubits: int) -> Circuit:
     """Apply the QFT to a GHZ state."""
     ghz = ghz_circuit(n_qubits)
     qft = qft_circuit(n_qubits)
-    return Circuit(list(ghz.gates) + list(qft.gates))
+    return Circuit(list(ghz.gates) + list(qft.gates), use_classical_simplification=False)
 
 
 def _w_state_spec(n: int) -> dict:
@@ -70,7 +70,7 @@ def _w_state_spec(n: int) -> dict:
 def w_state_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` W state preparation circuit."""
     spec = _w_state_spec(n_qubits)
-    return Circuit(spec["gates"])
+    return Circuit(spec["gates"], use_classical_simplification=False)
 
 
 def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
@@ -341,7 +341,7 @@ def random_circuit(num_qubits: int, seed: int | None = None) -> Circuit:
 
     qc = qiskit_random_circuit(num_qubits, 2 * num_qubits, seed=seed)
     qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    return Circuit.from_qiskit(qc, use_classical_simplification=False)
 
 
 def shor_circuit(circuit_size: int) -> Circuit:

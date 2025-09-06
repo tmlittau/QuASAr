@@ -67,15 +67,18 @@ class Circuit:
             self.classical_state: List[int | None] = [0] * (max_index + 1)
         else:
             self.classical_state = [None] * (max_index + 1)
-        self._num_gates = len(self.gates)
-        self._depth = self._compute_depth()
-        self.ssd = self._create_ssd()
-        self.cost_estimates = self._estimate_costs()
-        from .sparsity import sparsity_estimate
-        self.sparsity = sparsity_estimate(self)
-        from .symmetry import symmetry_score, rotation_diversity
-        self.symmetry = symmetry_score(self)
-        self.rotation_diversity = rotation_diversity(self)
+        if self.use_classical_simplification:
+            self.simplify_classical_controls()
+        else:
+            self._num_gates = len(self.gates)
+            self._depth = self._compute_depth()
+            self.ssd = self._create_ssd()
+            self.cost_estimates = self._estimate_costs()
+            from .sparsity import sparsity_estimate
+            self.sparsity = sparsity_estimate(self)
+            from .symmetry import symmetry_score, rotation_diversity
+            self.symmetry = symmetry_score(self)
+            self.rotation_diversity = rotation_diversity(self)
 
     # ------------------------------------------------------------------
     # Classical state tracking and simplification
@@ -217,6 +220,7 @@ class Circuit:
         self.gates = new_gates
         self._num_gates = len(new_gates)
         self._depth = self._compute_depth()
+        self.ssd = self._create_ssd()
         from .sparsity import sparsity_estimate
         from .symmetry import symmetry_score, rotation_diversity
         self.sparsity = sparsity_estimate(self)
