@@ -1,0 +1,157 @@
+{
+  "In": [
+    "",
+    "import time\nimport tracemalloc\nimport inspect\nimport pandas as pd\nimport matplotlib.pyplot as plt\nfrom qiskit import QuantumCircuit\nimport quasar\nimport quasar_convert as qconv\nfrom quasar.planner import Planner",
+    "def build_circuit(theta1, theta2):\n    qc = QuantumCircuit(2)\n    qc.rx(theta1, 0)\n    qc.cx(0, 1)\n    qc.ry(theta2, 1)\n    return quasar.Circuit.from_qiskit(qc)",
+    "angles = [(0.1,0.2), (0.3,0.4), (0.5,0.6)] * 3\nplanner_kwargs = {'quick_max_qubits': 0}\nif 'compare_pre_pass_costs' in inspect.signature(Planner).parameters:\n    planner_kwargs['compare_pre_pass_costs'] = True\nplanner_cold = Planner(**planner_kwargs)\nplanner_warm = Planner(**planner_kwargs)\nengine = qconv.ConversionEngine()\nmetrics = []\n\ndef time_and_peak_memory(planner, circ, *, use_cache):\n    tracemalloc.start()\n    t0 = time.time()\n    planner.plan(circ, use_cache=use_cache)\n    runtime = time.time() - t0\n    _, peak = tracemalloc.get_traced_memory()\n    tracemalloc.stop()\n    return runtime, peak / 1e6  # MB\n\nfor idx, (a,b) in enumerate(angles, start=1):\n    circ = build_circuit(a,b)\n    engine.extract_ssd([0,1], 2)\n    cold_time, cold_mem = time_and_peak_memory(planner_cold, circ, use_cache=False)\n    warm_time, warm_mem = time_and_peak_memory(planner_warm, circ, use_cache=True)\n    metrics.append({'run': idx,\n                    'cache_hits': planner_warm.cache_hits,\n                    'hit_rate': planner_warm.cache_hits/idx,\n                    'conversion_reuse': idx - len(engine._ssd_cache),\n                    'cold_time': cold_time,\n                    'warm_time': warm_time,\n                    'cold_memory': cold_mem,\n                    'warm_memory': warm_mem})\n\nimport pandas as pd\n\ndf = pd.DataFrame(metrics)\ndf['cum_cold_time'] = df['cold_time'].cumsum()\ndf['cum_warm_time'] = df['warm_time'].cumsum()\ndf['cum_cold_memory'] = df['cold_memory'].cumsum()\ndf['cum_warm_memory'] = df['warm_memory'].cumsum()\ndf['cumulative_speedup'] = df['cum_cold_time']/df['cum_warm_time']\ndf['cumulative_memory_savings'] = df['cum_cold_memory']/df['cum_warm_memory']\ndf[['run','hit_rate','conversion_reuse','cumulative_speedup','cumulative_memory_savings']]",
+    "df[['run','hit_rate','conversion_reuse','cumulative_speedup','cumulative_memory_savings']]",
+    "plt.figure(figsize=(6,4))\nplt.plot(df['run'], df['cumulative_speedup'], marker='o', label='Speedup (Time)')\nplt.plot(df['run'], df['cumulative_memory_savings'], marker='s', label='Memory Savings')\nplt.xlabel('Run')\nplt.ylabel('Cumulative Cold/Warm Ratio')\nplt.title('Cumulative Speedup and Memory Savings from Plan Cache')\nplt.grid(True)\nplt.legend()\nplt.show()",
+    "import pandas as pd\nfrom benchmarks.stats_utils import stats_table\n\ndef add_stats(df, quasar_col='QuASAr', baseline_cols=None, test='ttest', correction='bonferroni'):\n    \"\"\"Compute statistics comparing QuASAr with baselines.\n\n    Parameters\n    ----------\n    df : pandas.DataFrame\n        DataFrame with per-circuit results. One column must correspond to QuASAr,\n        others to baselines.\n    quasar_col : str\n        Name of the column containing QuASAr results.\n    baseline_cols : list[str] | None\n        Columns to treat as baselines. Defaults to all columns except quasar_col.\n    test : str\n        'ttest' or 'wilcoxon'.\n    correction : str\n        'bonferroni' or 'fdr_bh'.\n\n    Returns\n    -------\n    pd.DataFrame\n        Table with baseline name, statistic, corrected p-value, and effect size.\n    \"\"\"\n    if baseline_cols is None:\n        baseline_cols = [c for c in df.columns if c != quasar_col]\n    baselines = {c: df[c] for c in baseline_cols}\n    return stats_table(df[quasar_col], baselines, test=test, correction=correction)\n\n# Example usage after computing results DataFrame named `results_df`:\n# stats_df = add_stats(results_df)\n# stats_df",
+    "# Record parameters and results\nimport json, pathlib\ntry:\n    import ipynbname\n    nb_name = ipynbname.path().stem\nexcept Exception:  # pragma: no cover\n    nb_name = '06_plan_cache'\n\n# Collect simple parameters from globals\n_params = {\n    k: v for k, v in globals().items()\n    if not k.startswith('_') and isinstance(v, (int, float, str, bool, list, dict, tuple))\n}\npathlib.Path('../results').mkdir(exist_ok=True)\nwith open(f\"../results/{nb_name}_params.json\", 'w') as f:\n    json.dump(_params, f, indent=2, default=str)\nif 'results' in globals():\n    try:\n        with open(f\"../results/{nb_name}_results.json\", 'w') as f:\n            json.dump(results, f, indent=2)\n    except TypeError:\n        pass\nprint(json.dumps(_params, indent=2, default=str))"
+  ],
+  "Out": {
+    "3": "   run  hit_rate  conversion_reuse  cumulative_speedup  \\\n0    1  0.000000                 0            1.113465   \n1    2  0.000000                 1            1.099671   \n2    3  0.000000                 2            1.072508   \n3    4  0.250000                 3            1.418546   \n4    5  0.400000                 4            1.732704   \n5    6  0.500000                 5            2.056256   \n6    7  0.571429                 6            2.363200   \n7    8  0.625000                 7            2.757320   \n8    9  0.666667                 8            3.111577   \n\n   cumulative_memory_savings  \n0                   1.330990  \n1                   1.194979  \n2                   1.146917  \n3                   1.436366  \n4                   1.684964  \n5                   1.915395  \n6                   2.129708  \n7                   2.329500  \n8                   2.516339  ",
+    "4": "   run  hit_rate  conversion_reuse  cumulative_speedup  \\\n0    1  0.000000                 0            1.113465   \n1    2  0.000000                 1            1.099671   \n2    3  0.000000                 2            1.072508   \n3    4  0.250000                 3            1.418546   \n4    5  0.400000                 4            1.732704   \n5    6  0.500000                 5            2.056256   \n6    7  0.571429                 6            2.363200   \n7    8  0.625000                 7            2.757320   \n8    9  0.666667                 8            3.111577   \n\n   cumulative_memory_savings  \n0                   1.330990  \n1                   1.194979  \n2                   1.146917  \n3                   1.436366  \n4                   1.684964  \n5                   1.915395  \n6                   2.129708  \n7                   2.329500  \n8                   2.516339  "
+  },
+  "angles": [
+    [
+      0.1,
+      0.2
+    ],
+    [
+      0.3,
+      0.4
+    ],
+    [
+      0.5,
+      0.6
+    ],
+    [
+      0.1,
+      0.2
+    ],
+    [
+      0.3,
+      0.4
+    ],
+    [
+      0.5,
+      0.6
+    ],
+    [
+      0.1,
+      0.2
+    ],
+    [
+      0.3,
+      0.4
+    ],
+    [
+      0.5,
+      0.6
+    ]
+  ],
+  "planner_kwargs": {
+    "quick_max_qubits": 0
+  },
+  "metrics": [
+    {
+      "run": 1,
+      "cache_hits": 0,
+      "hit_rate": 0.0,
+      "conversion_reuse": 0,
+      "cold_time": 0.0061533451080322266,
+      "warm_time": 0.005526304244995117,
+      "cold_memory": 0.01666,
+      "warm_memory": 0.012517
+    },
+    {
+      "run": 2,
+      "cache_hits": 0,
+      "hit_rate": 0.0,
+      "conversion_reuse": 1,
+      "cold_time": 0.0051577091217041016,
+      "warm_time": 0.004759550094604492,
+      "cold_memory": 0.012948,
+      "warm_memory": 0.01226
+    },
+    {
+      "run": 3,
+      "cache_hits": 0,
+      "hit_rate": 0.0,
+      "conversion_reuse": 2,
+      "cold_time": 0.005285024642944336,
+      "warm_time": 0.0051882266998291016,
+      "cold_memory": 0.012852,
+      "warm_memory": 0.012244
+    },
+    {
+      "run": 4,
+      "cache_hits": 1,
+      "hit_rate": 0.25,
+      "conversion_reuse": 3,
+      "cold_time": 0.00542902946472168,
+      "warm_time": 5.245208740234375e-05,
+      "cold_memory": 0.01282,
+      "warm_memory": 0.001465
+    },
+    {
+      "run": 5,
+      "cache_hits": 2,
+      "hit_rate": 0.4,
+      "conversion_reuse": 4,
+      "cold_time": 0.0049533843994140625,
+      "warm_time": 4.363059997558594e-05,
+      "cold_memory": 0.012036,
+      "warm_memory": 0.001465
+    },
+    {
+      "run": 6,
+      "cache_hits": 3,
+      "hit_rate": 0.5,
+      "conversion_reuse": 5,
+      "cold_time": 0.005125999450683594,
+      "warm_time": 4.291534423828125e-05,
+      "cold_memory": 0.012012,
+      "warm_memory": 0.001465
+    },
+    {
+      "run": 7,
+      "cache_hits": 4,
+      "hit_rate": 0.5714285714285714,
+      "conversion_reuse": 6,
+      "cold_time": 0.005002498626708984,
+      "warm_time": 8.893013000488281e-05,
+      "cold_memory": 0.011996,
+      "warm_memory": 0.001465
+    },
+    {
+      "run": 8,
+      "cache_hits": 5,
+      "hit_rate": 0.625,
+      "conversion_reuse": 7,
+      "cold_time": 0.00631403923034668,
+      "warm_time": 4.553794860839844e-05,
+      "cold_memory": 0.01198,
+      "warm_memory": 0.001465
+    },
+    {
+      "run": 9,
+      "cache_hits": 6,
+      "hit_rate": 0.6666666666666666,
+      "conversion_reuse": 8,
+      "cold_time": 0.005713701248168945,
+      "warm_time": 4.3392181396484375e-05,
+      "cold_memory": 0.011972,
+      "warm_memory": 0.001465
+    }
+  ],
+  "idx": 9,
+  "a": 0.5,
+  "b": 0.6,
+  "cold_time": 0.005713701248168945,
+  "cold_mem": 0.011972,
+  "warm_time": 4.3392181396484375e-05,
+  "warm_mem": 0.001465,
+  "nb_name": "06_plan_cache"
+}
