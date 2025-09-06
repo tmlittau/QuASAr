@@ -176,6 +176,7 @@ def _supported_backends(
     symmetry: float | None = None,
     sparsity: float | None = None,
     circuit: "Circuit" | None = None,
+    rotation_diversity: int | None = None,
     allow_tableau: bool = True,
     estimator: CostEstimator | None = None,
     max_memory: float | None = None,
@@ -189,8 +190,9 @@ def _supported_backends(
     symmetry, sparsity:
         Optional heuristic metrics for the overall circuit.
     circuit:
-        Circuit providing symmetry and sparsity values.  Explicit ``symmetry``
-        and ``sparsity`` arguments take precedence when supplied.
+        Circuit providing heuristic metrics.  Explicit ``symmetry``,
+        ``sparsity`` and ``rotation_diversity`` arguments take precedence when
+        supplied.
     allow_tableau:
         If ``True`` and the gate sequence is Clifford-only, include
         :class:`Backend.TABLEAU` as a candidate.  When ``False`` the tableau
@@ -210,6 +212,8 @@ def _supported_backends(
             symmetry = getattr(circuit, "symmetry", None)
         if sparsity is None:
             sparsity = getattr(circuit, "sparsity", None)
+        if rotation_diversity is None:
+            rotation_diversity = getattr(circuit, "rotation_diversity", None)
 
     gates = list(gates)
     names = [g.gate.upper() for g in gates]
@@ -225,11 +229,14 @@ def _supported_backends(
 
     sym = symmetry if symmetry is not None else 0.0
     sparse = sparsity if sparsity is not None else 0.0
+    rot = rotation_diversity if rotation_diversity is not None else 0
     score = (
         config.DEFAULT.dd_symmetry_weight * sym
         + config.DEFAULT.dd_sparsity_weight * sparse
     )
     dd_metric = score >= config.DEFAULT.dd_metric_threshold
+    if rot > config.DEFAULT.dd_rotation_diversity_threshold:
+        dd_metric = False
 
     mps_metric = False
     if estimator is not None and all(len(g.qubits) <= 2 for g in gates):
@@ -406,19 +413,25 @@ class Planner:
         allow_tableau: bool = True,
         symmetry: float | None = None,
         sparsity: float | None = None,
+        rotation_diversity: int | None = None,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning.
 
         When ``forced_backend`` is provided only that backend is considered
         during planning.  A ``ValueError`` is raised if the backend cannot
-        simulate a segment of the circuit.  ``symmetry`` and ``sparsity`` are
-        forwarded to :func:`_supported_backends`.
+        simulate a segment of the circuit.  ``symmetry``, ``sparsity`` and
+        ``rotation_diversity`` are forwarded to :func:`_supported_backends`.
         """
         dd_metric = False
         if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
             dd_metric = True
         if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
             dd_metric = True
+        if (
+            rotation_diversity is not None
+            and rotation_diversity > config.DEFAULT.dd_rotation_diversity_threshold
+        ):
+            dd_metric = False
 
         n = len(gates)
         if n == 0:
@@ -473,6 +486,7 @@ class Planner:
                         segment,
                         symmetry=symmetry,
                         sparsity=sparsity,
+                        rotation_diversity=rotation_diversity,
                         allow_tableau=allow_tableau,
                         estimator=self.estimator,
                         max_memory=max_memory,
@@ -656,6 +670,7 @@ class Planner:
         *,
         symmetry: float | None = None,
         sparsity: float | None = None,
+        rotation_diversity: int | None = None,
         allow_tableau: bool = True,
     ) -> Tuple[Backend, Cost]:
         """Return best single-backend estimate for the full gate list.
@@ -668,6 +683,8 @@ class Planner:
             Optional memory threshold.
         symmetry, sparsity:
             Optional heuristic metrics for the overall circuit.
+        rotation_diversity:
+            Optional count of distinct rotation angles used by the circuit.
         allow_tableau:
             Propagate the circuit-level Clifford check.  When ``False`` the
             tableau backend is never considered even if ``gates`` are
@@ -689,11 +706,17 @@ class Planner:
             dd_metric = True
         if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
             dd_metric = True
+        if (
+            rotation_diversity is not None
+            and rotation_diversity > config.DEFAULT.dd_rotation_diversity_threshold
+        ):
+            dd_metric = False
         backends = self._order_backends(
             _supported_backends(
                 gates,
                 symmetry=symmetry,
                 sparsity=sparsity,
+                rotation_diversity=rotation_diversity,
                 allow_tableau=allow_tableau,
                 estimator=self.estimator,
                 max_memory=max_memory,
@@ -804,6 +827,7 @@ class Planner:
             threshold,
             symmetry=circuit.symmetry,
             sparsity=circuit.sparsity,
+            rotation_diversity=circuit.rotation_diversity,
             allow_tableau=allow_tableau,
         )
 
@@ -849,6 +873,7 @@ class Planner:
             allow_tableau=allow_tableau,
             symmetry=circuit.symmetry,
             sparsity=circuit.sparsity,
+            rotation_diversity=circuit.rotation_diversity,
         )
         pre_cost = (
             pre.table[-1][pre.final_backend].cost if pre.table else Cost(0.0, 0.0)
@@ -886,6 +911,7 @@ class Planner:
             allow_tableau=allow_tableau,
             symmetry=circuit.symmetry,
             sparsity=circuit.sparsity,
+            rotation_diversity=circuit.rotation_diversity,
         )
 
         dp_cost = (
@@ -943,6 +969,7 @@ class Planner:
                 allow_tableau=allow_tableau,
                 symmetry=circuit.symmetry,
                 sparsity=circuit.sparsity,
+                rotation_diversity=circuit.rotation_diversity,
             )
             for sub_step in sub.steps:
                 refined_steps.append(

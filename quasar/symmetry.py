@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from collections import Counter
 
+
+PHASE_GATES = {"RZ", "P", "PHASE", "CP", "CRZ"}
+
 from .circuit import Circuit
 
 
@@ -37,3 +40,42 @@ def symmetry_score(circuit: Circuit) -> float:
     counts = Counter(signatures)
     repeats = sum(1 for c in counts.values() if c > 1)
     return min(repeats / circuit.depth, 1.0)
+
+
+def rotation_diversity(circuit: Circuit) -> int:
+    """Count distinct rotation parameters for phase-type gates.
+
+    The heuristic scans ``circuit`` for phase and Z-rotation gates, gathering
+    the numeric rotation parameters they apply.  The returned value is the
+    number of unique parameters encountered, providing a rough measure of how
+    many different phase angles the circuit uses.
+
+    Parameters
+    ----------
+    circuit:
+        Circuit to analyse.
+
+    Returns
+    -------
+    int
+        Number of distinct rotation parameters across all phase-type gates.
+    """
+
+    values = set()
+    for gate in circuit.gates:
+        name = gate.gate.upper()
+        if name not in PHASE_GATES:
+            continue
+        val = None
+        if name == "CP":
+            param = gate.params.get("k")
+            if isinstance(param, (int, float)):
+                val = float(param)
+        else:
+            for param in gate.params.values():
+                if isinstance(param, (int, float)):
+                    val = float(param)
+                    break
+        if val is not None:
+            values.add(round(val, 12))
+    return len(values)

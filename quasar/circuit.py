@@ -50,8 +50,9 @@ class Circuit:
         self.cost_estimates = self._estimate_costs()
         from .sparsity import sparsity_estimate
         self.sparsity = sparsity_estimate(self)
-        from .symmetry import symmetry_score
+        from .symmetry import symmetry_score, rotation_diversity
         self.symmetry = symmetry_score(self)
+        self.rotation_diversity = rotation_diversity(self)
 
     # ------------------------------------------------------------------
     # Construction helpers

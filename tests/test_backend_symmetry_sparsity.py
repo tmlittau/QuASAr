@@ -29,6 +29,19 @@ def test_qft_selects_decision_diagram_via_symmetry(monkeypatch):
     assert part.backend == Backend.DECISION_DIAGRAM
 
 
+def test_qft_rotation_diversity_suppresses_dd(monkeypatch):
+    circ = qft_circuit(5)
+    assert circ.rotation_diversity > 3
+    monkeypatch.setattr(config.DEFAULT, "dd_symmetry_weight", 2.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_sparsity_weight", 0.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 0.5)
+    monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 3)
+    scheduler = Scheduler()
+    scheduler.prepare_run(circ)
+    part = circ.ssd.partitions[0]
+    assert part.backend == Backend.STATEVECTOR
+
+
 def test_random_circuit_stays_statevector_when_metrics_low():
     circ = random_circuit(5, seed=123)
     assert circ.sparsity < DEFAULT.dd_sparsity_threshold
