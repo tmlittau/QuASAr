@@ -40,11 +40,20 @@ def compute_baseline_best(
         raise ValueError("no baseline entries in results")
 
     group_cols = [c for c in ("circuit", "qubits") if c in df.columns]
-    mins = (
-        baselines.groupby(group_cols)[list(metrics)]
-        .min()
-        .reset_index()
-    )
+    rows: list[dict[str, object]] = []
+    for keys, group in baselines.groupby(group_cols):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        row = dict(zip(group_cols, keys))
+        for metric in metrics:
+            idx = group[metric].idxmin()
+            row[metric] = group.loc[idx, metric]
+            std_col = metric.replace("_mean", "_std")
+            if std_col in group.columns:
+                row[std_col] = group.loc[idx, std_col]
+        rows.append(row)
+
+    mins = pd.DataFrame(rows)
     mins["framework"] = "baseline_best"
     return mins
 
@@ -87,18 +96,39 @@ def plot_quasar_vs_baseline_best(
         unsupported = df.iloc[0:0]
 
     x_col = "qubits" if "qubits" in df.columns else "circuit"
-    ax.plot(
-        baseline_best[x_col],
-        baseline_best[metric],
-        marker="o",
-        label="baseline_best",
-    )
+    std_col = metric.replace("_mean", "_std")
+
+    if std_col in baseline_best.columns:
+        ax.errorbar(
+            baseline_best[x_col],
+            baseline_best[metric],
+            yerr=baseline_best[std_col],
+            fmt="o",
+            label="baseline_best",
+        )
+    else:
+        ax.plot(
+            baseline_best[x_col],
+            baseline_best[metric],
+            marker="o",
+            label="baseline_best",
+        )
+
     ax.plot(
         quasar[x_col],
         quasar[metric],
         marker="o",
         label="QuASAr",
     )
+    if std_col in quasar.columns:
+        sub = quasar.sort_values(x_col)
+        ax.fill_between(
+            sub[x_col],
+            sub[metric] - sub[std_col],
+            sub[metric] + sub[std_col],
+            alpha=0.2,
+        )
+
     if not unsupported.empty:
         ax.scatter(
             unsupported[x_col],
