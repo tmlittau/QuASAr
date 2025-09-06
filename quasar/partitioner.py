@@ -56,16 +56,38 @@ class Partitioner:
         current_backend: Backend | None = None
         current_cost: Cost | None = None
 
-        symmetry = getattr(circuit, "symmetry", None)
         sparsity = getattr(circuit, "sparsity", None)
         rotation = getattr(circuit, "rotation_diversity", None)
+        from .sparsity import adaptive_dd_sparsity_threshold, sparsity_estimate
+        from .symmetry import rotation_diversity as rot_div
+        if sparsity is None:
+            sparsity = sparsity_estimate(circuit)
+        if rotation is None:
+            rotation = rot_div(circuit)
+        nnz_estimate = int((1 - sparsity) * (2 ** circuit.num_qubits))
+        s_thresh = adaptive_dd_sparsity_threshold(circuit.num_qubits)
+        passes = (
+            sparsity >= s_thresh
+            and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
+            and rotation <= config.DEFAULT.dd_rotation_diversity_threshold
+        )
         dd_metric = False
-        if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
-            dd_metric = True
-        if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
-            dd_metric = True
-        if rotation is not None and rotation > config.DEFAULT.dd_rotation_diversity_threshold:
-            dd_metric = False
+        if passes:
+            s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
+            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
+            rot_score = 1 - rotation / config.DEFAULT.dd_rotation_diversity_threshold
+            weight_sum = (
+                config.DEFAULT.dd_sparsity_weight
+                + config.DEFAULT.dd_nnz_weight
+                + config.DEFAULT.dd_rotation_weight
+            )
+            weighted = (
+                config.DEFAULT.dd_sparsity_weight * s_score
+                + config.DEFAULT.dd_nnz_weight * nnz_score
+                + config.DEFAULT.dd_rotation_weight * rot_score
+            )
+            metric = weighted / weight_sum if weight_sum else 0.0
+            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
 
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]

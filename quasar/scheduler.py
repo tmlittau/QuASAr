@@ -136,26 +136,44 @@ class Scheduler:
         if names and all(name in CLIFFORD_GATES for name in names):
             return Backend.TABLEAU
 
-        symmetry = getattr(circuit, "symmetry", None)
         sparsity = getattr(circuit, "sparsity", None)
         rotation = getattr(circuit, "rotation_diversity", None)
-        if symmetry is None or sparsity is None or rotation is None:
-            from .symmetry import symmetry_score, rotation_diversity
-            from .sparsity import sparsity_estimate
+        if sparsity is None or rotation is None:
+            from .sparsity import sparsity_estimate, adaptive_dd_sparsity_threshold
+            from .symmetry import rotation_diversity
 
-            if symmetry is None:
-                symmetry = symmetry_score(circuit)
             if sparsity is None:
                 sparsity = sparsity_estimate(circuit)
             if rotation is None:
                 rotation = rotation_diversity(circuit)
+        else:
+            from .sparsity import adaptive_dd_sparsity_threshold
 
-        dd_metric = (
-            symmetry >= config.DEFAULT.dd_symmetry_threshold
-            or sparsity >= config.DEFAULT.dd_sparsity_threshold
+        nnz_estimate = int((1 - sparsity) * (2 ** num_qubits))
+        s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+        passes = (
+            sparsity >= s_thresh
+            and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
+            and rotation <= config.DEFAULT.dd_rotation_diversity_threshold
         )
-        if rotation is not None and rotation > config.DEFAULT.dd_rotation_diversity_threshold:
-            dd_metric = False
+
+        dd_metric = False
+        if passes:
+            s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
+            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
+            rot_score = 1 - rotation / config.DEFAULT.dd_rotation_diversity_threshold
+            weight_sum = (
+                config.DEFAULT.dd_sparsity_weight
+                + config.DEFAULT.dd_nnz_weight
+                + config.DEFAULT.dd_rotation_weight
+            )
+            weighted = (
+                config.DEFAULT.dd_sparsity_weight * s_score
+                + config.DEFAULT.dd_nnz_weight * nnz_score
+                + config.DEFAULT.dd_rotation_weight * rot_score
+            )
+            metric = weighted / weight_sum if weight_sum else 0.0
+            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
 
         multi = [g for g in circuit.gates if len(g.qubits) > 1]
         local = multi and all(

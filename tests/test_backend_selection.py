@@ -1,5 +1,6 @@
 from benchmarks.circuits import ghz_circuit, qft_circuit, w_state_circuit
-from quasar import Backend, CostEstimator, SimulationEngine
+from quasar import Backend, SimulationEngine
+from quasar.cost import CostEstimator
 import quasar.config as config
 
 
@@ -24,7 +25,6 @@ def test_planner_selects_mps_for_qft():
 
 def test_planner_selects_dd_when_sparsity_weighted(monkeypatch):
     circuit = w_state_circuit(5)
-    monkeypatch.setattr(config.DEFAULT, "dd_symmetry_weight", 0.0)
     monkeypatch.setattr(config.DEFAULT, "dd_sparsity_weight", 1.2)
     monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 0.9)
     engine = SimulationEngine()
@@ -65,11 +65,11 @@ def test_memory_threshold_limits_mps(monkeypatch):
 
 def test_rotation_diversity_discourages_dd(monkeypatch):
     circuit = qft_circuit(5)
-    monkeypatch.setattr(config.DEFAULT, "dd_symmetry_weight", 2.0)
-    monkeypatch.setattr(config.DEFAULT, "dd_sparsity_weight", 0.0)
-    monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 0.5)
+    monkeypatch.setattr(config.DEFAULT, "dd_sparsity_threshold", 0.0)
+    monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 10_000_000)
     monkeypatch.setattr(config.DEFAULT, "dd_rotation_diversity_threshold", 3)
     engine = SimulationEngine()
     plan = engine.planner.plan(circuit)
     assert plan.final_backend == Backend.STATEVECTOR
     assert Backend.DECISION_DIAGRAM not in {s.backend for s in plan.steps}
+

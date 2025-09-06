@@ -173,7 +173,6 @@ def _better(a: Cost, b: Cost) -> bool:
 def _supported_backends(
     gates: Iterable[Gate],
     *,
-    symmetry: float | None = None,
     sparsity: float | None = None,
     circuit: "Circuit" | None = None,
     rotation_diversity: int | None = None,
@@ -187,12 +186,11 @@ def _supported_backends(
     ----------
     gates:
         Gate sequence under consideration.
-    symmetry, sparsity:
-        Optional heuristic metrics for the overall circuit.
+    sparsity:
+        Optional sparsity metric for the overall circuit.
     circuit:
-        Circuit providing heuristic metrics.  Explicit ``symmetry``,
-        ``sparsity`` and ``rotation_diversity`` arguments take precedence when
-        supplied.
+        Circuit providing heuristic metrics.  Explicit ``sparsity`` and
+        ``rotation_diversity`` arguments take precedence when supplied.
     allow_tableau:
         If ``True`` and the gate sequence is Clifford-only, include
         :class:`Backend.TABLEAU` as a candidate.  When ``False`` the tableau
@@ -208,8 +206,6 @@ def _supported_backends(
     """
 
     if circuit is not None:
-        if symmetry is None:
-            symmetry = getattr(circuit, "symmetry", None)
         if sparsity is None:
             sparsity = getattr(circuit, "sparsity", None)
         if rotation_diversity is None:
@@ -227,16 +223,34 @@ def _supported_backends(
 
     candidates: List[Backend] = []
 
-    sym = symmetry if symmetry is not None else 0.0
     sparse = sparsity if sparsity is not None else 0.0
     rot = rotation_diversity if rotation_diversity is not None else 0
-    score = (
-        config.DEFAULT.dd_symmetry_weight * sym
-        + config.DEFAULT.dd_sparsity_weight * sparse
+    nnz = int((1 - sparse) * (2 ** num_qubits))
+    from .sparsity import adaptive_dd_sparsity_threshold
+
+    s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+    passes = (
+        sparse >= s_thresh
+        and nnz <= config.DEFAULT.dd_nnz_threshold
+        and rot <= config.DEFAULT.dd_rotation_diversity_threshold
     )
-    dd_metric = score >= config.DEFAULT.dd_metric_threshold
-    if rot > config.DEFAULT.dd_rotation_diversity_threshold:
-        dd_metric = False
+    dd_metric = False
+    if passes:
+        s_score = sparse / s_thresh if s_thresh > 0 else 0.0
+        nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
+        rot_score = 1 - rot / config.DEFAULT.dd_rotation_diversity_threshold
+        weight_sum = (
+            config.DEFAULT.dd_sparsity_weight
+            + config.DEFAULT.dd_nnz_weight
+            + config.DEFAULT.dd_rotation_weight
+        )
+        weighted = (
+            config.DEFAULT.dd_sparsity_weight * s_score
+            + config.DEFAULT.dd_nnz_weight * nnz_score
+            + config.DEFAULT.dd_rotation_weight * rot_score
+        )
+        metric = weighted / weight_sum if weight_sum else 0.0
+        dd_metric = metric >= config.DEFAULT.dd_metric_threshold
 
     mps_metric = False
     if estimator is not None and all(len(g.qubits) <= 2 for g in gates):
@@ -419,19 +433,41 @@ class Planner:
 
         When ``forced_backend`` is provided only that backend is considered
         during planning.  A ``ValueError`` is raised if the backend cannot
-        simulate a segment of the circuit.  ``symmetry``, ``sparsity`` and
+        simulate a segment of the circuit.  ``sparsity`` and
         ``rotation_diversity`` are forwarded to :func:`_supported_backends`.
         """
+        from .sparsity import adaptive_dd_sparsity_threshold
+        nnz_estimate = None
+        if sparsity is not None:
+            nnz_estimate = int((1 - sparsity) * (2 ** len({q for g in gates for q in g.qubits})))
+        s_thresh = adaptive_dd_sparsity_threshold(len({q for g in gates for q in g.qubits}))
+        passes = (
+            (sparsity is not None and sparsity >= s_thresh)
+            and (nnz_estimate is not None and nnz_estimate <= config.DEFAULT.dd_nnz_threshold)
+            and (
+                rotation_diversity is None
+                or rotation_diversity <= config.DEFAULT.dd_rotation_diversity_threshold
+            )
+        )
         dd_metric = False
-        if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
-            dd_metric = True
-        if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
-            dd_metric = True
-        if (
-            rotation_diversity is not None
-            and rotation_diversity > config.DEFAULT.dd_rotation_diversity_threshold
-        ):
-            dd_metric = False
+        if passes:
+            s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
+            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
+            rot_score = 1 - (
+                (rotation_diversity or 0) / config.DEFAULT.dd_rotation_diversity_threshold
+            )
+            weight_sum = (
+                config.DEFAULT.dd_sparsity_weight
+                + config.DEFAULT.dd_nnz_weight
+                + config.DEFAULT.dd_rotation_weight
+            )
+            weighted = (
+                config.DEFAULT.dd_sparsity_weight * s_score
+                + config.DEFAULT.dd_nnz_weight * nnz_score
+                + config.DEFAULT.dd_rotation_weight * rot_score
+            )
+            metric = weighted / weight_sum if weight_sum else 0.0
+            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
 
         n = len(gates)
         if n == 0:
@@ -484,7 +520,6 @@ class Planner:
                 backends = self._order_backends(
                     _supported_backends(
                         segment,
-                        symmetry=symmetry,
                         sparsity=sparsity,
                         rotation_diversity=rotation_diversity,
                         allow_tableau=allow_tableau,
@@ -668,7 +703,6 @@ class Planner:
         gates: List["Gate"],
         max_memory: float | None,
         *,
-        symmetry: float | None = None,
         sparsity: float | None = None,
         rotation_diversity: int | None = None,
         allow_tableau: bool = True,
@@ -701,20 +735,34 @@ class Planner:
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
+        from .sparsity import adaptive_dd_sparsity_threshold
+        nnz_estimate = int((1 - (sparsity or 0.0)) * (2 ** num_qubits))
+        s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+        passes = (
+            (sparsity or 0.0) >= s_thresh
+            and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
+            and (rotation_diversity or 0) <= config.DEFAULT.dd_rotation_diversity_threshold
+        )
         dd_metric = False
-        if symmetry is not None and symmetry >= config.DEFAULT.dd_symmetry_threshold:
-            dd_metric = True
-        if sparsity is not None and sparsity >= config.DEFAULT.dd_sparsity_threshold:
-            dd_metric = True
-        if (
-            rotation_diversity is not None
-            and rotation_diversity > config.DEFAULT.dd_rotation_diversity_threshold
-        ):
-            dd_metric = False
+        if passes:
+            s_score = (sparsity or 0.0) / s_thresh if s_thresh > 0 else 0.0
+            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
+            rot_score = 1 - (rotation_diversity or 0) / config.DEFAULT.dd_rotation_diversity_threshold
+            weight_sum = (
+                config.DEFAULT.dd_sparsity_weight
+                + config.DEFAULT.dd_nnz_weight
+                + config.DEFAULT.dd_rotation_weight
+            )
+            weighted = (
+                config.DEFAULT.dd_sparsity_weight * s_score
+                + config.DEFAULT.dd_nnz_weight * nnz_score
+                + config.DEFAULT.dd_rotation_weight * rot_score
+            )
+            metric = weighted / weight_sum if weight_sum else 0.0
+            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
         backends = self._order_backends(
             _supported_backends(
                 gates,
-                symmetry=symmetry,
                 sparsity=sparsity,
                 rotation_diversity=rotation_diversity,
                 allow_tableau=allow_tableau,
@@ -825,7 +873,6 @@ class Planner:
         single_backend_choice, single_cost = self._single_backend(
             gates,
             threshold,
-            symmetry=circuit.symmetry,
             sparsity=circuit.sparsity,
             rotation_diversity=circuit.rotation_diversity,
             allow_tableau=allow_tableau,
@@ -871,7 +918,6 @@ class Planner:
             batch_size=pre_batch,
             max_memory=threshold,
             allow_tableau=allow_tableau,
-            symmetry=circuit.symmetry,
             sparsity=circuit.sparsity,
             rotation_diversity=circuit.rotation_diversity,
         )
@@ -909,7 +955,6 @@ class Planner:
             batch_size=self.batch_size,
             max_memory=threshold,
             allow_tableau=allow_tableau,
-            symmetry=circuit.symmetry,
             sparsity=circuit.sparsity,
             rotation_diversity=circuit.rotation_diversity,
         )
@@ -967,7 +1012,6 @@ class Planner:
                 batch_size=1,
                 max_memory=threshold,
                 allow_tableau=allow_tableau,
-                symmetry=circuit.symmetry,
                 sparsity=circuit.sparsity,
                 rotation_diversity=circuit.rotation_diversity,
             )
