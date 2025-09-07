@@ -209,6 +209,102 @@ def test_lw_gate_counts_increase_time():
     assert with_gates.cost.time > base.cost.time
 
 
+def test_b2b_svd_memory_overhead():
+    coeff = {
+        "ingest_mps": 0.0,
+        "conversion_base": 0.0,
+        "lw_extract": 100.0,
+        "full_extract": 100.0,
+        "st_stage": 100.0,
+    }
+    base_est = CostEstimator(coeff=coeff)
+    base = base_est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=2,
+        rank=2,
+        frontier=0,
+        window=2,
+    )
+    coeff_mem = dict(coeff)
+    coeff_mem["b2b_svd_mem"] = 2.0
+    est = CostEstimator(coeff=coeff_mem)
+    with_mem = est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=2,
+        rank=2,
+        frontier=0,
+        window=2,
+    )
+    assert with_mem.primitive == "B2B"
+    assert with_mem.cost.memory == base.cost.memory + 2.0 * 4
+
+
+def test_lw_temp_memory_overhead():
+    coeff = {
+        "b2b_svd": 100.0,
+        "b2b_copy": 100.0,
+        "st_stage": 100.0,
+        "full_extract": 100.0,
+        "ingest_mps": 0.0,
+        "conversion_base": 0.0,
+    }
+    base_est = CostEstimator(coeff=coeff)
+    base = base_est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=2,
+        rank=4,
+        frontier=0,
+        window=2,
+    )
+    coeff_mem = dict(coeff)
+    coeff_mem["lw_temp_mem"] = 2.0
+    est = CostEstimator(coeff=coeff_mem)
+    with_mem = est.conversion(
+        Backend.TABLEAU,
+        Backend.MPS,
+        num_qubits=2,
+        rank=4,
+        frontier=0,
+        window=2,
+    )
+    assert with_mem.primitive == "LW"
+    assert with_mem.cost.memory == base.cost.memory + 2.0 * 4
+
+
+def test_dd_ingest_memory_overhead():
+    coeff = {
+        "ingest_dd": 0.0,
+        "b2b_svd": 1.0,
+        "b2b_copy": 1.0,
+        "lw_extract": 100.0,
+        "st_stage": 100.0,
+        "full_extract": 100.0,
+        "conversion_base": 0.0,
+    }
+    base_est = CostEstimator(coeff=coeff)
+    base = base_est.conversion(
+        Backend.STATEVECTOR,
+        Backend.DECISION_DIAGRAM,
+        num_qubits=2,
+        rank=2,
+        frontier=1,
+    )
+    coeff_mem = dict(coeff)
+    coeff_mem["ingest_dd_mem"] = 2.0
+    est = CostEstimator(coeff=coeff_mem)
+    with_mem = est.conversion(
+        Backend.STATEVECTOR,
+        Backend.DECISION_DIAGRAM,
+        num_qubits=2,
+        rank=2,
+        frontier=1,
+    )
+    assert with_mem.cost.memory == base.cost.memory + 2.0 * 4
+
+
 def test_conversion_caps():
     est = CostEstimator(q_max=2, r_max=2, s_max=4)
     res = est.conversion(

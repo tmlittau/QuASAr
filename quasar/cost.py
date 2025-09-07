@@ -108,7 +108,9 @@ class CostEstimator:
             # Conversion primitives
             "b2b_svd": 1.0,
             "b2b_copy": 1.0,
+            "b2b_svd_mem": 0.0,
             "lw_extract": 1.0,
+            "lw_temp_mem": 0.0,
             "st_stage": 1.0,
             "full_extract": 1.0,
             "st_chi_cap": 16.0,
@@ -117,6 +119,10 @@ class CostEstimator:
             "ingest_tab": 2.0,
             "ingest_mps": 2.0,
             "ingest_dd": 2.0,
+            "ingest_sv_mem": 0.0,
+            "ingest_tab_mem": 0.0,
+            "ingest_mps_mem": 0.0,
+            "ingest_dd_mem": 0.0,
             # Fixed overhead applied to every backend switch
             "conversion_base": 5.0,
         }
@@ -494,6 +500,7 @@ class CostEstimator:
 
         full = 2**num_qubits
         ingest_time = self.coeff[f"ingest_{target.value}"] * full
+        ingest_mem = self.coeff.get(f"ingest_{target.value}_mem", 0.0) * full
         base_time = self.coeff.get("conversion_base", 0.0)
         overhead = ingest_time + base_time
 
@@ -504,7 +511,8 @@ class CostEstimator:
             + self.coeff["b2b_copy"] * num_qubits * (rank**2)
             + overhead
         )
-        b2b_mem = max(num_qubits * rank**2, full)
+        svd_mem = self.coeff.get("b2b_svd_mem", 0.0) * (rank**2)
+        b2b_mem = max(num_qubits * rank**2 + svd_mem, full) + ingest_mem
 
         # --- LW primitive ---
         w = window if window is not None else min(num_qubits, 4)
@@ -514,17 +522,18 @@ class CostEstimator:
             + self.coeff["sv_gate_2q"] * window_2q_gates
         )
         lw_time = self.coeff["lw_extract"] * dense + gate_time * dense + overhead
-        lw_mem = max(dense, full)
+        temp_mem = self.coeff.get("lw_temp_mem", 0.0) * dense
+        lw_mem = max(dense + temp_mem, full) + ingest_mem
 
         # --- ST primitive ---
         chi_cap = int(self.coeff.get("st_chi_cap", 16)) or 16
         chi_tilde = min(rank, chi_cap)
         st_time = self.coeff["st_stage"] * (chi_tilde**3) + overhead
-        st_mem = max(num_qubits * (chi_tilde**2), full)
+        st_mem = max(num_qubits * (chi_tilde**2), full) + ingest_mem
 
         # --- Full extraction primitive ---
         full_time = self.coeff["full_extract"] * full + overhead
-        full_mem = full
+        full_mem = full + ingest_mem
 
         candidates = {
             "B2B": (b2b_time, b2b_mem),
