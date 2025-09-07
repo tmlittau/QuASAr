@@ -38,6 +38,24 @@ phases as well as their sum:
 - For QuASAr runs, **backend** – the simulator backend selected by the
   scheduler.
 
+### Timing semantics
+
+The recorded times capture only backend execution and the minimal preparation
+steps that occur after a plan has been produced. Circuit analysis, planning,
+and method selection are completed before timing begins for both forced and
+automatically selected runs.
+
+When a backend is forced, the scheduler honours the requested simulator but
+the measurement window remains the same—it excludes planning and records just
+the chosen backend's execution. In automatic mode, the scheduler picks a
+backend prior to the timed region.
+
+Quick‑path shortcuts (`quick=True` or the `QUASAR_QUICK_*` environment
+variables) bypass planning entirely. In auto‑selection mode the scheduler uses
+simple heuristics; in forced mode the specified backend runs immediately. These
+shortcuts reduce overall wall‑clock time but the reported `run_time` still
+reflects only the backend's execution.
+
 
 
 ## Comparing with baseline backends
