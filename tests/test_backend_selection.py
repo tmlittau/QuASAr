@@ -1,5 +1,6 @@
 from benchmarks.circuits import ghz_circuit, qft_circuit, w_state_circuit
 from quasar import Backend, SimulationEngine
+from quasar.circuit import Circuit
 from quasar.planner import Planner
 from quasar.cost import CostEstimator
 import quasar.config as config
@@ -74,4 +75,14 @@ def test_rotation_diversity_discourages_dd(monkeypatch):
     plan = engine.planner.plan(circuit)
     assert plan.final_backend == Backend.STATEVECTOR
     assert Backend.DECISION_DIAGRAM not in {s.backend for s in plan.steps}
+
+
+def test_planner_selects_tableau_for_classically_simplified_qft():
+    unsimplified = qft_circuit(3)
+    circuit = Circuit(unsimplified.gates, use_classical_simplification=True)
+    assert [g.gate for g in circuit.gates] == ["H", "H", "H"]
+    engine = SimulationEngine()
+    plan = engine.planner.plan(circuit)
+    assert plan.final_backend == Backend.TABLEAU
+    assert {s.backend for s in plan.steps} == {Backend.TABLEAU}
 
