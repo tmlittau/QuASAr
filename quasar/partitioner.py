@@ -271,43 +271,32 @@ class Partitioner:
             cost = self.estimator.tableau(num_qubits, num_gates)
             return backend, cost
 
-        if dd_metric:
-            backend = Backend.DECISION_DIAGRAM
-            cost = self.estimator.decision_diagram(
-                num_gates=num_gates, frontier=num_qubits
-            )
-            return backend, cost
-
-        if num_qubits < 20:
-            backend = Backend.STATEVECTOR
-            cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
-            return backend, cost
-
         multi = [g for g in gates if len(g.qubits) > 1]
         local = multi and all(
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
 
-        if num_gates <= 2 ** num_qubits and not local:
-            backend = Backend.DECISION_DIAGRAM
-            cost = self.estimator.decision_diagram(
+        candidates: List[Tuple[Backend, Cost]] = []
+        # Candidate costs computed using calibrated coefficients.
+        if dd_metric:
+            dd_cost = self.estimator.decision_diagram(
                 num_gates=num_gates, frontier=num_qubits
             )
-            return backend, cost
-
+            candidates.append((Backend.DECISION_DIAGRAM, dd_cost))
         if local:
-            backend = Backend.MPS
-            cost = self.estimator.mps(
+            mps_cost = self.estimator.mps(
                 num_qubits,
                 num_1q + num_meas,
                 num_2q,
                 chi=4,
                 svd=True,
             )
-            return backend, cost
+            candidates.append((Backend.MPS, mps_cost))
+        sv_cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+        candidates.append((Backend.STATEVECTOR, sv_cost))
 
-        backend = Backend.STATEVECTOR
-        cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+        # Selection leverages calibrated coefficients for realism.
+        backend, cost = min(candidates, key=lambda bc: (bc[1].memory, bc[1].time))
         return backend, cost
 
     # ------------------------------------------------------------------
