@@ -32,7 +32,7 @@ def test_conversion_layer_inserted(monkeypatch):
 
     conv = ssd.conversions[0]
     assert conv.source == Backend.TABLEAU
-    assert conv.target == Backend.MPS
+    assert conv.target == Backend.DECISION_DIAGRAM
     assert set(conv.boundary) == {0, 1, 2, 3, 4}
     assert conv.cost.time > 0
 
