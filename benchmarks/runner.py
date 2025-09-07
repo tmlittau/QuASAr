@@ -298,8 +298,10 @@ class BenchmarkRunner:
 
         Planning is performed prior to measurement so that only gate execution
         reported by :meth:`quasar.scheduler.Scheduler.run` contributes to the
-        recorded runtime.  Both phases are wrapped with :mod:`tracemalloc` to
-        also capture peak memory usage.  ``engine`` may either be a
+        recorded runtime.  Planning is profiled using :mod:`tracemalloc` while
+        execution relies on the ``Cost`` object returned from a single
+        ``scheduler.run(..., instrument=True)`` invocation.  ``engine`` may
+        either be a
         :class:`~quasar.scheduler.Scheduler` or an object providing
         ``scheduler`` and ``planner`` attributes (e.g.,
         :class:`~quasar.simulation_engine.SimulationEngine`).  The optional
@@ -373,20 +375,9 @@ class BenchmarkRunner:
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
 
-                original_ssd = copy.deepcopy(getattr(circuit, "ssd", None))
-                inst_start = time.perf_counter()
-                _, inst_cost = scheduler.run(circuit, plan, instrument=True)
-                prepare_time += time.perf_counter() - inst_start
-                prepare_peak_memory = max(prepare_peak_memory, int(inst_cost.memory))
-                if original_ssd is not None:
-                    circuit.ssd = copy.deepcopy(original_ssd)
-
-                tracemalloc.start()
-                start_run = time.perf_counter()
-                result = scheduler.run(circuit, plan, instrument=False)
-                run_time = time.perf_counter() - start_run
-                _, run_peak_memory = tracemalloc.get_traced_memory()
-                tracemalloc.stop()
+                result, run_cost = scheduler.run(circuit, plan, instrument=True)
+                run_time = run_cost.time
+                run_peak_memory = int(run_cost.memory)
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))

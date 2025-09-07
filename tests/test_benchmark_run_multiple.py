@@ -352,9 +352,24 @@ class RunErrorScheduler:
         ]), Cost(time=0.0, memory=0.0)
 
 
+class RunFailScheduler:
+    def __init__(self):
+        class Planner:
+            def plan(self, circuit, *, backend=None):
+                return PlanResult(table=[], final_backend=backend, gates=[], explicit_steps=[], explicit_conversions=[], step_costs=[])
+
+        self.planner = Planner()
+
+    def prepare_run(self, circuit, plan=None, *, backend=None):
+        return plan
+
+    def run(self, circuit, plan, *, monitor=None, instrument=False):
+        raise ValueError("run boom")
+
+
 def test_run_quasar_returns_failure_record_on_run_error():
     runner = BenchmarkRunner()
-    scheduler = RunErrorScheduler()
+    scheduler = RunFailScheduler()
     record = runner.run_quasar(None, scheduler)
     assert record["failed"] is True
     assert "run boom" in record["error"]
