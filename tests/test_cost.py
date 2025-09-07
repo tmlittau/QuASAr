@@ -141,6 +141,25 @@ def test_decision_diagram_small_frontier_linear():
     assert c2.memory == 2 * c1.memory
 
 
+def test_decision_diagram_gate_complexity_scaling():
+    est = CostEstimator()
+    c1 = est.decision_diagram(num_gates=5, frontier=8)
+    c2 = est.decision_diagram(num_gates=20, frontier=8)
+    ratio_mem = math.log2(21) / math.log2(6)
+    ratio_time = (20 * math.log2(21)) / (5 * math.log2(6))
+    assert math.isclose(c2.memory, c1.memory * ratio_mem)
+    assert math.isclose(c2.time, c1.time * ratio_time)
+
+
+def test_decision_diagram_memory_coefficients():
+    est = CostEstimator(coeff={"dd_node_bytes": 2.0, "dd_cache_overhead": 1.0})
+    cost = est.decision_diagram(num_gates=10, frontier=4)
+    active = 4 * math.log2(4)
+    nodes = active * math.log2(11)
+    expected = nodes * 2.0
+    expected += expected  # cache overhead of 1.0 doubles the table
+    assert math.isclose(cost.memory, expected)
+
 def test_conversion_primitive_selection():
     est = CostEstimator(
         coeff={"lw_extract": 10.0, "full_extract": 10.0, "st_stage": 10.0}

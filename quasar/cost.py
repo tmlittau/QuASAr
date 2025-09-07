@@ -103,6 +103,8 @@ class CostEstimator:
             "mps_temp_mem": 1.0,
             "dd_gate": 1.0,
             "dd_mem": 1.0,
+            "dd_node_bytes": 1.0,
+            "dd_cache_overhead": 0.0,
             # Conversion primitives
             "b2b_svd": 1.0,
             "b2b_copy": 1.0,
@@ -414,8 +416,12 @@ class CostEstimator:
     def decision_diagram(self, num_gates: int, frontier: int) -> Cost:
         """Estimate cost for decision diagram simulation.
 
-        The active node count is approximated by ``frontier * log2(frontier)``
-        with a linear fallback for small frontiers.
+        The number of active nodes is approximated by
+        ``frontier * log2(frontier)`` with a linear fallback for small
+        frontiers.  A logarithmic factor in ``num_gates`` models the build-up
+        of the unique table and the cost of occasional reordering or garbage
+        collection passes.  Memory is split between the unique node table and
+        an edge cache, each tunable via calibration coefficients.
         """
 
         threshold = 2
@@ -423,8 +429,16 @@ class CostEstimator:
             active_nodes = frontier
         else:
             active_nodes = frontier * math.log2(frontier)
-        time = self.coeff["dd_gate"] * num_gates * active_nodes
-        memory = self.coeff["dd_mem"] * active_nodes
+
+        gate_factor = math.log2(num_gates + 1)
+        node_count = active_nodes * gate_factor
+
+        time = self.coeff["dd_gate"] * num_gates * node_count
+
+        node_table = node_count * self.coeff.get("dd_node_bytes", 1.0)
+        cache = node_table * self.coeff.get("dd_cache_overhead", 0.0)
+        memory = self.coeff.get("dd_mem", 1.0) * (node_table + cache)
+
         depth = math.log2(frontier) if frontier > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
