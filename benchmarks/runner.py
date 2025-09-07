@@ -415,6 +415,59 @@ class BenchmarkRunner:
         return record
 
     # ------------------------------------------------------------------
+    def setup_quasar(
+        self,
+        circuit: Any,
+        engine: Any,
+        *,
+        backend: Backend | None = None,
+        quick: bool = False,
+    ) -> None:
+        """Perform any setup required before timed QuASAr measurements.
+
+        This runs a single instrumented scheduler invocation to calibrate cost
+        estimates and warm up any backend state.  The circuit's SSD as well as
+        estimator coefficients are restored to their original values so that
+        subsequent measurements are unaffected.
+        """
+
+        scheduler = getattr(engine, "scheduler", engine)
+        planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
+        use_quick = quick
+        should_quick = getattr(scheduler, "should_use_quick_path", None)
+        if callable(should_quick) and circuit is not None:
+            try:
+                use_quick = should_quick(circuit, backend=backend, force=quick)
+            except TypeError:  # pragma: no cover - legacy signature
+                use_quick = should_quick(circuit, backend=backend)
+                if quick:
+                    use_quick = True
+        elif quick:
+            use_quick = True
+
+        if use_quick:
+            return
+
+        if planner is not None:
+            plan = planner.plan(circuit, backend=backend)
+            plan = scheduler.prepare_run(circuit, plan, backend=backend)
+        else:
+            plan = scheduler.prepare_run(circuit, backend=backend)
+
+        original_ssd = (
+            copy.deepcopy(getattr(circuit, "ssd", None)) if circuit is not None else None
+        )
+        est = getattr(planner, "estimator", None)
+        coeff_backup = copy.deepcopy(getattr(est, "coeff", {})) if est else None
+
+        scheduler.run(circuit, plan, instrument=True)
+
+        if est is not None and coeff_backup is not None:
+            est.coeff = coeff_backup
+        if circuit is not None and original_ssd is not None:
+            circuit.ssd = copy.deepcopy(original_ssd)
+
+    # ------------------------------------------------------------------
     def run_quasar_multiple(
         self,
         circuit: Any,
@@ -490,17 +543,8 @@ class BenchmarkRunner:
                         simple_backend = step.backend
                         simple_gates = plan.gates[step.start : step.end]
 
-            expected_backend = getattr(plan, "final_backend", simple_backend)
-            if (
-                simple_backend is None
-                or expected_backend != simple_backend
-            ):
-                scheduler.run(circuit, plan, instrument=True)
-                if est is not None and coeff_backup is not None:
-                    est.coeff = coeff_backup
-            elif est is not None and coeff_backup is not None and est.coeff != coeff_backup:
+            if est is not None and coeff_backup is not None and est.coeff != coeff_backup:
                 est.coeff = coeff_backup
-
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
 
