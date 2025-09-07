@@ -10,6 +10,7 @@ The benchmarks are intentionally lightweight and avoid external
 dependencies.  They serve only as a coarse guide for relative
 performance on the current machine.
 """
+
 from __future__ import annotations
 
 from time import perf_counter
@@ -42,7 +43,8 @@ def benchmark_statevector(num_qubits: int = 8, num_gates: int = 50) -> Dict[str,
         "sv_gate_1q": coeff,
         "sv_gate_2q": coeff,
         "sv_meas": coeff,
-        "sv_mem": 16.0,  # Rough bytes per amplitude for complex128
+        # Rough buffer factor for statevector simulation.
+        "sv_bytes_per_amp": 2.0,
     }
 
 
@@ -88,7 +90,7 @@ def benchmark_dd(num_gates: int = 50, frontier: int = 32) -> Dict[str, float]:
 
 
 def benchmark_b2b(q: int = 6, s: int = 4) -> Dict[str, float]:
-    ops = (s ** 3) + q * (s ** 2)
+    ops = (s**3) + q * (s**2)
     elapsed = _bench_loop(ops)
     coeff = elapsed / ops
     return {"b2b_svd": coeff, "b2b_copy": coeff}
@@ -103,7 +105,7 @@ def benchmark_lw(w: int = 4) -> Dict[str, float]:
 
 def benchmark_st(s: int = 8) -> Dict[str, float]:
     chi = min(s, 16)
-    ops = chi ** 3
+    ops = chi**3
     elapsed = _bench_loop(ops)
     coeff = elapsed / ops
     return {"st_stage": coeff}
@@ -137,7 +139,9 @@ def save_coefficients(path: str | Path, coeff: Dict[str, float]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Calibrate QuASAr cost coefficients")
-    parser.add_argument("--output", "-o", default="coeff.json", help="Destination JSON file")
+    parser.add_argument(
+        "--output", "-o", default="coeff.json", help="Destination JSON file"
+    )
     args = parser.parse_args(argv)
     coeff = run_calibration()
     save_coefficients(args.output, coeff)

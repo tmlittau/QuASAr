@@ -12,6 +12,25 @@ def test_statevector_scaling():
     assert large.log_depth == math.log2(4)
 
 
+def test_statevector_precision_memory():
+    est = CostEstimator()
+    single = est.statevector(
+        num_qubits=3,
+        num_1q_gates=0,
+        num_2q_gates=0,
+        num_meas=0,
+        precision="complex64",
+    )
+    double = est.statevector(
+        num_qubits=3,
+        num_1q_gates=0,
+        num_2q_gates=0,
+        num_meas=0,
+        precision="complex128",
+    )
+    assert double.memory == 2 * single.memory
+
+
 def test_tableau_quadratic():
     est = CostEstimator()
     cost = est.tableau(num_qubits=5, num_gates=2)
@@ -23,8 +42,8 @@ def test_mps_chi_dependence():
     est = CostEstimator()
     chi2 = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=2)
     chi4 = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
-    assert chi4.time == chi2.time * (4 ** 3) / (2 ** 3)
-    assert chi4.memory == chi2.memory * (4 ** 2) / (2 ** 2)
+    assert chi4.time == chi2.time * (4**3) / (2**3)
+    assert chi4.memory == chi2.memory * (4**2) / (2**2)
 
 
 def test_mps_gate_scaling():
@@ -44,7 +63,7 @@ def test_mps_svd_cost():
         chi=4,
         svd=True,
     )
-    assert with_svd.time == base.time + 4 * (4 ** 3) * math.log2(4)
+    assert with_svd.time == base.time + 4 * (4**3) * math.log2(4)
 
 
 def test_decision_diagram_log_scaling():
@@ -67,7 +86,9 @@ def test_decision_diagram_small_frontier_linear():
 
 
 def test_conversion_primitive_selection():
-    est = CostEstimator(coeff={"lw_extract": 10.0, "full_extract": 10.0, "st_stage": 10.0})
+    est = CostEstimator(
+        coeff={"lw_extract": 10.0, "full_extract": 10.0, "st_stage": 10.0}
+    )
     small = est.conversion(
         Backend.TABLEAU,
         Backend.MPS,
