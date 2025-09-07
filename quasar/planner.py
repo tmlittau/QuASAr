@@ -164,10 +164,19 @@ def _add_cost(a: Cost, b: Cost) -> Cost:
     )
 
 
-def _better(a: Cost, b: Cost) -> bool:
-    """Return ``True`` if cost ``a`` is preferable over ``b``."""
+def _better(a: Cost, b: Cost, perf_prio: str = "memory") -> bool:
+    """Return ``True`` if cost ``a`` is preferable over ``b``.
 
-    return (a.time, a.memory) < (b.time, b.memory)
+    The comparison can prioritise either runtime or memory based on
+    ``perf_prio``.  When set to ``"time"`` the original behaviour of
+    comparing ``(time, memory)`` is used.  The default prioritises
+    memory and therefore compares ``(memory, time)``.  Any other value
+    falls back to the memory‑first ordering.
+    """
+
+    if perf_prio == "time":
+        return (a.time, a.memory) < (b.time, b.memory)
+    return (a.memory, a.time) < (b.memory, b.time)
 
 
 def _supported_backends(
@@ -385,6 +394,7 @@ class Planner:
         quick_max_depth: int | None = config.DEFAULT.quick_max_depth,
         backend_order: Optional[List[Backend]] = None,
         conversion_cost_multiplier: float = 1.0,
+        perf_prio: str = "memory",
     ):
         """Create a new planner instance.
 
@@ -417,6 +427,10 @@ class Planner:
             Factor applied to conversion time estimates.  Values greater than
             one discourage backend switches while values below one encourage
             them.  Defaults to ``1.0``.
+        perf_prio:
+            Performance priority used when comparing candidate costs.  Set to
+            ``"time"`` to favour runtime over memory or ``"memory"`` to
+            prioritise lower memory consumption.  Defaults to ``"memory"``.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -432,6 +446,7 @@ class Planner:
             else list(config.DEFAULT.preferred_backend_order)
         )
         self.conversion_cost_multiplier = conversion_cost_multiplier
+        self.perf_prio = perf_prio
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -644,16 +659,21 @@ class Planner:
                             _add_cost(prev_entry.cost, conv_cost), sim_cost
                         )
                         entry = table[i].get(backend)
-                        if entry is None or _better(total_cost, entry.cost):
+                        if entry is None or _better(total_cost, entry.cost, self.perf_prio):
                             table[i][backend] = DPEntry(
                                 cost=total_cost,
                                 prev_index=j,
                                 prev_backend=prev_backend,
                             )
             if self.top_k and len(table[i]) > self.top_k:
-                best = sorted(table[i].items(), key=lambda kv: kv[1].cost.time)[
-                    : self.top_k
-                ]
+                def cost_key(cost: Cost) -> tuple[float, float]:
+                    if self.perf_prio == "time":
+                        return (cost.time, cost.memory)
+                    return (cost.memory, cost.time)
+
+                best = sorted(
+                    table[i].items(), key=lambda kv: cost_key(kv[1].cost)
+                )[: self.top_k]
                 table[i] = dict(best)
 
         final_entries = table[n]
@@ -662,7 +682,14 @@ class Planner:
             if target_backend in final_entries:
                 backend = target_backend
         elif final_entries:
-            backend = min(final_entries.items(), key=lambda kv: kv[1].cost.time)[0]
+            def cost_key(cost: Cost) -> tuple[float, float]:
+                if self.perf_prio == "time":
+                    return (cost.time, cost.memory)
+                return (cost.memory, cost.time)
+
+            backend = min(
+                final_entries.items(), key=lambda kv: cost_key(kv[1].cost)
+            )[0]
 
         return PlanResult(table=table, final_backend=backend, gates=gates)
 
@@ -861,7 +888,14 @@ class Planner:
                 )
                 for backend in backends
             ]
-        return min(candidates, key=lambda kv: (kv[1].time, kv[1].memory))
+
+        def cost_key(kv: Tuple[Backend, Cost]) -> tuple[float, float]:
+            cost = kv[1]
+            if self.perf_prio == "time":
+                return (cost.time, cost.memory)
+            return (cost.memory, cost.time)
+
+        return min(candidates, key=cost_key)
 
     def plan(
         self,
@@ -999,7 +1033,7 @@ class Planner:
             pre.table[-1][pre.final_backend].cost if pre.table else Cost(0.0, 0.0)
         )
         overhead = Cost(time=len(gates) * 1e-6, memory=0.0)
-        if _better(single_cost, _add_cost(pre_cost, overhead)) and (
+        if _better(single_cost, _add_cost(pre_cost, overhead), self.perf_prio) and (
             threshold is None or single_cost.memory <= threshold
         ):
             part = Partitioner()
@@ -1040,7 +1074,7 @@ class Planner:
             else Cost(0.0, 0.0)
         )
 
-        if _better(single_cost, dp_cost) and (
+        if _better(single_cost, dp_cost, self.perf_prio) and (
             threshold is None or single_cost.memory <= threshold
         ):
             part = Partitioner()

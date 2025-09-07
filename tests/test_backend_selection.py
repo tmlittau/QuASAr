@@ -1,5 +1,6 @@
 from benchmarks.circuits import ghz_circuit, qft_circuit, w_state_circuit
 from quasar import Backend, SimulationEngine
+from quasar.planner import Planner
 from quasar.cost import CostEstimator
 import quasar.config as config
 
@@ -69,7 +70,7 @@ def test_rotation_diversity_discourages_dd(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 10_000_000)
     monkeypatch.setattr(config.DEFAULT, "dd_phase_rotation_diversity_threshold", 3)
     monkeypatch.setattr(config.DEFAULT, "dd_amplitude_rotation_diversity_threshold", 3)
-    engine = SimulationEngine()
+    engine = SimulationEngine(planner=Planner(perf_prio="time"))
     plan = engine.planner.plan(circuit)
     assert plan.final_backend == Backend.STATEVECTOR
     assert Backend.DECISION_DIAGRAM not in {s.backend for s in plan.steps}
