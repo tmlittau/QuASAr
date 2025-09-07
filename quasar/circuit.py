@@ -242,6 +242,19 @@ class Circuit:
         self.cost_estimates = self._estimate_costs()
         return new_gates
 
+    def enable_classical_simplification(self) -> None:
+        """Enable classical control simplification on an existing circuit.
+
+        The classical state is reset to all zeros before re-running
+        :meth:`simplify_classical_controls` so that cached metrics such as
+        depth, sparsity and cost estimates reflect the simplified circuit.
+        """
+
+        self.use_classical_simplification = True
+        max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
+        self.classical_state = [0] * (max_index + 1)
+        self.simplify_classical_controls()
+
     # ------------------------------------------------------------------
     # Construction helpers
     # ------------------------------------------------------------------

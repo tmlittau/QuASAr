@@ -64,9 +64,14 @@ def run_suite(
             )
         except TypeError:
             circuit = circuit_fn(n)
-            reset = getattr(circuit, "reset_classical_simplification", None)
-            if callable(reset):
-                reset(use_classical_simplification)
+            if use_classical_simplification:
+                enable = getattr(circuit, "enable_classical_simplification", None)
+                if callable(enable):
+                    enable()
+                else:
+                    circuit.use_classical_simplification = True
+            else:
+                circuit.use_classical_simplification = False
         runner = BenchmarkRunner()
         rec = runner.run_quasar_multiple(
             circuit,

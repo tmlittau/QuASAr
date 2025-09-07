@@ -118,12 +118,10 @@ def test_metrics_recomputed_after_simplification():
         {"gate": "X", "qubits": [0]},
         {"gate": "CX", "qubits": [0, 1]},
     ], use_classical_simplification=False)
-    circ.classical_state = [0] * circ.num_qubits
     initial_costs = circ.cost_estimates.copy()
     assert circ.depth > 0
 
-    circ.use_classical_simplification = True
-    circ.simplify_classical_controls()
+    circ.enable_classical_simplification()
 
     assert circ.gates == []
     assert circ.depth == 0
