@@ -8,6 +8,7 @@ from benchmarks.circuits import (
     w_state_circuit,
     grover_circuit,
     bernstein_vazirani_circuit,
+    qft_circuit,
 )
 
 
@@ -33,6 +34,13 @@ def test_ghz_circuit_state():
     expected[0] = 1 / math.sqrt(2)
     expected[-1] = 1 / math.sqrt(2)
     _assert_equivalent(state, expected)
+
+
+def test_qft_circuit_respects_flag():
+    circ = qft_circuit(2, use_classical_simplification=True)
+    assert circ.use_classical_simplification is True
+    circ2 = qft_circuit(2)
+    assert circ2.use_classical_simplification is False
 
 
 def test_w_state_circuit_state():
