@@ -9,7 +9,8 @@ from benchmarks.runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.ssd import SSD, SSDPartition
 from quasar.cost import Backend, Cost
-from quasar.planner import PlanResult
+from quasar.planner import PlanResult, PlanStep
+from types import SimpleNamespace
 
 
 class DummyBackend:
@@ -193,6 +194,77 @@ def test_run_quasar_multiple_aggregates_statistics():
     assert scheduler.plan_calls == [Backend.TABLEAU]
     assert scheduler.run_calls == [(Backend.TABLEAU, True)] + [(Backend.TABLEAU, False)] * 3
     assert record["backend"] == Backend.TABLEAU.name
+
+
+class DirectScheduler:
+    def __init__(self):
+        class Planner:
+            def plan(self, circuit, *, backend=None):
+                return PlanResult(
+                    table=[],
+                    final_backend=backend or Backend.STATEVECTOR,
+                    gates=circuit.gates,
+                    explicit_steps=[
+                        PlanStep(0, len(circuit.gates), backend or Backend.STATEVECTOR)
+                    ],
+                    explicit_conversions=[],
+                    step_costs=[],
+                )
+
+        self.planner = Planner()
+        self.run_calls: list[bool] = []
+        self.backends = {Backend.STATEVECTOR: DummySimBackend()}
+
+    def prepare_run(self, circuit, plan=None, *, backend=None):
+        return plan if plan is not None else self.planner.plan(circuit, backend=backend)
+
+    def run(self, circuit, plan, *, monitor=None, instrument=False):
+        self.run_calls.append(instrument)
+        ssd = SSD([
+            SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
+        ])
+        if instrument:
+            return ssd, Cost(time=0.0, memory=0.0)
+        return ssd
+
+
+class DummySimBackend:
+    backend = Backend.STATEVECTOR
+
+    def load(self, num_qubits):
+        pass
+
+    def apply_gate(self, gate, qubits, params):
+        pass
+
+    def extract_ssd(self):
+        return SSD([
+            SSDPartition(subsystems=((0,),), backend=Backend.STATEVECTOR)
+        ])
+
+
+class DummyCircuit:
+    def __init__(self):
+        self.num_qubits = 1
+        self.gates = [SimpleNamespace(gate="x", qubits=(0,), params=())]
+        self.ssd = SSD([])
+
+    def simplify_classical_controls(self):
+        return self.gates
+
+
+def test_run_quasar_multiple_direct_backend_path():
+    runner = BenchmarkRunner()
+    circuit = DummyCircuit()
+    scheduler = DirectScheduler()
+    side_effect = [0.0, 0.0, 1.0, 1.0, 3.0]
+    with patch("benchmarks.runner.time.perf_counter", side_effect=side_effect):
+        record = runner.run_quasar_multiple(circuit, scheduler, repetitions=2)
+    assert record["repetitions"] == 2
+    assert math.isclose(record["run_time_mean"], 1.5)
+    assert math.isclose(record["run_time_std"], math.sqrt(0.25))
+    assert scheduler.run_calls == [True]
+    assert record["backend"] == Backend.STATEVECTOR.name
 
 
 class PlannerErrorScheduler:
