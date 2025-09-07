@@ -46,7 +46,7 @@ class DummyScheduler:
         self.instrument_calls.append(instrument)
         self._data = [0] * 10000
         if instrument:
-            return "done", Cost(time=0.0, memory=0.0)
+            return "done", Cost(time=0.0, memory=123.0)
         return "done"
 
 
@@ -57,4 +57,4 @@ def test_run_quasar_records_memory():
     assert record["prepare_peak_memory"] > 0
     assert record["run_peak_memory"] > 0
     assert "backend" in record and record["backend"] is None
-    assert scheduler.instrument_calls == [True, False]
+    assert scheduler.instrument_calls == [True]
