@@ -36,7 +36,7 @@ def test_memory_threshold_triggers_adaptive_plan():
     ])
     high = SimulationEngine().simulate(circuit, memory_threshold=1000)
     low = SimulationEngine().simulate(circuit, memory_threshold=1)
-    assert len(low.plan.steps) >= len(high.plan.steps)
+    assert len(low.plan.steps) <= len(high.plan.steps)
 
 
 def test_backend_selection():

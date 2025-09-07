@@ -231,6 +231,11 @@ def _supported_backends(
 
     clifford = names and all(name in CLIFFORD_GATES for name in names)
     if allow_tableau and clifford:
+        if estimator is not None:
+            cost = estimator.tableau(num_qubits, num_gates)
+            # Memory check uses calibrated coefficients.
+            if max_memory is not None and cost.memory > max_memory:
+                return []
         return [Backend.TABLEAU]
 
     candidates: List[Backend] = []
@@ -238,6 +243,7 @@ def _supported_backends(
     sparse = sparsity if sparsity is not None else 0.0
     phase_rot = phase_rotation_diversity if phase_rotation_diversity is not None else 0
     amp_rot = amplitude_rotation_diversity if amplitude_rotation_diversity is not None else 0
+    rot = max(phase_rot, amp_rot)
     nnz = int((1 - sparse) * (2 ** num_qubits))
     multi = [g for g in gates if len(g.qubits) > 1]
     local = bool(multi) and all(
@@ -273,60 +279,102 @@ def _supported_backends(
         metric = weighted / weight_sum if weight_sum else 0.0
         dd_metric = metric >= config.DEFAULT.dd_metric_threshold
 
+    candidates: List[Backend] = []
     mps_metric = False
-    if estimator is not None and all(len(g.qubits) <= 2 for g in gates):
+    num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+    num_1q = sum(
+        1
+        for g in gates
+        if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+    )
+    num_2q = num_gates - num_1q - num_meas
+
+    if estimator is None:
+        if dd_metric:
+            candidates.append(Backend.DECISION_DIAGRAM)
+        if mps_metric:
+            candidates.append(Backend.MPS)
+        candidates.append(Backend.STATEVECTOR)
+
+        order = list(config.DEFAULT.preferred_backend_order)
+
+        def rank(b: Backend) -> int:
+            try:
+                idx = order.index(b)
+            except ValueError:
+                idx = len(order)
+            if dd_metric and b == Backend.DECISION_DIAGRAM:
+                return -1
+            return idx
+
+        ranking = sorted(candidates, key=lambda b: (b != Backend.TABLEAU, rank(b)))
+        ranking_str = ">".join(b.name for b in ranking)
+
+        if config.DEFAULT.verbose_selection:
+            print(
+                "[backend-selection] ",
+                f"sparsity={sparse:.6f} rotation_diversity={rot:.6f} nnz={nnz} ",
+                f"locality={local} candidates={ranking_str}",
+            )
+
+        if config.DEFAULT.backend_selection_log:
+            try:
+                with open(config.DEFAULT.backend_selection_log, "a", encoding="utf8") as f:
+                    f.write(
+                        f"{sparse:.6f},{nnz},{rot:.6f},{int(local)},{ranking_str}\n",
+                    )
+            except OSError:
+                pass
+
+        return ranking
+
+    if all(len(g.qubits) <= 2 for g in gates):
         chi_cap = estimator.chi_max
         if chi_cap is not None and chi_cap > 1:
-            num_meas = sum(
-                1 for g in gates if len(g.qubits) == 1 and g.gate.upper() in {"MEASURE", "RESET"}
-            )
-            num_1q = sum(
-                1
-                for g in gates
-                if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
-            )
-            num_2q = num_gates - num_1q - num_meas
             cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi_cap)
             if max_memory is None or cost.memory <= max_memory:
                 mps_metric = True
 
+    costs: Dict[Backend, Cost] = {}
+    # Estimates rely on calibrated coefficients for realistic costs.
     if dd_metric:
-        candidates.append(Backend.DECISION_DIAGRAM)
+        dd_cost = estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+        if max_memory is None or dd_cost.memory <= max_memory:
+            costs[Backend.DECISION_DIAGRAM] = dd_cost
     if mps_metric:
-        candidates.append(Backend.MPS)
-    candidates.append(Backend.STATEVECTOR)
+        mps_cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi=4, svd=True)
+        if max_memory is None or mps_cost.memory <= max_memory:
+            costs[Backend.MPS] = mps_cost
+    sv_cost = estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+    if max_memory is None or sv_cost.memory <= max_memory:
+        costs[Backend.STATEVECTOR] = sv_cost
+    candidates = list(costs.keys())
+    if not candidates:
+        # Always retain statevector as a fallback even if it exceeds memory.
+        costs[Backend.STATEVECTOR] = sv_cost
+        candidates = [Backend.STATEVECTOR]
 
-    order = list(config.DEFAULT.preferred_backend_order)
-
-    def rank(b: Backend) -> int:
-        try:
-            idx = order.index(b)
-        except ValueError:
-            idx = len(order)
-        if dd_metric and b == Backend.DECISION_DIAGRAM:
-            return -1
-        return idx
-
-    ranking = sorted(candidates, key=lambda b: (b != Backend.TABLEAU, rank(b)))
+    # Select backends by estimated memory then runtime to respect calibration.
+    ranking = sorted(candidates, key=lambda b: (costs[b].memory, costs[b].time))
     ranking_str = ">".join(b.name for b in ranking)
 
     if config.DEFAULT.verbose_selection:
         print(
-            "[backend-selection] "
-            f"sparsity={sparse:.6f} rotation_diversity={rot:.6f} nnz={nnz} "
-            f"locality={local} candidates={ranking_str}"
+            "[backend-selection] ",
+            f"sparsity={sparse:.6f} rotation_diversity={rot:.6f} nnz={nnz} ",
+            f"locality={local} candidates={ranking_str}",
         )
 
     if config.DEFAULT.backend_selection_log:
         try:
             with open(config.DEFAULT.backend_selection_log, "a", encoding="utf8") as f:
                 f.write(
-                    f"{sparse:.6f},{nnz},{rot:.6f},{int(local)},{ranking_str}\n"
+                    f"{sparse:.6f},{nnz},{rot:.6f},{int(local)},{ranking_str}\n",
                 )
         except OSError:
             pass
 
-    return candidates
+    return ranking
 
 
 def _circuit_depth(gates: Iterable["Gate"]) -> int:
@@ -870,6 +918,9 @@ class Planner:
             ),
             dd_metric=dd_metric,
         )
+        if not backends:
+            # Ensure planning proceeds even if all estimates exceed limits.
+            backends = [Backend.STATEVECTOR]
         candidates: List[Tuple[Backend, Cost]] = []
         for backend in backends:
             cost = _simulation_cost(
@@ -1030,7 +1081,9 @@ class Planner:
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
         )
         pre_cost = (
-            pre.table[-1][pre.final_backend].cost if pre.table else Cost(0.0, 0.0)
+            pre.table[-1][pre.final_backend].cost
+            if pre.table and pre.final_backend in pre.table[-1]
+            else Cost(float("inf"), float("inf"))
         )
         overhead = Cost(time=len(gates) * 1e-6, memory=0.0)
         if _better(single_cost, _add_cost(pre_cost, overhead), self.perf_prio) and (
@@ -1070,8 +1123,8 @@ class Planner:
 
         dp_cost = (
             coarse.table[-1][coarse.final_backend].cost
-            if coarse.table
-            else Cost(0.0, 0.0)
+            if coarse.table and coarse.final_backend in coarse.table[-1]
+            else Cost(float("inf"), float("inf"))
         )
 
         if _better(single_cost, dp_cost, self.perf_prio) and (
