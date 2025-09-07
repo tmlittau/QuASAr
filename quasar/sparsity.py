@@ -17,8 +17,17 @@ def adaptive_dd_sparsity_threshold(n_qubits: int) -> float:
     """
 
     base = config.DEFAULT.dd_sparsity_threshold
+
+    # For tiny circuits even moderately sparse states should consider the DD
+    # backend.  Gradually ramp up the required sparsity so that the original
+    # threshold is reached by five qubits and maintained until the wide circuit
+    # relaxation below kicks in.
+    if n_qubits <= 5:
+        scale = 0.4 + 0.1 * n_qubits
+        return base * scale
     if n_qubits <= 10:
         return base
+
     # Linear relaxation beyond 10 qubits, clamped at zero.
     return max(0.0, base - 0.01 * (n_qubits - 10))
 
