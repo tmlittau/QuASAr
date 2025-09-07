@@ -432,6 +432,8 @@ class Scheduler:
         replay_time = 0.0
         current_backend = None
         current_sim = None
+        if instrument:
+            tracemalloc.start()
         i = 0
         while i < len(steps):
             step = steps[i]
@@ -460,7 +462,7 @@ class Scheduler:
 
                 est_cost = est_costs[i]
                 if instrument:
-                    tracemalloc.start()
+                    tracemalloc.reset_peak()
                     start_time = time.perf_counter()
 
                 def run_group(job):
@@ -475,7 +477,6 @@ class Scheduler:
                     elapsed = time.perf_counter() - start_time
                     total_gate_time.time += elapsed
                     _, peak = tracemalloc.get_traced_memory()
-                    tracemalloc.stop()
                     total_gate_time.memory = max(total_gate_time.memory, float(peak))
                     observed = Cost(time=elapsed, memory=float(peak))
 
@@ -533,7 +534,7 @@ class Scheduler:
                     sim_obj = type(self.backends[target])()
                     sim_obj.load(circuit.num_qubits)
                     if instrument:
-                        tracemalloc.start()
+                        tracemalloc.reset_peak()
                         start_time = time.perf_counter()
                     try:
                         sim_obj.ingest(prepared, num_qubits=circuit.num_qubits)
@@ -559,7 +560,6 @@ class Scheduler:
                     if instrument:
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
-                        tracemalloc.stop()
                         conversion_time += elapsed
                         total_gate_time.memory = max(
                             total_gate_time.memory, float(peak)
@@ -589,12 +589,11 @@ class Scheduler:
                     sim_obj.load(circuit.num_qubits)
                 if current_sim is not None:
                     if instrument:
-                        tracemalloc.start()
+                        tracemalloc.reset_peak()
                         start_time = time.perf_counter()
                         current_ssd = current_sim.extract_ssd()
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
-                        tracemalloc.stop()
                         conversion_time += elapsed
                         total_gate_time.memory = max(
                             total_gate_time.memory, float(peak)
@@ -624,7 +623,7 @@ class Scheduler:
                         primitive = "Full"
                     conv_ssd = CESD(boundary_qubits=list(boundary), top_s=rank)
                     if instrument:
-                        tracemalloc.start()
+                        tracemalloc.reset_peak()
                         start_time = time.perf_counter()
                     try:
                         if primitive == "B2B":
@@ -695,7 +694,6 @@ class Scheduler:
                         if instrument:
                             elapsed = time.perf_counter() - start_time
                             _, peak = tracemalloc.get_traced_memory()
-                            tracemalloc.stop()
                             conversion_time += elapsed
                             total_gate_time.memory = max(
                                 total_gate_time.memory, float(peak)
@@ -709,7 +707,7 @@ class Scheduler:
             est_cost = est_costs[i]
 
             if instrument:
-                tracemalloc.start()
+                tracemalloc.reset_peak()
                 start_time = time.perf_counter()
 
             for gate in segment:
@@ -719,7 +717,6 @@ class Scheduler:
                 elapsed = time.perf_counter() - start_time
                 total_gate_time.time += elapsed
                 _, peak = tracemalloc.get_traced_memory()
-                tracemalloc.stop()
                 total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 observed = Cost(time=elapsed, memory=float(peak))
 
@@ -760,12 +757,11 @@ class Scheduler:
             used_qubits = set()
             for sim in sims.values():
                 if instrument:
-                    tracemalloc.start()
+                    tracemalloc.reset_peak()
                     start_time = time.perf_counter()
                     ssd = sim.extract_ssd()
                     elapsed = time.perf_counter() - start_time
                     _, peak = tracemalloc.get_traced_memory()
-                    tracemalloc.stop()
                     conversion_time += elapsed
                     total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 else:
@@ -786,6 +782,7 @@ class Scheduler:
                     conversion=conversion_time,
                     replay=replay_time,
                 )
+                tracemalloc.stop()
                 return ssd_res, run_cost
             return ssd_res
         ssd_res = circuit.ssd
@@ -796,6 +793,7 @@ class Scheduler:
                 conversion=conversion_time,
                 replay=replay_time,
             )
+            tracemalloc.stop()
             return ssd_res, run_cost
         return ssd_res
 

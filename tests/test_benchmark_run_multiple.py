@@ -123,7 +123,7 @@ class DummyScheduler:
     def __init__(self):
         self.plan_calls: list = []
         self.run_calls: list = []
-        self.run_times = [1.0, 2.0, 3.0]
+        self.run_times = [0.0, 1.0, 2.0, 3.0]
 
         class Planner:
             def __init__(self, outer):
@@ -167,22 +167,31 @@ class DummyScheduler:
                 )
             ]
         )
-        return ssd, Cost(time=runtime, memory=0.0)
+        if instrument:
+            return ssd, Cost(time=runtime, memory=0.0)
+        return ssd
 
 
 def test_run_quasar_multiple_aggregates_statistics():
     runner = BenchmarkRunner()
     scheduler = DummyScheduler()
-    record = runner.run_quasar_multiple(
-        None, scheduler, repetitions=3, backend=Backend.TABLEAU
-    )
+    side_effect = [
+        0.0,  # start of run_quasar_multiple
+        0.0, 1.0,  # run 1
+        1.0, 3.0,  # run 2
+        3.0, 6.0,  # run 3
+    ]
+    with patch("benchmarks.runner.time.perf_counter", side_effect=side_effect):
+        record = runner.run_quasar_multiple(
+            None, scheduler, repetitions=3, backend=Backend.TABLEAU
+        )
     assert len(runner.results) == 1
     assert runner.results[0] == record
     assert record["repetitions"] == 3
     assert record["run_time_mean"] == 2.0
     assert math.isclose(record["run_time_std"], math.sqrt(2 / 3))
     assert scheduler.plan_calls == [Backend.TABLEAU]
-    assert scheduler.run_calls == [(Backend.TABLEAU, True)] * 3
+    assert scheduler.run_calls == [(Backend.TABLEAU, True)] + [(Backend.TABLEAU, False)] * 3
     assert record["backend"] == Backend.TABLEAU.name
 
 
@@ -225,7 +234,11 @@ class RunErrorScheduler:
         return plan
 
     def run(self, circuit, plan, *, monitor=None, instrument=False):
-        raise ValueError("run boom")
+        if not instrument:
+            raise ValueError("run boom")
+        return SSD([
+            SSDPartition(subsystems=((0,),), backend=plan.final_backend or Backend.STATEVECTOR)
+        ]), Cost(time=0.0, memory=0.0)
 
 
 def test_run_quasar_returns_failure_record_on_run_error():

@@ -311,7 +311,6 @@ class BenchmarkRunner:
         result: Any | None = None
         backend_choice_name: str | None = None
 
-        tracemalloc.start()
         try:
             backend_choice = None
             use_quick = False
@@ -320,6 +319,7 @@ class BenchmarkRunner:
                 use_quick = should_quick(circuit, backend=backend)
 
             if use_quick:
+                tracemalloc.start()
                 select_backend = getattr(scheduler, "select_backend", None)
                 if callable(select_backend):
                     backend_choice = select_backend(circuit, backend=backend)
@@ -344,35 +344,41 @@ class BenchmarkRunner:
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
             else:
+                tracemalloc.start()
                 if planner is not None:
                     start_prepare = time.perf_counter()
                     plan = planner.plan(circuit, backend=backend)
                     plan = scheduler.prepare_run(circuit, plan, backend=backend)
                     prepare_time = time.perf_counter() - start_prepare
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
-                    tracemalloc.reset_peak()
                 else:
                     start_prepare = time.perf_counter()
                     plan = scheduler.prepare_run(circuit, backend=backend)
                     prepare_time = time.perf_counter() - start_prepare
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
-                    tracemalloc.reset_peak()
+                tracemalloc.stop()
 
-                result, run_cost = scheduler.run(circuit, plan, instrument=True)
-                run_time = run_cost.time
+                original_ssd = copy.deepcopy(getattr(circuit, "ssd", None))
+                inst_start = time.perf_counter()
+                _, inst_cost = scheduler.run(circuit, plan, instrument=True)
+                prepare_time += time.perf_counter() - inst_start
+                prepare_peak_memory = max(prepare_peak_memory, int(inst_cost.memory))
+                if original_ssd is not None:
+                    circuit.ssd = copy.deepcopy(original_ssd)
+
+                tracemalloc.start()
+                start_run = time.perf_counter()
+                result = scheduler.run(circuit, plan, instrument=False)
+                run_time = time.perf_counter() - start_run
+                _, run_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
-                try:
-                    result.extract_state(0)
-                except Exception:
-                    pass
+        except Exception as exc:  # pragma: no cover - exercised in tests
+            if tracemalloc.is_tracing():
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
-                run_peak_memory = max(run_peak_memory, int(run_cost.memory))
-        except Exception as exc:  # pragma: no cover - exercised in tests
-            _, run_peak_memory = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
             record = {
                 "framework": "quasar",
                 "prepare_time": prepare_time,
@@ -446,7 +452,16 @@ class BenchmarkRunner:
                 plan = scheduler.prepare_run(circuit, plan, backend=backend)
             else:
                 plan = scheduler.prepare_run(circuit, backend=backend)
-            original_ssd = copy.deepcopy(getattr(circuit, "ssd", None)) if circuit is not None else None
+            original_ssd = (
+                copy.deepcopy(getattr(circuit, "ssd", None)) if circuit is not None else None
+            )
+            est = getattr(planner, "estimator", None)
+            coeff_backup = copy.deepcopy(getattr(est, "coeff", {})) if est else None
+            scheduler.run(circuit, plan, instrument=True)
+            if est is not None and coeff_backup is not None:
+                est.coeff = coeff_backup
+            if circuit is not None and original_ssd is not None:
+                circuit.ssd = copy.deepcopy(original_ssd)
 
         def _run_once() -> Dict[str, Any]:
             if use_quick:
@@ -456,11 +471,12 @@ class BenchmarkRunner:
             assert plan is not None
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
-            est = getattr(planner, "estimator", None)
-            coeff_backup = copy.deepcopy(getattr(est, "coeff", {})) if est else None
-            result, run_cost = scheduler.run(circuit, plan, instrument=True)
-            if est is not None and coeff_backup is not None:
-                est.coeff = coeff_backup
+            tracemalloc.start()
+            start_run = time.perf_counter()
+            result = scheduler.run(circuit, plan, instrument=False)
+            run_time = time.perf_counter() - start_run
+            _, run_peak_memory = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
             backend_choice_name = None
             if hasattr(result, "partitions") and getattr(result, "partitions"):
                 backend_obj = result.partitions[0].backend
@@ -468,10 +484,10 @@ class BenchmarkRunner:
             return {
                 "framework": "quasar",
                 "prepare_time": 0.0,
-                "run_time": run_cost.time,
-                "total_time": run_cost.time,
+                "run_time": run_time,
+                "total_time": run_time,
                 "prepare_peak_memory": 0,
-                "run_peak_memory": int(run_cost.memory),
+                "run_peak_memory": int(run_peak_memory),
                 "result": result,
                 "failed": False,
                 "backend": backend_choice_name,

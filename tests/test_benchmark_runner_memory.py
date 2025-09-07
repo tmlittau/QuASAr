@@ -45,7 +45,9 @@ class DummyScheduler:
     def run(self, circuit, plan, *, monitor=None, instrument=False):
         self.instrument_calls.append(instrument)
         self._data = [0] * 10000
-        return "done", Cost(time=0.0, memory=0.0)
+        if instrument:
+            return "done", Cost(time=0.0, memory=0.0)
+        return "done"
 
 
 def test_run_quasar_records_memory():
@@ -55,4 +57,4 @@ def test_run_quasar_records_memory():
     assert record["prepare_peak_memory"] > 0
     assert record["run_peak_memory"] > 0
     assert "backend" in record and record["backend"] is None
-    assert scheduler.instrument_calls == [True]
+    assert scheduler.instrument_calls == [True, False]
