@@ -267,7 +267,7 @@ def _supported_backends(
     mps_metric = False
     if estimator is not None and all(len(g.qubits) <= 2 for g in gates):
         chi_cap = estimator.chi_max
-        if chi_cap is not None and chi_cap >= 1:
+        if chi_cap is not None and chi_cap > 1:
             num_meas = sum(
                 1 for g in gates if len(g.qubits) == 1 and g.gate.upper() in {"MEASURE", "RESET"}
             )

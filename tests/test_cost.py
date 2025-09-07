@@ -42,15 +42,23 @@ def test_mps_chi_dependence():
     est = CostEstimator()
     chi2 = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=2)
     chi4 = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
-    assert chi4.time == chi2.time * (4**3) / (2**3)
-    assert chi4.memory == chi2.memory * (4**2) / (2**2)
+    ratio_time = chi4.time / chi2.time
+    expected_time = (2 * 4**2 + 4**3) / (2 * 2**2 + 2**3)
+    assert math.isclose(ratio_time, expected_time)
+    ratio_mem = chi4.memory / chi2.memory
+    expected_mem = (2 * 4 + 2 * 4**2) / (2 * 2 + 2 * 2**2)
+    assert math.isclose(ratio_mem, expected_mem)
 
 
 def test_mps_gate_scaling():
     est = CostEstimator()
-    one = est.mps(num_qubits=4, num_1q_gates=1, num_2q_gates=0, chi=4)
-    two = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
-    assert two.time == one.time * 4
+    n = 4
+    one = est.mps(num_qubits=n, num_1q_gates=1, num_2q_gates=0, chi=4)
+    two = est.mps(num_qubits=n, num_1q_gates=0, num_2q_gates=1, chi=4)
+    sum_site = 2 * 4 + (n - 2) * 4**2
+    bond_sum = 2 * 4**2 + (n - 3) * 4**3
+    ratio = n * bond_sum / (n - 1) / sum_site
+    assert math.isclose(two.time, one.time * ratio)
 
 
 def test_mps_svd_cost():
@@ -63,7 +71,47 @@ def test_mps_svd_cost():
         chi=4,
         svd=True,
     )
-    assert with_svd.time == base.time + 4 * (4**3) * math.log2(4)
+    trunc = (16 * math.log2(4) + 64 * math.log2(4) + 16 * math.log2(4)) / 3
+    assert with_svd.time == base.time + 4 * trunc
+    assert with_svd.memory == base.memory + 64
+
+
+def test_mps_per_bond_list():
+    est = CostEstimator()
+    varied = est.mps(num_qubits=3, num_1q_gates=0, num_2q_gates=1, chi=[2, 4])
+    uniform = est.mps(num_qubits=3, num_1q_gates=0, num_2q_gates=1, chi=4)
+    assert varied.time < uniform.time
+    assert varied.memory < uniform.memory
+
+
+def test_mps_derive_chi_from_gates():
+    est = CostEstimator()
+    gates = [Gate("CX", [0, 1]), Gate("CX", [1, 2])]
+    auto = est.mps(num_qubits=3, num_1q_gates=0, num_2q_gates=2, chi=None, gates=gates)
+    manual = est.mps(num_qubits=3, num_1q_gates=0, num_2q_gates=2, chi=[2, 2])
+    assert auto.time == manual.time
+    assert auto.memory == manual.memory
+
+
+def test_mps_temp_memory():
+    est = CostEstimator(coeff={"mps_temp_mem": 2.0})
+    base = est.mps(num_qubits=4, num_1q_gates=0, num_2q_gates=1, chi=4)
+    with_svd = est.mps(
+        num_qubits=4,
+        num_1q_gates=0,
+        num_2q_gates=1,
+        chi=4,
+        svd=True,
+    )
+    assert with_svd.memory == base.memory + 2.0 * 64
+
+
+def test_mps_qubit_scaling():
+    est = CostEstimator()
+    c3 = est.mps(num_qubits=3, num_1q_gates=0, num_2q_gates=1, chi=2)
+    c5 = est.mps(num_qubits=5, num_1q_gates=0, num_2q_gates=1, chi=2)
+    assert c5.time > c3.time
+    assert c5.memory > c3.memory
 
 
 def test_decision_diagram_log_scaling():
