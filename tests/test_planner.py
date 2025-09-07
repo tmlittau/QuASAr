@@ -90,12 +90,13 @@ def test_conversion_cost_multiplier_discourages_switch():
         "ingest_sv": 0.375,
     }
     est = CostEstimator(coeff)
-    base = Planner(est)
+    base = Planner(est, perf_prio="time")
     steps = base.plan(circ).steps
     assert all(s.backend == Backend.STATEVECTOR for s in steps)
     penalized = Planner(
         est,
         conversion_cost_multiplier=50.0,
+        perf_prio="time",
     )
     steps2 = penalized.plan(circ).steps
     assert all(s.backend == Backend.STATEVECTOR for s in steps2)

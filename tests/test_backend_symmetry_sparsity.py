@@ -9,7 +9,7 @@ from quasar.config import DEFAULT
 def test_w_state_selects_decision_diagram_via_sparsity():
     circ = w_state_circuit(5)
     assert circ.sparsity >= DEFAULT.dd_sparsity_threshold
-    scheduler = Scheduler()
+    scheduler = Scheduler(planner=Planner(perf_prio="time"))
     scheduler.prepare_run(circ)
     part = circ.ssd.partitions[0]
     assert part.backend == Backend.DECISION_DIAGRAM
@@ -22,7 +22,7 @@ def test_high_rotation_diversity_stays_dense(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 10_000_000)
     monkeypatch.setattr(config.DEFAULT, "dd_phase_rotation_diversity_threshold", 3)
     monkeypatch.setattr(config.DEFAULT, "dd_amplitude_rotation_diversity_threshold", 3)
-    scheduler = Scheduler()
+    scheduler = Scheduler(planner=Planner(perf_prio="time"))
     scheduler.prepare_run(circ)
     part = circ.ssd.partitions[0]
     assert part.backend == Backend.STATEVECTOR
@@ -35,7 +35,7 @@ def test_high_nnz_stays_dense(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "dd_nnz_threshold", 1)
     monkeypatch.setattr(config.DEFAULT, "dd_phase_rotation_diversity_threshold", 1000)
     monkeypatch.setattr(config.DEFAULT, "dd_amplitude_rotation_diversity_threshold", 1000)
-    scheduler = Scheduler()
+    scheduler = Scheduler(planner=Planner(perf_prio="time"))
     scheduler.prepare_run(circ)
     part = circ.ssd.partitions[0]
     assert part.backend == Backend.STATEVECTOR
@@ -44,7 +44,7 @@ def test_high_nnz_stays_dense(monkeypatch):
 def test_random_circuit_stays_statevector_when_metrics_low():
     circ = random_circuit(5, seed=123)
     assert circ.sparsity < DEFAULT.dd_sparsity_threshold
-    scheduler = Scheduler()
+    scheduler = Scheduler(planner=Planner(perf_prio="time"))
     scheduler.prepare_run(circ)
     part = circ.ssd.partitions[0]
     assert part.backend == Backend.STATEVECTOR

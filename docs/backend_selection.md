@@ -34,6 +34,12 @@ examines basic structural metrics to guide this choice:
 4. **Fallback** – remaining candidates such as the dense STATEVECTOR simulator
    are considered based on estimated runtime and memory cost.
 
+The planner compares candidate costs using a configurable priority between
+runtime and memory.  By default memory consumption takes precedence to avoid
+backends with excessive requirements when a slower but leaner alternative
+exists.  This behaviour can be overridden via the planner's ``perf_prio``
+option, setting it to ``"time"`` to prioritise runtime instead.
+
 The default weights for sparsity, nnz and the two rotation metrics are ``1.0``
 each with a ``dd_metric_threshold`` of ``0.8`` and rotation‑diversity thresholds
 of ``16`` distinct angles for both phase and amplitude rotations. These values

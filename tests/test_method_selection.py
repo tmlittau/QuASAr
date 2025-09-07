@@ -1,9 +1,10 @@
 from benchmarks.circuits import random_circuit
 from quasar import Circuit, Backend, Scheduler
+from quasar.planner import Planner
 
 
 def _prepare(circ: Circuit):
-    scheduler = Scheduler()
+    scheduler = Scheduler(planner=Planner(perf_prio="time"))
     plan = scheduler.prepare_run(circ)
     return scheduler, plan
 
