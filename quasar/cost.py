@@ -15,7 +15,7 @@ from enum import Enum
 import json
 import math
 from pathlib import Path
-from typing import Dict, Iterable, Optional, TYPE_CHECKING
+from typing import Dict, Iterable, Optional, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .circuit import Gate
@@ -98,6 +98,7 @@ class CostEstimator:
             "mps_gate_2q": 1.0,
             "mps_trunc": 1.0,
             "mps_mem": 1.0,
+            "mps_temp_mem": 1.0,
             "dd_gate": 1.0,
             "dd_mem": 1.0,
             # Conversion primitives
@@ -143,13 +144,13 @@ class CostEstimator:
     # ------------------------------------------------------------------
     # Entanglement heuristics
     # ------------------------------------------------------------------
-    def max_schmidt_rank(self, num_qubits: int, gates: Iterable["Gate"]) -> int:
-        """Return an upper bound on the maximal Schmidt rank.
+    def bond_dimensions(self, num_qubits: int, gates: Iterable["Gate"]) -> list[int]:
+        """Track bond dimensions across a linear qubit ordering.
 
-        The routine tracks a simple bond dimension across a linear ordering of
-        qubits.  Each two-qubit gate acting on qubits ``a`` and ``b`` doubles the
-        bond dimension of all cuts between ``a`` and ``b``.  The largest bond
-        encountered is returned as a crude predictor for MPS efficiency.
+        Each two-qubit gate acting on qubits ``a`` and ``b`` doubles the bond
+        dimension of all cuts between ``a`` and ``b``.  The returned list has
+        ``num_qubits - 1`` entries corresponding to the Schmidt rank for each
+        cut along the chain.
         """
 
         bonds = [1] * max(0, num_qubits - 1)
@@ -161,6 +162,12 @@ class CostEstimator:
             q0, q1 = min(qubits), max(qubits)
             for i in range(q0, q1):
                 bonds[i] = min(bonds[i] * 2, limit)
+        return bonds
+
+    def max_schmidt_rank(self, num_qubits: int, gates: Iterable["Gate"]) -> int:
+        """Return an upper bound on the maximal Schmidt rank."""
+
+        bonds = self.bond_dimensions(num_qubits, gates)
         return max(bonds, default=1)
 
     def entanglement_entropy(self, num_qubits: int, gates: Iterable["Gate"]) -> float:
@@ -280,9 +287,10 @@ class CostEstimator:
         num_qubits: int,
         num_1q_gates: int,
         num_2q_gates: int,
-        chi: int,
+        chi: int | Sequence[int] | None,
         *,
         svd: bool = False,
+        gates: Iterable["Gate"] | None = None,
     ) -> Cost:
         r"""Estimate cost for matrix product state simulation.
 
@@ -294,28 +302,65 @@ class CostEstimator:
             Counts of single- and two-qubit gates respectively. Measurement
             operations should be included in ``num_1q_gates``.
         chi:
-            Assumed bond dimension of the MPS.
+            Bond dimensions along the chain.  A scalar applies the same
+            dimension to every bond while an iterable specifies per-bond
+            dimensions.  If ``None``, ``gates`` must be provided and bond
+            dimensions are derived from :meth:`bond_dimensions`.
         svd:
             If ``True``, include an additional cost for the singular value
             decomposition and truncation step performed after entangling gates.
+        gates:
+            Optional gate sequence used to derive bond dimensions when ``chi``
+            is ``None``.
 
         Notes
         -----
-        Single-qubit gates scale with :math:`\chi^2` while two-qubit gates scale
-        with :math:`\chi^3`.  The optional truncation step adds a term scaling
-        as :math:`\chi^3 \log \chi` per two-qubit gate.
+        Single-qubit gates scale with the product of adjacent bond dimensions
+        while two-qubit gates scale with the product of the left, shared and
+        right bonds.  The optional truncation step adds a term scaling as
+        :math:`\chi^3 \log \chi` per two-qubit gate.  Temporary workspace
+        required for SVD is controlled via the ``mps_temp_mem`` coefficient.
         """
 
         n = num_qubits
-        chi2 = chi**2
-        chi3 = chi**3
-        time = (
-            self.coeff["mps_gate_1q"] * num_1q_gates * n * chi2
-            + self.coeff["mps_gate_2q"] * num_2q_gates * n * chi3
-        )
-        if svd and chi > 1 and num_2q_gates > 0:
-            time += self.coeff["mps_trunc"] * num_2q_gates * n * chi3 * math.log2(chi)
-        memory = self.coeff["mps_mem"] * n * chi2
+        if chi is None:
+            if gates is None:
+                raise ValueError("gates must be provided when chi is None")
+            bond_dims = self.bond_dimensions(n, gates)
+        elif isinstance(chi, Iterable) and not isinstance(chi, (str, bytes)):
+            bond_dims = list(chi)
+        else:
+            bond_dims = [int(chi)] * max(0, n - 1)
+
+        if len(bond_dims) < max(0, n - 1):
+            bond_dims.extend([1] * (max(0, n - 1) - len(bond_dims)))
+        elif len(bond_dims) > max(0, n - 1):
+            bond_dims = bond_dims[: n - 1]
+
+        left = [1] + bond_dims
+        right = bond_dims + [1]
+        site_costs = [l * r for l, r in zip(left, right)]
+        bond_costs = [left[i] * bond_dims[i] * right[i + 1] for i in range(len(bond_dims))]
+
+        time = self.coeff["mps_gate_1q"] * num_1q_gates * sum(site_costs)
+        if n > 1:
+            avg_bond_cost = sum(bond_costs) / (n - 1)
+            time += self.coeff["mps_gate_2q"] * num_2q_gates * n * avg_bond_cost
+            if svd and num_2q_gates > 0:
+                trunc = sum(
+                    c * math.log2(b) if b > 1 else 0.0
+                    for c, b in zip(bond_costs, bond_dims)
+                )
+                trunc /= (n - 1)
+                time += self.coeff["mps_trunc"] * num_2q_gates * n * trunc
+        elif svd and num_2q_gates > 0:
+            # Defensive branch for single qubit with svd flag
+            time += 0.0
+
+        memory = self.coeff["mps_mem"] * sum(site_costs)
+        if svd and num_2q_gates > 0 and bond_costs:
+            memory += self.coeff.get("mps_temp_mem", 0.0) * max(bond_costs)
+
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
