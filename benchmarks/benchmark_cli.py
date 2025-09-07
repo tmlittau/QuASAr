@@ -82,6 +82,7 @@ def run_suite(
             engine,
             backend=Backend.STATEVECTOR,
             repetitions=repetitions,
+            quick=True,
         )
         state = rec.get("result")
         if state is None:

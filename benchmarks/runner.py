@@ -287,7 +287,12 @@ class BenchmarkRunner:
 
     # ------------------------------------------------------------------
     def run_quasar(
-        self, circuit: Any, engine: Any, *, backend: Backend | None = None
+        self,
+        circuit: Any,
+        engine: Any,
+        *,
+        backend: Backend | None = None,
+        quick: bool = False,
     ) -> Dict[str, Any]:
         """Execute ``circuit`` using a QuASAr scheduler ``engine``.
 
@@ -299,7 +304,9 @@ class BenchmarkRunner:
         ``scheduler`` and ``planner`` attributes (e.g.,
         :class:`~quasar.simulation_engine.SimulationEngine`).  The optional
         ``backend`` argument forces both planning and execution to use a
-        specific backend rather than selecting one automatically.
+        specific backend rather than selecting one automatically.  When
+        ``quick`` is set to ``True`` the quick-path is taken regardless of the
+        scheduler's heuristics.
 
         The returned record contains a ``backend`` field indicating the
         backend chosen by the scheduler.
@@ -316,10 +323,17 @@ class BenchmarkRunner:
 
         try:
             backend_choice = None
-            use_quick = False
+            use_quick = quick
             should_quick = getattr(scheduler, "should_use_quick_path", None)
             if callable(should_quick):
-                use_quick = should_quick(circuit, backend=backend)
+                try:
+                    use_quick = should_quick(circuit, backend=backend, force=quick)
+                except TypeError:  # pragma: no cover - legacy signature
+                    use_quick = should_quick(circuit, backend=backend)
+                    if quick:
+                        use_quick = True
+            elif quick:
+                use_quick = True
 
             if use_quick:
                 tracemalloc.start()
@@ -419,11 +433,13 @@ class BenchmarkRunner:
         repetitions: int = 1,
         timeout: float | None = None,
         run_timeout: float | None = None,
+        quick: bool = False,
     ) -> Dict[str, Any]:
         """Execute :meth:`run_quasar` repeatedly and aggregate statistics.
 
         When ``backend`` is provided it is forwarded to each
-        :meth:`run_quasar` invocation to force a specific backend.  The
+        :meth:`run_quasar` invocation to force a specific backend.  Setting
+        ``quick`` to ``True`` forces quick-path execution for each run.  The
         summary record includes the chosen ``backend``.
         """
 
@@ -439,10 +455,17 @@ class BenchmarkRunner:
 
         scheduler = getattr(engine, "scheduler", engine)
         planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
-        use_quick = False
+        use_quick = quick
         should_quick = getattr(scheduler, "should_use_quick_path", None)
         if callable(should_quick) and circuit is not None:
-            use_quick = should_quick(circuit, backend=backend)
+            try:
+                use_quick = should_quick(circuit, backend=backend, force=quick)
+            except TypeError:  # pragma: no cover - legacy signature
+                use_quick = should_quick(circuit, backend=backend)
+                if quick:
+                    use_quick = True
+        elif quick:
+            use_quick = True
 
         if use_quick:
             plan = None
@@ -482,7 +505,7 @@ class BenchmarkRunner:
 
         def _run_once() -> Dict[str, Any]:
             if use_quick:
-                rec = self.run_quasar(circuit, engine, backend=backend)
+                rec = self.run_quasar(circuit, engine, backend=backend, quick=True)
                 self.results.pop()
                 return rec
             if simple_backend is not None and simple_gates is not None:

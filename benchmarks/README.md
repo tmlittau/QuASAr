@@ -78,7 +78,8 @@ CLI can discover it automatically.  The existing functions, such as
 
 Benchmarks can force a particular simulator without using adapter classes.
 Invoke :func:`benchmarks.runner.BenchmarkRunner.run_quasar_multiple` and pass
-the desired :class:`quasar.cost.Backend` value:
+the desired :class:`quasar.cost.Backend` value.  Set ``quick=True`` to bypass
+planning and execute directly on the chosen backend:
 
 ```python
 from benchmarks.runner import BenchmarkRunner
@@ -87,7 +88,13 @@ from quasar.cost import Backend
 
 runner = BenchmarkRunner()
 engine = SimulationEngine()
-rec = runner.run_quasar_multiple(circuit, engine, backend=Backend.STATEVECTOR, repetitions=3)
+rec = runner.run_quasar_multiple(
+    circuit,
+    engine,
+    backend=Backend.STATEVECTOR,
+    repetitions=3,
+    quick=True,
+)
 ```
 
 This leverages the scheduler while still collecting timings for a single

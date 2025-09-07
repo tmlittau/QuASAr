@@ -49,7 +49,7 @@ class DummyScheduler:
         self.backends = {Backend.STATEVECTOR: DummyBackend()}
         self.ran = False
 
-    def should_use_quick_path(self, circuit, *, backend=None):  # pragma: no cover - trivial
+    def should_use_quick_path(self, circuit, *, backend=None, force: bool = False):  # pragma: no cover - trivial
         return True
 
     def select_backend(self, circuit, *, backend=None):  # pragma: no cover - trivial

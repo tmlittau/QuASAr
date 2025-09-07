@@ -7,7 +7,7 @@ import benchmark_cli
 from quasar.circuit import Circuit
 
 
-def dummy_run_quasar_multiple(self, circuit, engine, backend, repetitions):
+def dummy_run_quasar_multiple(self, circuit, engine, backend, repetitions, quick=False):
     return {
         "backend": backend.name if hasattr(backend, "name") else backend,
         "repetitions": repetitions,

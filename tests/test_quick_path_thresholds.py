@@ -19,6 +19,7 @@ from benchmarks.circuits import (
 )
 from quasar import Scheduler
 from quasar.planner import Planner
+from quasar.cost import Backend
 
 
 def _time_planning(circ, *, quick: bool) -> float:
@@ -56,3 +57,12 @@ def test_quick_path_thresholds_match_performance(circ) -> None:
     quick_time = _time_planning(circ, quick=True)
     full_time = _time_planning(circ, quick=False)
     assert quick_time < full_time
+
+
+def test_backend_still_checks_quick_path() -> None:
+    scheduler = Scheduler(quick_max_qubits=1, quick_max_gates=1, quick_max_depth=1)
+    circ = ghz_circuit(2)
+    assert not scheduler.should_use_quick_path(circ, backend=Backend.STATEVECTOR)
+    assert scheduler.should_use_quick_path(
+        circ, backend=Backend.STATEVECTOR, force=True
+    )

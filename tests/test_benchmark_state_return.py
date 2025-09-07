@@ -22,7 +22,7 @@ class DummyScheduler:
 
         self.planner = Planner()
 
-    def should_use_quick_path(self, circuit, *, backend=None):
+    def should_use_quick_path(self, circuit, *, backend=None, force: bool = False):
         return False
 
     def prepare_run(self, circuit, plan=None, *, backend=None):
