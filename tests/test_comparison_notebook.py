@@ -4,6 +4,7 @@ import pytest
 import benchmarks.circuits as circuit_lib
 from benchmarks.runner import BenchmarkRunner
 from quasar import Backend, SimulationEngine
+from quasar.ssd import SSD
 
 
 @pytest.mark.parametrize("num_qubits", [3, 5])
@@ -28,6 +29,8 @@ def test_notebook_comparison_behaviour(num_qubits: int) -> None:
                 rec = runner.run_quasar_multiple(base, engine, backend=b, repetitions=1)
                 rec.update({"circuit": name, "mode": "forced"})
                 records.append(rec)
+                state_rec = runner.run_quasar(base, engine, backend=b)
+                assert isinstance(state_rec["result"], SSD)
             except RuntimeError:
                 pass
         try:
@@ -35,6 +38,8 @@ def test_notebook_comparison_behaviour(num_qubits: int) -> None:
             rec = runner.run_quasar_multiple(auto, engine, repetitions=1)
             rec.update({"circuit": name, "mode": "auto"})
             records.append(rec)
+            state_rec = runner.run_quasar(auto, engine)
+            assert isinstance(state_rec["result"], SSD)
         except RuntimeError:
             pass
 

@@ -87,6 +87,7 @@ class BenchmarkRunner:
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()
 
+                kwargs.setdefault("return_state", True)
                 start_run = time.perf_counter()
                 result = backend.run_benchmark(**kwargs)
                 run_time = time.perf_counter() - start_run
@@ -278,6 +279,8 @@ class BenchmarkRunner:
             summary[f"{m}_std"] = (
                 statistics.pstdev(values) if len(values) > 1 else 0.0
             )
+
+        summary["result"] = records[-1].get("result") if records else None
 
         self.results.append(summary)
         return summary
@@ -544,6 +547,8 @@ class BenchmarkRunner:
             summary[f"{m}_std"] = (
                 statistics.pstdev(values) if len(values) > 1 else 0.0
             )
+
+        summary["result"] = records[-1].get("result") if records else None
 
         self.results.append(summary)
         return summary

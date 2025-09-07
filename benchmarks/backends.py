@@ -29,7 +29,7 @@ class _Adapter:
         self.backend.apply_gate(gate, qubits, params)
 
     def run_benchmark(self, *, return_state: bool = False) -> Any | None:
-        result = self.backend.run_benchmark()
+        result = self.backend.run_benchmark(return_state=return_state)
         if return_state:
             if result is None and hasattr(self.backend, "statevector"):
                 try:

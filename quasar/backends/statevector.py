@@ -172,12 +172,12 @@ class StatevectorBackend(Backend):
         self._benchmark_ops = []
         self._cached_state = None
 
-    def run_benchmark(self) -> np.ndarray:
-        """Execute the prepared circuit once and cache the resulting state."""
+    def run_benchmark(self, *, return_state: bool = False) -> np.ndarray | None:
+        """Execute the prepared circuit once and optionally return the state."""
         self._benchmark_mode = False
         state = self._run()
         self._cached_state = state
-        return state
+        return state if return_state else None
 
     # ------------------------------------------------------------------
     def _run(self) -> np.ndarray:

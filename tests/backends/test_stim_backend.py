@@ -1,16 +1,16 @@
 """Tests for the Stim backend initialisation."""
 
 from quasar.backends.stim_backend import StimBackend
+from quasar.ssd import SSD
 
 
-def test_run_benchmark_caches_tableau_without_statevector(monkeypatch) -> None:
-    """``run_benchmark`` should execute queued ops without dense extraction."""
+def test_run_benchmark_returns_ssd_without_statevector(monkeypatch) -> None:
+    """``run_benchmark`` should return an SSD without dense extraction."""
     backend = StimBackend()
     backend.load(1)
     backend.prepare_benchmark()
     backend.apply_gate("H", [0])
 
-    # Spy on the simulator's state_vector to ensure it is not called
     assert backend.simulator is not None  # for mypy
     called = False
     original_sv = backend.simulator.state_vector
@@ -24,21 +24,10 @@ def test_run_benchmark_caches_tableau_without_statevector(monkeypatch) -> None:
         type(backend.simulator), "state_vector", spy_state_vector, raising=False
     )
 
-    result = backend.run_benchmark()
-    assert result is None
-    assert backend._benchmark_tableau is not None
+    result = backend.run_benchmark(return_state=True)
     assert not called
-
-    run_called = False
-
-    def fake_run() -> None:
-        nonlocal run_called
-        run_called = True
-
-    backend.run = fake_run  # type: ignore[assignment]
-    ssd = backend.extract_ssd()
-    assert not run_called
-    assert ssd.partitions[0].history == ("H",)
+    assert isinstance(result, SSD)
+    assert result.partitions[0].history == ("H",)
 
 
 def test_load_and_apply_highest_qubit() -> None:
