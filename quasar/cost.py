@@ -130,7 +130,10 @@ class CostEstimator:
             # Decision diagram coefficients ----------------------------------
             # Zulehner & Wille (2019) report node operations linear in the
             # active frontier size; we keep the unit constant.
-            "dd_gate": 1.0,
+            # Decision diagrams are highly efficient for sparse states.
+            # Downscale the per-gate runtime cost so that small sparse circuits
+            # prefer the DD backend over dense simulators.
+            "dd_gate": 0.05,
             # Memory is proportional to node count with an additional cache.
             # Empirical measurements show QMDDs require significantly less
             # storage than the raw node size suggests, hence a small scaling

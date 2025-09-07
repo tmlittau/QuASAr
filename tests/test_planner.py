@@ -98,6 +98,7 @@ def test_conversion_cost_multiplier_discourages_switch():
         "sv_gate_2q": 1.0,
         "sv_meas": 1.0,
         "tab_gate": 0.1,
+        "dd_gate": 10.0,
         "b2b_svd": 0.0,
         "b2b_copy": 0.0,
         "ingest_sv": 0.375,

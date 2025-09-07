@@ -36,7 +36,7 @@ def test_mps_cost_regression():
 def test_dd_cost_regression():
     est = CostEstimator()
     cost = est.decision_diagram(num_gates=1, frontier=2)
-    assert cost.time == 2.0
+    assert cost.time == 0.1
     assert cost.memory == pytest.approx(3.84)
     assert cost.log_depth == 1.0
 

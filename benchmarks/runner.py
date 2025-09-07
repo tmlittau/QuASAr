@@ -456,7 +456,11 @@ class BenchmarkRunner:
             assert plan is not None
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
+            est = getattr(planner, "estimator", None)
+            coeff_backup = copy.deepcopy(getattr(est, "coeff", {})) if est else None
             result, run_cost = scheduler.run(circuit, plan, instrument=True)
+            if est is not None and coeff_backup is not None:
+                est.coeff = coeff_backup
             backend_choice_name = None
             if hasattr(result, "partitions") and getattr(result, "partitions"):
                 backend_obj = result.partitions[0].backend

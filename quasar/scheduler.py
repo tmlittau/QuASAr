@@ -497,12 +497,13 @@ class Scheduler:
                         gate_keys, mem_key = coeff
                         if est_cost.time > 0:
                             ratio = observed.time / est_cost.time
+                            ratio = max(0.1, min(ratio, 10.0))
                             for gk in gate_keys:
                                 updates[gk] = est.coeff[gk] * ratio
                         if est_cost.memory > 0 and observed.memory > 0:
-                            updates[mem_key] = (
-                                est.coeff[mem_key] * observed.memory / est_cost.memory
-                            )
+                            mem_ratio = observed.memory / est_cost.memory
+                            mem_ratio = max(0.1, min(mem_ratio, 10.0))
+                            updates[mem_key] = est.coeff[mem_key] * mem_ratio
                         if updates:
                             est.update_coefficients(updates)
 

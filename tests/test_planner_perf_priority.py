@@ -15,6 +15,9 @@ class MemoryEstimator(CostEstimator):
     def mps(self, num_qubits, num_1q_gates, num_2q_gates, chi, *, svd=False):
         return Cost(time=10.0, memory=10.0)
 
+    def decision_diagram(self, num_gates, frontier):
+        return Cost(time=1000.0, memory=1000.0)
+
     def conversion(self, *args, **kwargs):
         return ConversionEstimate("b2b", Cost(time=0.0, memory=0.0))
 
