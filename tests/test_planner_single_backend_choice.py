@@ -11,7 +11,7 @@ class OverheadEstimator(CostEstimator):
     def statevector(self, num_qubits, num_1q_gates, num_2q_gates, num_meas):
         return Cost(time=num_1q_gates + num_2q_gates + num_meas + 1, memory=0)
 
-    def tableau(self, num_qubits, num_gates):
+    def tableau(self, num_qubits, num_gates, **kwargs):
         return Cost(time=num_gates + 1, memory=0)
 
     def mps(self, num_qubits, num_1q_gates, num_2q_gates, chi, *, svd=False):

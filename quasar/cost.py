@@ -94,6 +94,8 @@ class CostEstimator:
             "sv_bytes_per_amp": 2.0,
             "tab_gate": 1.0,
             "tab_mem": 1.0,
+            "tab_phase_mem": 1.0,
+            "tab_meas_mem": 1.0,
             "mps_gate_1q": 1.0,
             "mps_gate_2q": 1.0,
             "mps_trunc": 1.0,
@@ -275,10 +277,55 @@ class CostEstimator:
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
-    def tableau(self, num_qubits: int, num_gates: int) -> Cost:
-        quad = num_qubits**2
+    def tableau(
+        self,
+        num_qubits: int,
+        num_gates: int,
+        *,
+        stab_rows: int | None = None,
+        stab_cols: int | None = None,
+        dest_rows: int | None = None,
+        dest_cols: int | None = None,
+        phase_bits: bool = False,
+        num_meas: int = 0,
+    ) -> Cost:
+        """Estimate cost for stabilizer tableau simulation.
+
+        Parameters
+        ----------
+        num_qubits:
+            Total number of qubits represented by the tableau.  Used only
+            for the logarithmic depth term and as a default for the matrix
+            dimensions.
+        num_gates:
+            Number of Clifford gates applied to the tableau.
+        stab_rows, stab_cols, dest_rows, dest_cols:
+            Explicit row/column counts for the stabilizer and destabilizer
+            matrices.  Defaults to ``num_qubits`` for missing values.
+        phase_bits:
+            If ``True``, include memory for phase bits.  One bit per row is
+            assumed across both matrices.
+        num_meas:
+            Number of measurements whose results must be logged.
+        """
+
+        stab_rows = num_qubits if stab_rows is None else stab_rows
+        stab_cols = num_qubits if stab_cols is None else stab_cols
+        dest_rows = num_qubits if dest_rows is None else dest_rows
+        dest_cols = num_qubits if dest_cols is None else dest_cols
+
+        stab_cells = stab_rows * stab_cols
+        dest_cells = dest_rows * dest_cols
+        quad = stab_cells + dest_cells
+
         time = self.coeff["tab_gate"] * num_gates * quad
         memory = self.coeff["tab_mem"] * quad
+
+        if phase_bits:
+            memory += self.coeff["tab_phase_mem"] * (stab_rows + dest_rows)
+        if num_meas:
+            memory += self.coeff["tab_meas_mem"] * num_meas
+
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 

@@ -31,11 +31,19 @@ def test_statevector_precision_memory():
     assert double.memory == 2 * single.memory
 
 
-def test_tableau_quadratic():
+def test_tableau_qubit_scaling():
     est = CostEstimator()
-    cost = est.tableau(num_qubits=5, num_gates=2)
-    assert cost.time == 2 * 25
-    assert cost.memory == 25
+    small = est.tableau(num_qubits=2, num_gates=1)
+    large = est.tableau(num_qubits=4, num_gates=1)
+    assert large.time == 4 * small.time
+    assert large.memory == 4 * small.memory
+
+
+def test_tableau_measurement_memory():
+    est = CostEstimator()
+    base = est.tableau(num_qubits=3, num_gates=0)
+    meas = est.tableau(num_qubits=3, num_gates=0, num_meas=5)
+    assert meas.memory == base.memory + 5 * est.coeff["tab_meas_mem"]
 
 
 def test_mps_chi_dependence():
