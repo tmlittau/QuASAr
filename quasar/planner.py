@@ -967,9 +967,11 @@ class Planner:
         is restricted to Clifford circuits).
         """
 
-        gates = circuit.gates
+        gates = circuit.simplify_classical_controls()
         names = [g.gate.upper() for g in gates]
-        clifford_circuit = bool(names) and all(name in CLIFFORD_GATES for name in names)
+        clifford_circuit = bool(names) and all(
+            name in CLIFFORD_GATES for name in names
+        )
         allow_tableau = clifford_circuit
 
         threshold = max_memory if max_memory is not None else self.max_memory
