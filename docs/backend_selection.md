@@ -64,6 +64,29 @@ plan = engine.planner.plan(qft_circuit(5))
 assert plan.final_backend == Backend.MPS
 ```
 
+## Classical control simplification
+
+The planner analyses the circuit as it is presented.  For accurate backend
+selection, classical control simplification must run before planning so that
+gates conditioned on known classical bits are removed or reduced.  Circuits
+constructed with ``use_classical_simplification=False`` retain their original
+structure and need explicit reinitialisation via
+``circuit.enable_classical_simplification()`` (or reconstruction) to benefit.
+
+Simplifying a quantum Fourier transform initialised in ``|0\rangle`` removes all
+controlled phase rotations, leaving only Hadamards.  The planner then detects a
+pure Clifford circuit and selects the ``STIM`` backend:
+
+```python
+from benchmarks.circuits import qft_circuit
+from quasar import Backend, SimulationEngine
+
+circ = qft_circuit(5, use_classical_simplification=True)
+circ.simplify_classical_controls()  # must run before planning
+plan = SimulationEngine().planner.plan(circ)
+assert plan.final_backend == Backend.STIM
+```
+
 ## Telemetry
 
 Backend decisions made on the quick path can be recorded for later analysis.
