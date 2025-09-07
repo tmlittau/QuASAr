@@ -24,14 +24,20 @@ def test_notebook_comparison_behaviour():
                 rec = runner.run_quasar_multiple(base, engine, backend=b, repetitions=1)
                 rec.update({'circuit': name, 'mode': 'forced'})
                 records.append(rec)
-            except Exception:
+            except RuntimeError:
+                # some backend/circuit combinations are unsupported and
+                # ``run_quasar_multiple`` raises a RuntimeError in those cases
+                # when no runs can be executed.  Treat these as expected
+                # failures for the purposes of this comparison and skip them.
                 pass
         try:
             auto = build(5, use_classical_simplification=True)
             rec = runner.run_quasar_multiple(auto, engine, repetitions=1)
             rec.update({'circuit': name, 'mode': 'auto'})
             records.append(rec)
-        except Exception:
+        except RuntimeError:
+            # As above, only ignore known failures where the automatic
+            # selection could not execute any runs.
             pass
 
     df = pd.DataFrame(records)
