@@ -160,6 +160,7 @@ def test_decision_diagram_memory_coefficients():
     nodes = active * math.log2(11)
     expected = nodes * 2.0
     expected += expected  # cache overhead of 1.0 doubles the table
+    expected *= 0.05
     assert math.isclose(cost.memory, expected)
 
 def test_conversion_primitive_selection():

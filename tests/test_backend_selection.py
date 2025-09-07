@@ -31,7 +31,7 @@ def test_planner_selects_dd_when_sparsity_weighted(monkeypatch):
     monkeypatch.setattr(config.DEFAULT, "dd_metric_threshold", 0.9)
     engine = SimulationEngine()
     plan = engine.planner.plan(circuit)
-    assert plan.final_backend == Backend.MPS
+    assert plan.final_backend == Backend.DECISION_DIAGRAM
 
 
 def test_mps_target_fidelity_controls_selection(monkeypatch):

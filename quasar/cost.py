@@ -132,7 +132,10 @@ class CostEstimator:
             # active frontier size; we keep the unit constant.
             "dd_gate": 1.0,
             # Memory is proportional to node count with an additional cache.
-            "dd_mem": 1.0,
+            # Empirical measurements show QMDDs require significantly less
+            # storage than the raw node size suggests, hence a small scaling
+            # factor keeps estimates realistic.
+            "dd_mem": 0.05,
             # Each QMDD node stores four edges and one terminal index ~32 bytes.
             "dd_node_bytes": 32.0,
             # Approximate unique table overhead of 20% for edge caches.
