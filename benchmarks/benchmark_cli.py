@@ -79,6 +79,7 @@ def run_suite(
             backend=Backend.STATEVECTOR,
             repetitions=repetitions,
         )
+        _state = rec.get("result")  # retain state for potential downstream use
         record = {
             "circuit": circuit_fn.__name__,
             "qubits": n,

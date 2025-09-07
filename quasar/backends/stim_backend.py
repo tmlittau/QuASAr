@@ -120,16 +120,8 @@ class StimBackend(Backend):
         for name, qubits, params in ops:
             self.apply_gate(name, qubits, params)
 
-    def run_benchmark(self) -> None:
-        """Execute queued operations and cache the resulting tableau.
-
-        Benchmarking should avoid generating a dense statevector as this would
-        defeat the purpose of timing a stabilizer simulation.  Instead we apply
-        the queued gates via :meth:`run` and store the resulting tableau in
-        ``_benchmark_tableau`` for later retrieval by :meth:`extract_ssd`.
-        ``None`` is returned so callers do not accidentally trigger a
-        statevector extraction.
-        """
+    def run_benchmark(self, *, return_state: bool = False) -> SSD | None:
+        """Execute queued operations and optionally return the final state."""
         self.run()
         self._benchmark_tableau = None
         if self.simulator is not None:
@@ -137,6 +129,8 @@ class StimBackend(Backend):
                 self._benchmark_tableau = self.simulator.current_inverse_tableau()
             except Exception:
                 self._benchmark_tableau = None
+        if return_state:
+            return self.extract_ssd()
         return None
 
     def extract_ssd(self) -> SSD:

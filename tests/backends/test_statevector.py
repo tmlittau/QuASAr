@@ -8,7 +8,7 @@ def test_statevector_benchmark_uses_cached_state(monkeypatch):
     backend.load(1)
     backend.prepare_benchmark()
     backend.apply_gate("H", [0])
-    state = backend.run_benchmark()
+    state = backend.run_benchmark(return_state=True)
 
     def fail_run():  # pragma: no cover - should not be called
         raise AssertionError("_run invoked despite cached state")

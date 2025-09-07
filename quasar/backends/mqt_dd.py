@@ -133,11 +133,13 @@ class DecisionDiagramBackend(Backend):
             self.apply_gate(name, qubits, params)
 
     # ------------------------------------------------------------------
-    def run_benchmark(self) -> None:
-        """Apply queued gates and cache the resulting state."""
+    def run_benchmark(self, *, return_state: bool = False) -> SSD | None:
+        """Apply queued gates and optionally return the final state."""
 
         self.run()
         self._benchmark_state = self.state if isinstance(self.state, dd.VectorDD) else None
+        if return_state:
+            return self.extract_ssd()
         return None
 
     # ------------------------------------------------------------------

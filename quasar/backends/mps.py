@@ -195,13 +195,13 @@ class MPSBackend(Backend):
         self._cached_state = None
         self._cached_statevector = None
 
-    def run_benchmark(self) -> object:
-        """Execute the prepared circuit once and cache the resulting state."""
+    def run_benchmark(self, *, return_state: bool = False) -> object | None:
+        """Execute the prepared circuit once and optionally return the state."""
         self._benchmark_mode = False
         state = self._run()
         self._cached_state = state
         self._cached_statevector = None
-        return state
+        return state if return_state else None
 
     # ------------------------------------------------------------------
     def _run(self) -> object:

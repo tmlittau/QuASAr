@@ -42,7 +42,7 @@ def test_mps_benchmark_uses_cached_state(monkeypatch):
         return original_run()
 
     monkeypatch.setattr(backend, "_run", run_spy)
-    state = backend.run_benchmark()
+    state = backend.run_benchmark(return_state=True)
     assert run_calls["n"] == 1
 
     def fail_run() -> object:  # pragma: no cover - should not run
