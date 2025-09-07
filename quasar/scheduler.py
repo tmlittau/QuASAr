@@ -139,6 +139,7 @@ class Scheduler:
         amp_rot = getattr(circuit, "amplitude_rotation_diversity", None)
         from .sparsity import sparsity_estimate, adaptive_dd_sparsity_threshold
         from .symmetry import phase_rotation_diversity, amplitude_rotation_diversity
+
         if sparsity is None:
             sparsity = sparsity_estimate(circuit)
         if phase_rot is None:
@@ -146,12 +147,16 @@ class Scheduler:
         if amp_rot is None:
             amp_rot = amplitude_rotation_diversity(circuit)
 
-        nnz_estimate = int((1 - sparsity) * (2 ** num_qubits))
+        nnz_estimate = int((1 - sparsity) * (2**num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
         s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
         nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-        phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-        amp_score = 1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+        phase_score = (
+            1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
+        )
+        amp_score = (
+            1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+        )
         weight_sum = (
             config.DEFAULT.dd_sparsity_weight
             + config.DEFAULT.dd_nnz_weight
@@ -256,9 +261,7 @@ class Scheduler:
             )
             plan.explicit_conversions = []
             if self.planner is not None:
-                plan.step_costs = [
-                    self._estimate_cost(backend_choice, gates)
-                ]
+                plan.step_costs = [self._estimate_cost(backend_choice, gates)]
             else:
                 plan.step_costs = [Cost(time=0.0, memory=0.0)]
             circuit.ssd.conversions = []
@@ -435,7 +438,11 @@ class Scheduler:
             target = step.backend
             segment = gates[step.start : step.end]
 
-            if step.parallel and len(step.parallel) > 1 and target in self.parallel_backends:
+            if (
+                step.parallel
+                and len(step.parallel) > 1
+                and target in self.parallel_backends
+            ):
                 groups: List[List] = [[] for _ in step.parallel]
                 mapping = {q: idx for idx, grp in enumerate(step.parallel) for q in grp}
                 for gate in segment:
@@ -473,7 +480,10 @@ class Scheduler:
                     observed = Cost(time=elapsed, memory=float(peak))
 
                     coeff = {
-                        Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                        Backend.STATEVECTOR: (
+                            ["sv_gate_1q", "sv_gate_2q", "sv_meas"],
+                            "sv_bytes_per_amp",
+                        ),
                         Backend.MPS: (
                             ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
                             "mps_mem",
@@ -490,7 +500,9 @@ class Scheduler:
                             for gk in gate_keys:
                                 updates[gk] = est.coeff[gk] * ratio
                         if est_cost.memory > 0 and observed.memory > 0:
-                            updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                            updates[mem_key] = (
+                                est.coeff[mem_key] * observed.memory / est_cost.memory
+                            )
                         if updates:
                             est.update_coefficients(updates)
 
@@ -515,11 +527,7 @@ class Scheduler:
                     ((k, s) for k, s in sims.items() if gate.qubits[1] in k[0]),
                     None,
                 )
-                if (
-                    left_info
-                    and right_info
-                    and left_info[1] is not right_info[1]
-                ):
+                if left_info and right_info and left_info[1] is not right_info[1]:
                     prepared = plan.replay_ssd.get(i)
                     sim_obj = type(self.backends[target])()
                     sim_obj.load(circuit.num_qubits)
@@ -531,11 +539,19 @@ class Scheduler:
                     except Exception:
                         if isinstance(prepared, SSD):
                             if target == Backend.TABLEAU:
-                                rep = self.conversion_engine.convert_boundary_to_tableau(prepared)
+                                rep = (
+                                    self.conversion_engine.convert_boundary_to_tableau(
+                                        prepared
+                                    )
+                                )
                             elif target == Backend.DECISION_DIAGRAM:
-                                rep = self.conversion_engine.convert_boundary_to_dd(prepared)
+                                rep = self.conversion_engine.convert_boundary_to_dd(
+                                    prepared
+                                )
                             else:
-                                rep = self.conversion_engine.convert_boundary_to_statevector(prepared)
+                                rep = self.conversion_engine.convert_boundary_to_statevector(
+                                    prepared
+                                )
                             sim_obj.ingest(rep, num_qubits=circuit.num_qubits)
                         else:
                             sim_obj.load(circuit.num_qubits)
@@ -544,7 +560,9 @@ class Scheduler:
                         _, peak = tracemalloc.get_traced_memory()
                         tracemalloc.stop()
                         conversion_time += elapsed
-                        total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                        total_gate_time.memory = max(
+                            total_gate_time.memory, float(peak)
+                        )
                     sims.clear()
                     sims[(frozenset(range(circuit.num_qubits)), target)] = sim_obj
                     current_sim = sim_obj
@@ -577,7 +595,9 @@ class Scheduler:
                         _, peak = tracemalloc.get_traced_memory()
                         tracemalloc.stop()
                         conversion_time += elapsed
-                        total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                        total_gate_time.memory = max(
+                            total_gate_time.memory, float(peak)
+                        )
                     else:
                         current_ssd = current_sim.extract_ssd()
                     layer = None
@@ -591,8 +611,12 @@ class Scheduler:
                         rank = layer.rank
                         primitive = layer.primitive
                     else:  # Fallback path; should not trigger in normal operation
-                        if current_ssd is not None and getattr(current_ssd, "partitions", None):
-                            boundary = list(set(current_ssd.partitions[0].qubits) & set(qubits))
+                        if current_ssd is not None and getattr(
+                            current_ssd, "partitions", None
+                        ):
+                            boundary = list(
+                                set(current_ssd.partitions[0].qubits) & set(qubits)
+                            )
                         else:
                             boundary = list(qubits)
                         rank = 2 ** len(boundary)
@@ -604,14 +628,22 @@ class Scheduler:
                     try:
                         if primitive == "B2B":
                             try:
-                                sim_obj.ingest(current_ssd, num_qubits=circuit.num_qubits)
+                                sim_obj.ingest(
+                                    current_ssd, num_qubits=circuit.num_qubits
+                                )
                             except Exception:
                                 if target == Backend.TABLEAU:
-                                    rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
+                                    rep = self.conversion_engine.convert_boundary_to_tableau(
+                                        conv_ssd
+                                    )
                                 elif target == Backend.DECISION_DIAGRAM:
-                                    rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
+                                    rep = self.conversion_engine.convert_boundary_to_dd(
+                                        conv_ssd
+                                    )
                                 else:
-                                    rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
+                                    rep = self.conversion_engine.convert_boundary_to_statevector(
+                                        conv_ssd
+                                    )
                                 sim_obj.ingest(
                                     rep,
                                     num_qubits=circuit.num_qubits,
@@ -619,14 +651,18 @@ class Scheduler:
                                 )
                         elif primitive == "LW":
                             state = current_sim.statevector()
-                            rep = self.conversion_engine.extract_local_window(state, boundary)
+                            rep = self.conversion_engine.extract_local_window(
+                                state, boundary
+                            )
                             sim_obj.ingest(
                                 rep,
                                 num_qubits=circuit.num_qubits,
                                 mapping=boundary,
                             )
                         elif primitive == "ST":
-                            rep = self.conversion_engine.build_bridge_tensor(conv_ssd, conv_ssd)
+                            rep = self.conversion_engine.build_bridge_tensor(
+                                conv_ssd, conv_ssd
+                            )
                             sim_obj.ingest(
                                 rep,
                                 num_qubits=circuit.num_qubits,
@@ -634,11 +670,19 @@ class Scheduler:
                             )
                         else:
                             if target == Backend.TABLEAU:
-                                rep = self.conversion_engine.convert_boundary_to_tableau(conv_ssd)
+                                rep = (
+                                    self.conversion_engine.convert_boundary_to_tableau(
+                                        conv_ssd
+                                    )
+                                )
                             elif target == Backend.DECISION_DIAGRAM:
-                                rep = self.conversion_engine.convert_boundary_to_dd(conv_ssd)
+                                rep = self.conversion_engine.convert_boundary_to_dd(
+                                    conv_ssd
+                                )
                             else:
-                                rep = self.conversion_engine.convert_boundary_to_statevector(conv_ssd)
+                                rep = self.conversion_engine.convert_boundary_to_statevector(
+                                    conv_ssd
+                                )
                             sim_obj.ingest(
                                 rep,
                                 num_qubits=circuit.num_qubits,
@@ -652,7 +696,9 @@ class Scheduler:
                             _, peak = tracemalloc.get_traced_memory()
                             tracemalloc.stop()
                             conversion_time += elapsed
-                            total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                            total_gate_time.memory = max(
+                                total_gate_time.memory, float(peak)
+                            )
                 current_sim = sim_obj
                 current_backend = target
                 for k in list(sims.keys()):
@@ -678,7 +724,10 @@ class Scheduler:
 
                 # Update cost model based on observation
                 coeff = {
-                    Backend.STATEVECTOR: (["sv_gate_1q", "sv_gate_2q", "sv_meas"], "sv_mem"),
+                    Backend.STATEVECTOR: (
+                        ["sv_gate_1q", "sv_gate_2q", "sv_meas"],
+                        "sv_bytes_per_amp",
+                    ),
                     Backend.MPS: (
                         ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
                         "mps_mem",
@@ -695,7 +744,9 @@ class Scheduler:
                         for gk in gate_keys:
                             updates[gk] = est.coeff[gk] * ratio
                     if est_cost.memory > 0 and observed.memory > 0:
-                        updates[mem_key] = est.coeff[mem_key] * observed.memory / est_cost.memory
+                        updates[mem_key] = (
+                            est.coeff[mem_key] * observed.memory / est_cost.memory
+                        )
                     if updates:
                         est.update_coefficients(updates)
 
@@ -754,7 +805,9 @@ class Scheduler:
         m = len(gates)
         num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
         num_1q = sum(
-            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            1
+            for g in gates
+            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = m - num_1q - num_meas
         if backend == Backend.TABLEAU:

@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-"""Cost estimation for different quantum simulation backends."""
+"""Cost estimation for different quantum simulation backends.
+
+The estimator exposes a ``sv_bytes_per_amp`` calibration coefficient to
+approximate the bytes required per statevector amplitude, including
+intermediate buffers.  The actual memory footprint is modelled as
+``2**num_qubits * bytes_per_amplitude * sv_bytes_per_amp`` where the
+``bytes_per_amplitude`` term depends on the chosen precision
+(``complex64`` or ``complex128``).
+"""
 
 from dataclasses import dataclass
 from enum import Enum
@@ -83,7 +91,7 @@ class CostEstimator:
             "sv_gate_1q": 1.0,
             "sv_gate_2q": 1.0,
             "sv_meas": 1.0,
-            "sv_mem": 1.0,
+            "sv_bytes_per_amp": 2.0,
             "tab_gate": 1.0,
             "tab_mem": 1.0,
             "mps_gate_1q": 1.0,
@@ -135,9 +143,7 @@ class CostEstimator:
     # ------------------------------------------------------------------
     # Entanglement heuristics
     # ------------------------------------------------------------------
-    def max_schmidt_rank(
-        self, num_qubits: int, gates: Iterable["Gate"]
-    ) -> int:
+    def max_schmidt_rank(self, num_qubits: int, gates: Iterable["Gate"]) -> int:
         """Return an upper bound on the maximal Schmidt rank.
 
         The routine tracks a simple bond dimension across a linear ordering of
@@ -147,7 +153,7 @@ class CostEstimator:
         """
 
         bonds = [1] * max(0, num_qubits - 1)
-        limit = 2 ** num_qubits
+        limit = 2**num_qubits
         for gate in gates:
             qubits = getattr(gate, "qubits", [])
             if len(qubits) < 2:
@@ -229,20 +235,41 @@ class CostEstimator:
         num_1q_gates: int,
         num_2q_gates: int,
         num_meas: int,
+        *,
+        precision: str = "complex128",
     ) -> Cost:
-        amp = 2 ** num_qubits
+        """Estimate cost for dense statevector simulation.
+
+        Parameters
+        ----------
+        num_qubits:
+            Number of qubits in the simulated register.
+        num_1q_gates, num_2q_gates, num_meas:
+            Counts of single-qubit, two-qubit and measurement operations.
+        precision:
+            Complex dtype for the amplitudes.  Supported values are
+            ``"complex64"`` and ``"complex128"``.
+        """
+
+        amp = 2**num_qubits
         gate_time = (
             self.coeff["sv_gate_1q"] * num_1q_gates
             + self.coeff["sv_gate_2q"] * num_2q_gates
             + self.coeff["sv_meas"] * num_meas
         )
         time = gate_time * amp
-        memory = self.coeff["sv_mem"] * amp
+        if precision == "complex64":
+            bytes_per_amp = 8
+        elif precision == "complex128":
+            bytes_per_amp = 16
+        else:  # pragma: no cover - defensive branch
+            raise ValueError(f"unsupported precision: {precision}")
+        memory = self.coeff["sv_bytes_per_amp"] * amp * bytes_per_amp
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
     def tableau(self, num_qubits: int, num_gates: int) -> Cost:
-        quad = num_qubits ** 2
+        quad = num_qubits**2
         time = self.coeff["tab_gate"] * num_gates * quad
         memory = self.coeff["tab_mem"] * quad
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
@@ -280,20 +307,14 @@ class CostEstimator:
         """
 
         n = num_qubits
-        chi2 = chi ** 2
-        chi3 = chi ** 3
+        chi2 = chi**2
+        chi3 = chi**3
         time = (
             self.coeff["mps_gate_1q"] * num_1q_gates * n * chi2
             + self.coeff["mps_gate_2q"] * num_2q_gates * n * chi3
         )
         if svd and chi > 1 and num_2q_gates > 0:
-            time += (
-                self.coeff["mps_trunc"]
-                * num_2q_gates
-                * n
-                * chi3
-                * math.log2(chi)
-            )
+            time += self.coeff["mps_trunc"] * num_2q_gates * n * chi3 * math.log2(chi)
         memory = self.coeff["mps_mem"] * n * chi2
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
@@ -365,23 +386,23 @@ class CostEstimator:
         ):
             return ConversionEstimate("Full", Cost(float("inf"), float("inf")))
 
-        full = 2 ** num_qubits
+        full = 2**num_qubits
         ingest_time = self.coeff[f"ingest_{target.value}"] * full
         base_time = self.coeff.get("conversion_base", 0.0)
         overhead = ingest_time + base_time
 
         # --- B2B primitive ---
-        svd_cost = min(num_qubits * (rank ** 2), rank * (num_qubits ** 2))
+        svd_cost = min(num_qubits * (rank**2), rank * (num_qubits**2))
         b2b_time = (
             self.coeff["b2b_svd"] * svd_cost
-            + self.coeff["b2b_copy"] * num_qubits * (rank ** 2)
+            + self.coeff["b2b_copy"] * num_qubits * (rank**2)
             + overhead
         )
-        b2b_mem = max(num_qubits * rank ** 2, full)
+        b2b_mem = max(num_qubits * rank**2, full)
 
         # --- LW primitive ---
         w = window if window is not None else min(num_qubits, 4)
-        dense = 2 ** w
+        dense = 2**w
         gate_time = (
             self.coeff["sv_gate_1q"] * window_1q_gates
             + self.coeff["sv_gate_2q"] * window_2q_gates
@@ -392,8 +413,8 @@ class CostEstimator:
         # --- ST primitive ---
         chi_cap = int(self.coeff.get("st_chi_cap", 16)) or 16
         chi_tilde = min(rank, chi_cap)
-        st_time = self.coeff["st_stage"] * (chi_tilde ** 3) + overhead
-        st_mem = max(num_qubits * (chi_tilde ** 2), full)
+        st_time = self.coeff["st_stage"] * (chi_tilde**3) + overhead
+        st_mem = max(num_qubits * (chi_tilde**2), full)
 
         # --- Full extraction primitive ---
         full_time = self.coeff["full_extract"] * full + overhead
@@ -419,4 +440,3 @@ __all__ = [
     "ConversionEstimate",
     "CostEstimator",
 ]
-
