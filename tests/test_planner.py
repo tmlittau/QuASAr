@@ -26,6 +26,19 @@ def test_explicit_statevector_for_clifford():
     assert steps[0].backend == Backend.STATEVECTOR
 
 
+def test_planner_simplifies_controls_for_clifford_detection():
+    gates = [
+        {"gate": "H", "qubits": [1]},
+        {"gate": "CT", "qubits": [0, 2]},
+    ]
+    circ = Circuit.from_dict(gates, use_classical_simplification=False)
+    circ.use_classical_simplification = True
+    circ.classical_state = [0] * circ.num_qubits
+    result = Planner().plan(circ, backend=Backend.TABLEAU)
+    assert result.final_backend == Backend.TABLEAU
+    assert [g.gate for g in circ.gates] == ["H"]
+
+
 def test_statevector_for_non_clifford():
     gates = [
         {"gate": "CX", "qubits": [0, 1]},
