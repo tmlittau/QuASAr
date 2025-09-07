@@ -10,6 +10,7 @@
 - Code is primarily Python 3.8+ with optional C++17 extensions.
 - Follow existing style: PEP8 formatting, descriptive docstrings and type annotations.
 - Document new user‑facing behaviour in `docs/` or relevant notebooks.
+- Avoid placeholders, dummy implementations, or simplified stubs; target production-ready code even if it takes longer.
 - Unsupported gates should be implemented natively without decomposing into other operations.
 - Backend `run` methods should return native representations; only convert to a statevector (or other format) when explicitly required by a conversion layer.
 
