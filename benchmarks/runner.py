@@ -335,13 +335,11 @@ class BenchmarkRunner:
                 prepare_time = time.perf_counter() - start_prepare
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.reset_peak()
-
                 start_run = time.perf_counter()
                 for g in getattr(circuit, "gates", []):
                     sim.apply_gate(g.gate, g.qubits, g.params)
-                run_time = time.perf_counter() - start_run
-
                 result = sim.extract_ssd()
+                run_time = time.perf_counter() - start_run
                 result = result if result is not None else getattr(circuit, "ssd", None)
                 backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
                 _, run_peak_memory = tracemalloc.get_traced_memory()
