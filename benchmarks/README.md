@@ -91,7 +91,11 @@ rec = runner.run_quasar_multiple(circuit, engine, backend=Backend.STATEVECTOR, r
 ```
 
 This leverages the scheduler while still collecting timings for a single
-backend implementation.
+backend implementation.  The returned record includes the final simulation
+state under the ``result`` key.  Both forced and automatically selected runs
+populate this field so that downstream scripts or notebooks can inspect the
+produced state.  The state is deliberately omitted from the generated CSV/JSON
+files and therefore must be consumed from the in‑memory result.
 
 ## Feeding results into the cost model
 
