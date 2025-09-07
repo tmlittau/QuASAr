@@ -263,8 +263,47 @@ def test_run_quasar_multiple_direct_backend_path():
     assert record["repetitions"] == 2
     assert math.isclose(record["run_time_mean"], 1.5)
     assert math.isclose(record["run_time_std"], math.sqrt(0.25))
-    assert scheduler.run_calls == [True]
+    assert scheduler.run_calls == []
     assert record["backend"] == Backend.STATEVECTOR.name
+
+
+class EstimatorScheduler(DirectScheduler):
+    def __init__(self):
+        super().__init__()
+
+        class Estimator:
+            def __init__(self):
+                self.coeff = {"changed": False}
+
+        self.planner.estimator = Estimator()
+
+    def run(self, circuit, plan, *, monitor=None, instrument=False):
+        self.run_calls.append(instrument)
+        if instrument:
+            self.planner.estimator.coeff["changed"] = True
+            ssd = SSD([
+                SSDPartition(
+                    subsystems=((0,),),
+                    backend=plan.final_backend or Backend.STATEVECTOR,
+                )
+            ])
+            return ssd, Cost(time=0.0, memory=0.0)
+        return SSD([
+            SSDPartition(
+                subsystems=((0,),),
+                backend=plan.final_backend or Backend.STATEVECTOR,
+            )
+        ])
+
+
+def test_run_quasar_multiple_skips_instrumentation_keeps_estimator_coeff():
+    runner = BenchmarkRunner()
+    circuit = DummyCircuit()
+    scheduler = EstimatorScheduler()
+    record = runner.run_quasar_multiple(circuit, scheduler, repetitions=1)
+    assert record["repetitions"] == 1
+    assert scheduler.run_calls == []
+    assert scheduler.planner.estimator.coeff["changed"] is False
 
 
 class PlannerErrorScheduler:
