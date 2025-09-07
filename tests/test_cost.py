@@ -80,8 +80,10 @@ def test_mps_svd_cost():
         svd=True,
     )
     trunc = (16 * math.log2(4) + 64 * math.log2(4) + 16 * math.log2(4)) / 3
-    assert with_svd.time == base.time + 4 * trunc
-    assert with_svd.memory == base.memory + 64
+    expected_time = base.time + est.coeff["mps_trunc"] * 4 * trunc
+    expected_mem = base.memory + est.coeff["mps_temp_mem"] * 64
+    assert with_svd.time == expected_time
+    assert with_svd.memory == expected_mem
 
 
 def test_mps_per_bond_list():
@@ -216,6 +218,7 @@ def test_b2b_svd_memory_overhead():
         "lw_extract": 100.0,
         "full_extract": 100.0,
         "st_stage": 100.0,
+        "b2b_svd_mem": 0.0,
     }
     base_est = CostEstimator(coeff=coeff)
     base = base_est.conversion(
@@ -249,6 +252,7 @@ def test_lw_temp_memory_overhead():
         "full_extract": 100.0,
         "ingest_mps": 0.0,
         "conversion_base": 0.0,
+        "lw_temp_mem": 0.0,
     }
     base_est = CostEstimator(coeff=coeff)
     base = base_est.conversion(
@@ -283,6 +287,7 @@ def test_dd_ingest_memory_overhead():
         "st_stage": 100.0,
         "full_extract": 100.0,
         "conversion_base": 0.0,
+        "ingest_dd_mem": 0.0,
     }
     base_est = CostEstimator(coeff=coeff)
     base = base_est.conversion(

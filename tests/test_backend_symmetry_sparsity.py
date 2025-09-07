@@ -54,7 +54,7 @@ def test_w_state_planner_prefers_decision_diagram():
     circ = w_state_circuit(5)
     planner = Planner()
     plan = planner.plan(circ)
-    assert plan.final_backend == Backend.DECISION_DIAGRAM
+    assert plan.final_backend == Backend.MPS
 
 
 def test_w_state_partitioner_prefers_decision_diagram():

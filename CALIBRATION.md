@@ -11,15 +11,37 @@ singular-value-decomposition (SVD) truncation step.  Separate
 coefficients for these components are produced by the calibration
 script.
 
+## Default coefficients
+
+Baseline coefficients are derived from operation counts and memory
+requirements reported in established simulators and textbooks:
+
+- **Statevector** numbers follow QuEST's flop counts for unitary
+  updates (Jones et al., 2019) and the Qiskit Aer performance guide for
+  memory overheads.
+- **Tableau** costs are based on the Aaronson & Gottesman (2004)
+  stabilizer formalism, which stores ``2n^2`` bits and applies roughly
+  ``2n^2`` bit operations per Clifford gate.
+- **Matrix product state** scaling uses the expressions from
+  Schollwöck's review of the density matrix renormalisation group
+  (2011) with each tensor element taking 16 bytes.
+- **Decision diagram** parameters originate from the QMDD analysis by
+  Zulehner & Wille (2019), assuming 32-byte nodes and a 20% unique table
+  cache overhead.
+
+These defaults provide reasonable first-order estimates and can be
+further refined with the calibration workflow below.
+
 ## Conversion overhead
 
 Backend switches incur additional fixed and ingestion costs.  The default
-coefficients `ingest_sv`, `ingest_tab`, `ingest_mps`, and `ingest_dd` are
-set to `2.0` to model the effort required to load a full register into a
-new representation.  A separate `conversion_base` value of `5.0` adds a
-constant penalty to every backend transition.  These parameters can be
-measured and adjusted using the calibration utilities in this project to
-better match the characteristics of the target hardware.
+coefficients model per-amplitude transfer times of `5.0` for statevector
+ingestion, `3.0` for tableau, `4.0` for MPS and `2.0` for decision
+diagram backends.  Ingestion memory overheads are set to zero by default.
+A separate `conversion_base` value of `5.0` adds a constant penalty to
+every backend transition.  These parameters can be measured and adjusted
+using the calibration utilities in this project to better match the
+characteristics of the target hardware.
 
 ## Running the benchmarks
 

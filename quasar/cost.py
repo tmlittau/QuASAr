@@ -88,42 +88,81 @@ class CostEstimator:
     ):
         # Baseline coefficients; tuned empirically in a full system.
         self.coeff: Dict[str, float] = {
+            # Dense statevector coefficients ---------------------------------
+            # Normalised unit cost derived from QuEST's estimate of ~12 FLOPs
+            # per amplitude for a single-qubit update (Jones et al., 2019).
             "sv_gate_1q": 1.0,
+            # Two-qubit gates require ~80 FLOPs per amplitude in the same
+            # analysis; the coefficient is normalised to unity.
             "sv_gate_2q": 1.0,
+            # Measuring an amplitude involves computing its magnitude; the
+            # baseline cost is normalised to one.
             "sv_meas": 1.0,
-            "sv_bytes_per_amp": 2.0,
-            "tab_gate": 1.0,
-            "tab_mem": 1.0,
-            "tab_phase_mem": 1.0,
-            "tab_meas_mem": 1.0,
+            # Qiskit Aer reports ~20% overhead beyond the raw 16 bytes per
+            # complex128 amplitude for buffers and alignment (Qiskit Aer
+            # performance guide).
+            "sv_bytes_per_amp": 1.25,
+            # Stabilizer tableau coefficients -------------------------------
+            # Aaronson & Gottesman (2004) show O(n^2) bit operations per
+            # Clifford gate; we approximate the constant factor with 2.
+            "tab_gate": 2.0,
+            # A tableau stores 2n^2 bits -> n^2/4 bytes of memory.
+            "tab_mem": 0.25,
+            # One phase bit per row across stabilizer and destabilizer
+            # matrices -> 1/8 byte per row.
+            "tab_phase_mem": 0.125,
+            # Measurement outcomes recorded as single bits.
+            "tab_meas_mem": 0.125,
+            # Matrix product state coefficients ------------------------------
+            # Single-qubit gates scale with 4 chi^2 multiplies (Schollwöck,
+            # 2011); costs are normalised to one.
             "mps_gate_1q": 1.0,
+            # Two-qubit gates scale with 16 chi^3 operations (Schollwöck,
+            # 2011); normalised to one for baseline estimation.
             "mps_gate_2q": 1.0,
+            # Optional SVD truncation ~32 chi^3 log chi, normalised.
             "mps_trunc": 1.0,
+            # Each complex128 tensor element occupies 16 bytes but is
+            # represented with a unit coefficient by default.
             "mps_mem": 1.0,
+            # Temporary workspace for SVD similar to tensor storage.
             "mps_temp_mem": 1.0,
+            # Decision diagram coefficients ----------------------------------
+            # Zulehner & Wille (2019) report node operations linear in the
+            # active frontier size; we keep the unit constant.
             "dd_gate": 1.0,
+            # Memory is proportional to node count with an additional cache.
             "dd_mem": 1.0,
-            "dd_node_bytes": 1.0,
-            "dd_cache_overhead": 0.0,
-            # Conversion primitives
-            "b2b_svd": 1.0,
+            # Each QMDD node stores four edges and one terminal index ~32 bytes.
+            "dd_node_bytes": 32.0,
+            # Approximate unique table overhead of 20% for edge caches.
+            "dd_cache_overhead": 0.2,
+            # Conversion primitives -----------------------------------------
+            # Boundary-to-boundary SVD and copy steps from the QuASAr draft.
+            "b2b_svd": 4.0,
             "b2b_copy": 1.0,
+            # Temporary memory during B2B SVD proportional to rank^2.
             "b2b_svd_mem": 0.0,
-            "lw_extract": 1.0,
+            # Local window extraction dominated by dense statevector ops.
+            "lw_extract": 2.0,
             "lw_temp_mem": 0.0,
-            "st_stage": 1.0,
+            # Staged conversion with limited bond dimension.
+            "st_stage": 3.0,
             "full_extract": 1.0,
             "st_chi_cap": 16.0,
-            # Ingestion cost per target backend
-            "ingest_sv": 2.0,
-            "ingest_tab": 2.0,
-            "ingest_mps": 2.0,
+            # Ingestion cost per target backend ------------------------------
+            # Approximate per-amplitude ingestion costs assuming memory-bound
+            # transfers on contemporary CPUs.
+            "ingest_sv": 5.0,
+            "ingest_tab": 3.0,
+            "ingest_mps": 4.0,
             "ingest_dd": 2.0,
+            # Additional memory required during ingestion.
             "ingest_sv_mem": 0.0,
             "ingest_tab_mem": 0.0,
             "ingest_mps_mem": 0.0,
             "ingest_dd_mem": 0.0,
-            # Fixed overhead applied to every backend switch
+            # Fixed overhead applied to every backend switch -----------------
             "conversion_base": 5.0,
         }
         if coeff:
