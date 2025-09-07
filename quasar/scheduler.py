@@ -62,14 +62,19 @@ class Scheduler:
             }
 
     def should_use_quick_path(
-        self, circuit: Circuit, *, backend: Backend | None = None
+        self,
+        circuit: Circuit,
+        *,
+        backend: Backend | None = None,
+        force: bool = False,
     ) -> bool:
         """Return ``True`` if ``circuit`` can bypass planning.
 
-        The decision is based on the quick‑path heuristics configured for the
-        scheduler.  When ``backend`` is explicitly specified the caller is
-        requesting direct execution on a backend and therefore planning is not
-        required.
+        The decision is based on the quick-path heuristics configured for the
+        scheduler.  Explicitly setting ``force`` to ``True`` bypasses these
+        heuristics and unconditionally enables quick-path execution.  When a
+        backend is specified the heuristics are still evaluated unless
+        ``force`` is also ``True``.
 
         Parameters
         ----------
@@ -77,15 +82,17 @@ class Scheduler:
             Circuit to simulate.
         backend:
             Optional override selecting a specific backend.
+        force:
+            When ``True`` skip heuristic checks and force quick-path execution.
 
         Returns
         -------
         bool
             ``True`` when the circuit is small enough to execute directly
-            without invoking the planner.
+            without invoking the planner or when ``force`` is ``True``.
         """
 
-        if backend is not None:
+        if force:
             return True
 
         quick = True

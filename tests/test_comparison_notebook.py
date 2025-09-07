@@ -26,10 +26,12 @@ def test_notebook_comparison_behaviour(num_qubits: int) -> None:
             if name == "wstate" and b == Backend.TABLEAU:
                 continue
             try:
-                rec = runner.run_quasar_multiple(base, engine, backend=b, repetitions=1)
+                rec = runner.run_quasar_multiple(
+                    base, engine, backend=b, repetitions=1, quick=True
+                )
                 rec.update({"circuit": name, "mode": "forced"})
                 records.append(rec)
-                state_rec = runner.run_quasar(base, engine, backend=b)
+                state_rec = runner.run_quasar(base, engine, backend=b, quick=True)
                 assert isinstance(state_rec["result"], SSD)
             except RuntimeError:
                 pass
