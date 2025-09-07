@@ -467,6 +467,8 @@ class BenchmarkRunner:
         elif quick:
             use_quick = True
 
+        simple_backend: Backend | None = None
+        simple_gates: List[Any] | None = None
         if use_quick:
             plan = None
             original_ssd = None
@@ -481,27 +483,35 @@ class BenchmarkRunner:
             )
             est = getattr(planner, "estimator", None)
             coeff_backup = copy.deepcopy(getattr(est, "coeff", {})) if est else None
-            scheduler.run(circuit, plan, instrument=True)
-            if est is not None and coeff_backup is not None:
-                est.coeff = coeff_backup
-            if circuit is not None and original_ssd is not None:
-                circuit.ssd = copy.deepcopy(original_ssd)
 
-        simple_backend: Backend | None = None
-        simple_gates: List[Any] | None = None
-        if not use_quick and plan is not None:
-            parts = getattr(plan, "partitions", None)
             conv_layers = list(getattr(plan, "conversions", []))
-            if parts is not None:
-                if len(parts) == 1 and not conv_layers:
-                    simple_backend = parts[0].backend
+            parts = getattr(plan, "partitions", None)
+            if parts is not None and len(parts) == 1 and not conv_layers:
+                backend_choice = parts[0].backend
+                if backend_choice in getattr(scheduler, "backends", {}):
+                    simple_backend = backend_choice
                     simple_gates = list(getattr(plan, "gates", []))
             else:
                 steps = list(getattr(plan, "steps", []))
                 if len(steps) == 1 and not conv_layers:
                     step = steps[0]
-                    simple_backend = step.backend
-                    simple_gates = plan.gates[step.start : step.end]
+                    if step.backend in getattr(scheduler, "backends", {}):
+                        simple_backend = step.backend
+                        simple_gates = plan.gates[step.start : step.end]
+
+            expected_backend = getattr(plan, "final_backend", simple_backend)
+            if (
+                simple_backend is None
+                or expected_backend != simple_backend
+            ):
+                scheduler.run(circuit, plan, instrument=True)
+                if est is not None and coeff_backup is not None:
+                    est.coeff = coeff_backup
+            elif est is not None and coeff_backup is not None and est.coeff != coeff_backup:
+                est.coeff = coeff_backup
+
+            if circuit is not None and original_ssd is not None:
+                circuit.ssd = copy.deepcopy(original_ssd)
 
         def _run_once() -> Dict[str, Any]:
             if use_quick:
