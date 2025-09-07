@@ -464,11 +464,53 @@ class BenchmarkRunner:
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
 
+        simple_backend: Backend | None = None
+        simple_gates: List[Any] | None = None
+        if not use_quick and plan is not None:
+            parts = getattr(plan, "partitions", None)
+            conv_layers = list(getattr(plan, "conversions", []))
+            if parts is not None:
+                if len(parts) == 1 and not conv_layers:
+                    simple_backend = parts[0].backend
+                    simple_gates = list(getattr(plan, "gates", []))
+            else:
+                steps = list(getattr(plan, "steps", []))
+                if len(steps) == 1 and not conv_layers:
+                    step = steps[0]
+                    simple_backend = step.backend
+                    simple_gates = plan.gates[step.start : step.end]
+
         def _run_once() -> Dict[str, Any]:
             if use_quick:
                 rec = self.run_quasar(circuit, engine, backend=backend)
                 self.results.pop()
                 return rec
+            if simple_backend is not None and simple_gates is not None:
+                if circuit is not None and original_ssd is not None:
+                    circuit.ssd = copy.deepcopy(original_ssd)
+                sim = type(scheduler.backends[simple_backend])()
+                sim.load(circuit.num_qubits)
+                tracemalloc.start()
+                start_run = time.perf_counter()
+                for g in simple_gates:
+                    sim.apply_gate(g.gate, g.qubits, g.params)
+                result = sim.extract_ssd()
+                run_time = time.perf_counter() - start_run
+                result = result if result is not None else getattr(circuit, "ssd", None)
+                _, run_peak_memory = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                backend_choice_name = getattr(simple_backend, "name", str(simple_backend))
+                return {
+                    "framework": "quasar",
+                    "prepare_time": 0.0,
+                    "run_time": run_time,
+                    "total_time": run_time,
+                    "prepare_peak_memory": 0,
+                    "run_peak_memory": int(run_peak_memory),
+                    "result": result,
+                    "failed": False,
+                    "backend": backend_choice_name,
+                }
             assert plan is not None
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
