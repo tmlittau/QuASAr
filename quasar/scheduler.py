@@ -426,6 +426,74 @@ class Scheduler:
         conv_idx = 0
         est_costs = plan.step_costs or [Cost(time=0.0, memory=0.0)] * len(steps)
 
+        if len(steps) == 1 and not conv_layers and not getattr(
+            plan, "explicit_conversions", None
+        ):
+            step = steps[0]
+            target = step.backend
+            segment = gates[step.start : step.end]
+            est_cost = est_costs[0]
+            sim_obj = type(self.backends[target])()
+            sim_obj.load(circuit.num_qubits)
+            if instrument:
+                tracemalloc.start()
+                tracemalloc.reset_peak()
+                start_time = time.perf_counter()
+            for gate in segment:
+                sim_obj.apply_gate(gate.gate, gate.qubits, gate.params)
+            if instrument:
+                elapsed = time.perf_counter() - start_time
+                _, peak = tracemalloc.get_traced_memory()
+                total_gate_time = Cost(time=elapsed, memory=float(peak))
+                observed = Cost(time=elapsed, memory=float(peak))
+                coeff = {
+                    Backend.STATEVECTOR: (
+                        ["sv_gate_1q", "sv_gate_2q", "sv_meas"],
+                        "sv_bytes_per_amp",
+                    ),
+                    Backend.MPS: (
+                        ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
+                        "mps_mem",
+                    ),
+                    Backend.TABLEAU: (["tab_gate"], "tab_mem"),
+                    Backend.DECISION_DIAGRAM: (["dd_gate"], "dd_mem"),
+                }[target]
+                est = self.planner.estimator if self.planner is not None else None
+                if est is not None:
+                    updates: Dict[str, float] = {}
+                    gate_keys, mem_key = coeff
+                    if est_cost.time > 0:
+                        ratio = observed.time / est_cost.time
+                        for gk in gate_keys:
+                            updates[gk] = est.coeff[gk] * ratio
+                    if est_cost.memory > 0 and observed.memory > 0:
+                        updates[mem_key] = (
+                            est.coeff[mem_key]
+                            * observed.memory
+                            / est_cost.memory
+                        )
+                    if updates:
+                        est.update_coefficients(updates)
+                if monitor:
+                    monitor(step, observed, est_cost)
+                tracemalloc.reset_peak()
+                start_time = time.perf_counter()
+            ssd = sim_obj.extract_ssd()
+            if instrument:
+                elapsed = time.perf_counter() - start_time
+                _, peak = tracemalloc.get_traced_memory()
+                conversion_time = elapsed
+                total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                run_cost = Cost(
+                    time=total_gate_time.time,
+                    memory=total_gate_time.memory,
+                    conversion=conversion_time,
+                    replay=0.0,
+                )
+                tracemalloc.stop()
+                return ssd if ssd is not None else circuit.ssd, run_cost
+            return ssd if ssd is not None else circuit.ssd
+
         sims: Dict[tuple, object] = {}
         total_gate_time = Cost(time=0.0, memory=0.0)
         conversion_time = 0.0
