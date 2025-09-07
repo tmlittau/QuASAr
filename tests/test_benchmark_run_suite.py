@@ -19,6 +19,7 @@ def dummy_run_quasar_multiple(self, circuit, engine, backend, repetitions):
         "prepare_peak_memory_std": 0.0,
         "run_peak_memory_mean": 0.0,
         "run_peak_memory_std": 0.0,
+        "result": object(),
     }
 
 
@@ -33,6 +34,8 @@ def test_run_suite_passes_classical_flag(monkeypatch):
     monkeypatch.setattr(
         benchmark_cli.BenchmarkRunner, "run_quasar_multiple", dummy_run_quasar_multiple
     )
-    results = benchmark_cli.run_suite(circuit_fn, [1], 1, use_classical_simplification=False)
+    results = benchmark_cli.run_suite(
+        circuit_fn, [1], 1, use_classical_simplification=False
+    )
     assert flags == [False]
     assert results[0]["qubits"] == 1

@@ -52,7 +52,11 @@ def run_suite(
 
     The helper runs QuASAr's scheduler multiple times, forcing the
     :class:`~quasar.cost.Backend.STATEVECTOR` backend so that results are
-    comparable to single-method simulators.
+    comparable to single-method simulators.  Each summary record returned by
+    :meth:`BenchmarkRunner.run_quasar_multiple` is expected to include the
+    final simulation state under the ``"result"`` key.  The state is retained
+    in memory for potential downstream analysis but is intentionally omitted
+    from serialised output.
     """
 
     engine = SimulationEngine()
@@ -79,7 +83,10 @@ def run_suite(
             backend=Backend.STATEVECTOR,
             repetitions=repetitions,
         )
-        _state = rec.get("result")  # retain state for potential downstream use
+        state = rec.get("result")
+        if state is None:
+            raise RuntimeError("benchmark run did not return a state")
+        _ = state  # retain state for potential downstream use
         record = {
             "circuit": circuit_fn.__name__,
             "qubits": n,
@@ -126,16 +133,27 @@ def save_results(results: List[dict], output: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Execute benchmark circuits and record timings")
-    parser.add_argument("--circuit", required=True, help="Circuit family name (e.g. ghz, qft)")
+    parser = argparse.ArgumentParser(
+        description="Execute benchmark circuits and record timings"
+    )
+    parser.add_argument(
+        "--circuit", required=True, help="Circuit family name (e.g. ghz, qft)"
+    )
     parser.add_argument(
         "--qubits",
         required=True,
         type=parse_qubit_range,
         help="Qubit range as start:end[:step]",
     )
-    parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions per configuration")
-    parser.add_argument("--output", required=True, type=Path, help="Output file path without extension")
+    parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=3,
+        help="Number of repetitions per configuration",
+    )
+    parser.add_argument(
+        "--output", required=True, type=Path, help="Output file path without extension"
+    )
     parser.add_argument(
         "--disable-classical-simplify",
         action="store_true",
