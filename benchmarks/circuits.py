@@ -21,15 +21,17 @@ from qiskit.circuit.random import random_circuit as qiskit_random_circuit
 from quasar.circuit import Circuit, Gate
 
 
-def ghz_circuit(n_qubits: int) -> Circuit:
+def ghz_circuit(
+    n_qubits: int, *, use_classical_simplification: bool = False
+) -> Circuit:
     """Create an ``n_qubits`` GHZ state preparation circuit."""
     gates: List[Gate] = []
     if n_qubits <= 0:
-        return Circuit(gates, use_classical_simplification=False)
+        return Circuit(gates, use_classical_simplification=use_classical_simplification)
     gates.append(Gate("H", [0]))
     for i in range(1, n_qubits):
         gates.append(Gate("CX", [i - 1, i]))
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
 
 def _qft_spec(n: int) -> dict:
@@ -42,17 +44,28 @@ def _qft_spec(n: int) -> dict:
     return {"n_qubits": n, "gates": gates}
 
 
-def qft_circuit(n_qubits: int) -> Circuit:
+def qft_circuit(
+    n_qubits: int, *, use_classical_simplification: bool = False
+) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
     spec = _qft_spec(n_qubits)
-    return Circuit(spec["gates"], use_classical_simplification=False)
+    return Circuit(spec["gates"], use_classical_simplification=use_classical_simplification)
 
 
-def qft_on_ghz_circuit(n_qubits: int) -> Circuit:
+def qft_on_ghz_circuit(
+    n_qubits: int, *, use_classical_simplification: bool = False
+) -> Circuit:
     """Apply the QFT to a GHZ state."""
-    ghz = ghz_circuit(n_qubits)
-    qft = qft_circuit(n_qubits)
-    return Circuit(list(ghz.gates) + list(qft.gates), use_classical_simplification=False)
+    ghz = ghz_circuit(
+        n_qubits, use_classical_simplification=use_classical_simplification
+    )
+    qft = qft_circuit(
+        n_qubits, use_classical_simplification=use_classical_simplification
+    )
+    return Circuit(
+        list(ghz.gates) + list(qft.gates),
+        use_classical_simplification=use_classical_simplification,
+    )
 
 
 def _w_state_spec(n: int) -> dict:
@@ -67,10 +80,14 @@ def _w_state_spec(n: int) -> dict:
     return {"n_qubits": n, "gates": gates}
 
 
-def w_state_circuit(n_qubits: int) -> Circuit:
+def w_state_circuit(
+    n_qubits: int, *, use_classical_simplification: bool = False
+) -> Circuit:
     """Create an ``n_qubits`` W state preparation circuit."""
     spec = _w_state_spec(n_qubits)
-    return Circuit(spec["gates"], use_classical_simplification=False)
+    return Circuit(
+        spec["gates"], use_classical_simplification=use_classical_simplification
+    )
 
 
 def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
@@ -336,12 +353,19 @@ def quantum_walk_circuit(num_qubits: int, depth: int) -> Circuit:
     return Circuit.from_qiskit(qc)
 
 
-def random_circuit(num_qubits: int, seed: int | None = None) -> Circuit:
+def random_circuit(
+    num_qubits: int,
+    seed: int | None = None,
+    *,
+    use_classical_simplification: bool = False,
+) -> Circuit:
     """Generate a random circuit of depth ``2*num_qubits``."""
 
     qc = qiskit_random_circuit(num_qubits, 2 * num_qubits, seed=seed)
     qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc, use_classical_simplification=False)
+    return Circuit.from_qiskit(
+        qc, use_classical_simplification=use_classical_simplification
+    )
 
 
 def shor_circuit(circuit_size: int) -> Circuit:

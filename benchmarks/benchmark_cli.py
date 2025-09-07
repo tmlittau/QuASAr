@@ -58,9 +58,15 @@ def run_suite(
     engine = SimulationEngine()
     results = []
     for n in qubits:
-        circuit = circuit_fn(n)
-        if hasattr(circuit, "use_classical_simplification"):
-            circuit.use_classical_simplification = use_classical_simplification
+        try:
+            circuit = circuit_fn(
+                n, use_classical_simplification=use_classical_simplification
+            )
+        except TypeError:
+            circuit = circuit_fn(n)
+            reset = getattr(circuit, "reset_classical_simplification", None)
+            if callable(reset):
+                reset(use_classical_simplification)
         runner = BenchmarkRunner()
         rec = runner.run_quasar_multiple(
             circuit,
