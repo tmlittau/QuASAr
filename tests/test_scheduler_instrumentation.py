@@ -41,6 +41,7 @@ def test_run_skips_instrumentation_by_default(monkeypatch):
     monkeypatch.setattr(
         "quasar.scheduler.tracemalloc.get_traced_memory", lambda: (0, 0)
     )
+    monkeypatch.setattr("quasar.scheduler.tracemalloc.reset_peak", lambda: None)
     monkeypatch.setattr("quasar.scheduler.tracemalloc.stop", lambda: None)
 
     scheduler.run(circuit, plan)
@@ -72,6 +73,7 @@ def test_run_reports_instrumentation(monkeypatch):
     monkeypatch.setattr(
         "quasar.scheduler.tracemalloc.get_traced_memory", lambda: (0, 0)
     )
+    monkeypatch.setattr("quasar.scheduler.tracemalloc.reset_peak", lambda: None)
 
     _, run_cost = scheduler.run(circuit, plan, instrument=True)
     assert run_cost.time > 0
