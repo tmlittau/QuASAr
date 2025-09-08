@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any, Sequence, Dict
 
 from quasar.backends import (
-    StatevectorBackend,
     MPSBackend,
     DecisionDiagramBackend,
     StimBackend,
@@ -55,11 +54,6 @@ class _Adapter:
         return self.run_benchmark(**kwargs)
 
 
-class StatevectorAdapter(_Adapter):
-    def __init__(self) -> None:  # pragma: no cover - trivial
-        super().__init__(StatevectorBackend(), "statevector")
-
-
 class DecisionDiagramAdapter(_Adapter):
     def __init__(self) -> None:  # pragma: no cover - trivial
         super().__init__(DecisionDiagramBackend(), "mqt_dd")
@@ -76,7 +70,6 @@ class StimAdapter(_Adapter):
 
 
 __all__ = [
-    "StatevectorAdapter",
     "DecisionDiagramAdapter",
     "MPSAdapter",
     "StimAdapter",
