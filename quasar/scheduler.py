@@ -156,14 +156,15 @@ class Scheduler:
 
         nnz_estimate = int((1 - sparsity) * (2**num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+        amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(
+            num_qubits, sparsity
+        )
         s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
         nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
         phase_score = (
             1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
         )
-        amp_score = (
-            1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
-        )
+        amp_score = 1 - amp_rot / amp_thresh
         weight_sum = (
             config.DEFAULT.dd_sparsity_weight
             + config.DEFAULT.dd_nnz_weight
@@ -181,7 +182,7 @@ class Scheduler:
             sparsity >= s_thresh
             and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
             and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-            and amp_rot <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+            and amp_rot <= amp_thresh
         )
         dd_metric = passes and metric >= config.DEFAULT.dd_metric_threshold
 

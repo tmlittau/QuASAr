@@ -123,3 +123,29 @@ class Config:
 
 # Global configuration instance used when modules import ``quasar.config``.
 DEFAULT = Config()
+
+
+def adaptive_dd_amplitude_rotation_threshold(
+    n_qubits: int, sparsity: float | None = None
+) -> int:
+    """Return the amplitude rotation diversity limit for a circuit.
+
+    The base threshold ``DEFAULT.dd_amplitude_rotation_diversity_threshold``
+    is scaled with circuit width and sparsity.  Extremely sparse circuits such
+    as W states therefore retain the decision diagram backend even when they
+    contain many distinct rotation angles.
+
+    Args:
+        n_qubits: Number of qubits in the circuit segment.
+        sparsity: Estimated sparsity of the segment.  When provided the
+            threshold grows with the estimated number of non-zero amplitudes.
+
+    Returns:
+        An adjusted diversity threshold.
+    """
+
+    base = DEFAULT.dd_amplitude_rotation_diversity_threshold
+    if sparsity is None:
+        return max(base, n_qubits)
+    nnz = int((1 - sparsity) * (2**n_qubits))
+    return max(base, nnz)

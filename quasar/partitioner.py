@@ -72,18 +72,21 @@ class Partitioner:
             amp_rot = rot_amp(circuit)
         nnz_estimate = int((1 - sparsity) * (2 ** circuit.num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(circuit.num_qubits)
+        amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(
+            circuit.num_qubits, sparsity
+        )
         passes = (
             sparsity >= s_thresh
             and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
             and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-            and amp_rot <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+            and amp_rot <= amp_thresh
         )
         dd_metric = False
         if passes:
             s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
             nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
             phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-            amp_score = 1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+            amp_score = 1 - amp_rot / amp_thresh
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
                 + config.DEFAULT.dd_nnz_weight
