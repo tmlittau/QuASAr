@@ -9,7 +9,8 @@ The matrix product state (MPS) calibration distinguishes between costs
 for single- and two-qubit gates and an additional optional
 singular-value-decomposition (SVD) truncation step.  Separate
 coefficients for these components are produced by the calibration
-script.
+script.  A small W-state benchmark also records fixed runtime and
+memory overheads, exposed as ``mps_base_time`` and ``mps_base_mem``.
 
 ## Default coefficients
 
