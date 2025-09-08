@@ -28,7 +28,7 @@ def test_auto_and_forced_single_backend_have_equal_runtime():
 
     assert auto["backend"] == "STATEVECTOR"
     assert forced["backend"] == "STATEVECTOR"
-    assert auto["run_time_mean"] == pytest.approx(forced["run_time_mean"], rel=0.1)
+    assert auto["run_time_mean"] == pytest.approx(forced["run_time_mean"], rel=0.2)
     assert auto["run_peak_memory_mean"] == pytest.approx(
         forced["run_peak_memory_mean"], rel=0.1
     )

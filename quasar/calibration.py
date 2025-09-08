@@ -80,6 +80,32 @@ def benchmark_mps(
     }
 
 
+def benchmark_mps_baseline(num_qubits: int = 3) -> Dict[str, float]:
+    """Measure fixed overhead for MPS simulation using a small W-state."""
+
+    from .backends.mps import MPSBackend
+    from qiskit import QuantumCircuit
+    import numpy as np
+    import tracemalloc
+
+    amp = np.zeros(2**num_qubits, dtype=complex)
+    for i in range(num_qubits):
+        amp[1 << i] = 1 / math.sqrt(num_qubits)
+    circuit = QuantumCircuit(num_qubits)
+    circuit.initialize(amp, range(num_qubits))
+
+    backend = MPSBackend()
+    backend.prepare_benchmark(circuit)
+    tracemalloc.start()
+    start = perf_counter()
+    backend.run_benchmark()
+    elapsed = perf_counter() - start
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    return {"mps_base_time": elapsed, "mps_base_mem": float(peak)}
+
+
 def benchmark_dd(num_gates: int = 50, frontier: int = 32) -> Dict[str, float]:
     ops = num_gates * frontier
     elapsed = _bench_loop(ops)
@@ -124,6 +150,7 @@ def run_calibration() -> Dict[str, float]:
     coeff.update(benchmark_statevector())
     coeff.update(benchmark_tableau())
     coeff.update(benchmark_mps())
+    coeff.update(benchmark_mps_baseline())
     coeff.update(benchmark_dd())
     coeff.update(benchmark_b2b())
     coeff.update(benchmark_lw())

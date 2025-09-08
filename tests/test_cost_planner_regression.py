@@ -28,8 +28,10 @@ def test_tableau_cost_regression():
 def test_mps_cost_regression():
     est = CostEstimator()
     cost = est.mps(num_qubits=4, num_1q_gates=1, num_2q_gates=1, chi=2, svd=True)
-    assert cost.time == pytest.approx(54.6666666667)
-    assert cost.memory == 20.0
+    expected_time = 54.6666666667 + est.coeff["mps_base_time"]
+    assert cost.time == pytest.approx(expected_time)
+    expected_mem = 20.0 + est.coeff["mps_base_mem"]
+    assert cost.memory == expected_mem
     assert cost.log_depth == 2.0
 
 

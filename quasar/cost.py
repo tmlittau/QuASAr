@@ -127,6 +127,10 @@ class CostEstimator:
             "mps_mem": 1.0,
             # Temporary workspace for SVD similar to tensor storage.
             "mps_temp_mem": 1.0,
+            # Fixed runtime and memory overhead applied to every MPS estimate.
+            # Calibrated using a small W-state benchmark.
+            "mps_base_time": 0.0175,
+            "mps_base_mem": 56000.0,
             # Decision diagram coefficients ----------------------------------
             # Zulehner & Wille (2019) report node operations linear in the
             # active frontier size; we keep the unit constant.
@@ -442,7 +446,8 @@ class CostEstimator:
         site_costs = [l * r for l, r in zip(left, right)]
         bond_costs = [left[i] * bond_dims[i] * right[i + 1] for i in range(len(bond_dims))]
 
-        time = self.coeff["mps_gate_1q"] * num_1q_gates * sum(site_costs)
+        base_time = self.coeff.get("mps_base_time", 0.0)
+        time = base_time + self.coeff["mps_gate_1q"] * num_1q_gates * sum(site_costs)
         if n > 1:
             avg_bond_cost = sum(bond_costs) / (n - 1)
             time += self.coeff["mps_gate_2q"] * num_2q_gates * n * avg_bond_cost
@@ -457,7 +462,8 @@ class CostEstimator:
             # Defensive branch for single qubit with svd flag
             time += 0.0
 
-        memory = self.coeff["mps_mem"] * sum(site_costs)
+        base_mem = self.coeff.get("mps_base_mem", 0.0)
+        memory = base_mem + self.coeff["mps_mem"] * sum(site_costs)
         if svd and num_2q_gates > 0 and bond_costs:
             memory += self.coeff.get("mps_temp_mem", 0.0) * max(bond_costs)
 
