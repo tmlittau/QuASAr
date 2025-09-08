@@ -94,7 +94,7 @@ CLI can discover it automatically.  The existing functions, such as
 
 ## Running specific backends
 
-Benchmarks can force a particular simulator without using adapter classes.
+Benchmarks can force a particular simulator by specifying a backend directly.
 Invoke :func:`benchmarks.runner.BenchmarkRunner.run_quasar_multiple` and pass
 the desired :class:`quasar.cost.Backend` value.  Set ``quick=True`` to bypass
 planning and execute directly on the chosen backend:
