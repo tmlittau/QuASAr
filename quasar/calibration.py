@@ -48,6 +48,27 @@ def benchmark_statevector(num_qubits: int = 8, num_gates: int = 50) -> Dict[str,
     }
 
 
+def benchmark_statevector_baseline(num_qubits: int = 1) -> Dict[str, float]:
+    """Measure fixed overhead for statevector simulation using Aer."""
+
+    from .backends.statevector import StatevectorBackend
+    from qiskit import QuantumCircuit
+    import tracemalloc
+
+    circuit = QuantumCircuit(num_qubits)
+    circuit.h(0)
+    backend = StatevectorBackend()
+    backend.prepare_benchmark(circuit)
+    tracemalloc.start()
+    start = perf_counter()
+    backend.run_benchmark()
+    elapsed = perf_counter() - start
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    return {"sv_base_time": elapsed, "sv_base_mem": float(peak)}
+
+
 def benchmark_tableau(num_qubits: int = 8, num_gates: int = 50) -> Dict[str, float]:
     quad = num_qubits * num_qubits
     elapsed = _bench_loop(quad * num_gates)
@@ -148,6 +169,7 @@ def run_calibration() -> Dict[str, float]:
     """Execute all benchmarks and return a coefficient dictionary."""
     coeff: Dict[str, float] = {}
     coeff.update(benchmark_statevector())
+    coeff.update(benchmark_statevector_baseline())
     coeff.update(benchmark_tableau())
     coeff.update(benchmark_mps())
     coeff.update(benchmark_mps_baseline())

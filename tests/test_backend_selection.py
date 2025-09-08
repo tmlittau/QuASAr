@@ -22,6 +22,8 @@ def test_planner_selects_mps_for_qft():
         coeff={
             "sv_gate_1q": 50.0,
             "sv_gate_2q": 50.0,
+            "sv_base_time": 0.0,
+            "sv_base_mem": 0.0,
             "mps_base_time": 0.0,
             "mps_base_mem": 0.0,
         }
@@ -68,6 +70,8 @@ def test_mps_target_fidelity_controls_selection(monkeypatch):
         coeff={
             "sv_gate_1q": 50.0,
             "sv_gate_2q": 50.0,
+            "sv_base_time": 0.0,
+            "sv_base_mem": 0.0,
             "mps_base_time": 0.0,
             "mps_base_mem": 0.0,
         }
@@ -91,6 +95,8 @@ def test_memory_threshold_limits_mps(monkeypatch):
         coeff={
             "sv_gate_1q": 50.0,
             "sv_gate_2q": 50.0,
+            "sv_base_time": 0.0,
+            "sv_base_mem": 0.0,
             "mps_base_time": 0.0,
             "mps_base_mem": 0.0,
         }

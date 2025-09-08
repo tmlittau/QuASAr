@@ -6,8 +6,10 @@ def test_statevector_scaling():
     est = CostEstimator()
     small = est.statevector(num_qubits=3, num_1q_gates=1, num_2q_gates=0, num_meas=0)
     large = est.statevector(num_qubits=4, num_1q_gates=1, num_2q_gates=0, num_meas=0)
-    assert large.time == 2 * small.time
-    assert large.memory == 2 * small.memory
+    base_t = est.coeff["sv_base_time"]
+    base_m = est.coeff["sv_base_mem"]
+    assert large.time - base_t == 2 * (small.time - base_t)
+    assert large.memory - base_m == 2 * (small.memory - base_m)
     assert small.log_depth == math.log2(3)
     assert large.log_depth == math.log2(4)
 
@@ -28,7 +30,18 @@ def test_statevector_precision_memory():
         num_meas=0,
         precision="complex128",
     )
-    assert double.memory == 2 * single.memory
+    base = est.coeff["sv_base_mem"]
+    assert double.memory - base == 2 * (single.memory - base)
+
+
+def test_statevector_base_overhead():
+    est = CostEstimator()
+    cost = est.statevector(num_qubits=0, num_1q_gates=0, num_2q_gates=0, num_meas=0)
+    base_t = est.coeff["sv_base_time"]
+    base_m = est.coeff["sv_base_mem"]
+    expected_mem = base_m + est.coeff["sv_bytes_per_amp"] * 1 * 16
+    assert cost.time == base_t
+    assert cost.memory == expected_mem
 
 
 def test_tableau_qubit_scaling():
