@@ -34,6 +34,25 @@ def test_planner_selects_dd_when_sparsity_weighted(monkeypatch):
     assert plan.final_backend == Backend.DECISION_DIAGRAM
 
 
+def test_w_state_amplitude_threshold_scales(monkeypatch):
+    base = config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+    circuit = w_state_circuit(base + 5)
+    # Skew the estimator to strongly prefer decision diagrams over MPS.
+    est = CostEstimator(
+        coeff={
+            "dd_gate": 1e-6,
+            "dd_mem": 1e-6,
+            "mps_gate_1q": 1000.0,
+            "mps_gate_2q": 1000.0,
+            "mps_mem": 1000.0,
+            "mps_temp_mem": 1000.0,
+        }
+    )
+    engine = SimulationEngine(estimator=est)
+    plan = engine.planner.plan(circuit)
+    assert plan.final_backend == Backend.DECISION_DIAGRAM
+
+
 def test_mps_target_fidelity_controls_selection(monkeypatch):
     circuit = qft_circuit(7)
     circuit.symmetry = 0.0

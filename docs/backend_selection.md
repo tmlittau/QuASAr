@@ -11,9 +11,10 @@ examines basic structural metrics to guide this choice:
    *amplitude* rotation diversity are consulted. Each metric is normalised by
    its corresponding threshold – ``adaptive_dd_sparsity_threshold(n_qubits)``,
    ``dd_nnz_threshold``, ``dd_phase_rotation_diversity_threshold`` and
-   ``dd_amplitude_rotation_diversity_threshold`` – and combined using weights
-   ``dd_sparsity_weight``, ``dd_nnz_weight``, ``dd_phase_rotation_weight`` and
-   ``dd_amplitude_rotation_weight``.  The combined score is
+   ``adaptive_dd_amplitude_rotation_threshold(n_qubits, sparsity)`` – and
+   combined using weights ``dd_sparsity_weight``, ``dd_nnz_weight``,
+   ``dd_phase_rotation_weight`` and ``dd_amplitude_rotation_weight``.  The
+   combined score is
 
    ``(w_s*(s/s_thr) + w_n*(1 - nnz/nnz_thr) + w_p*(1 - p/p_thr) + w_a*(1 - a/a_thr)) / (w_s+w_n+w_p+w_a)``
 
@@ -41,12 +42,12 @@ exists.  This behaviour can be overridden via the planner's ``perf_prio``
 option, setting it to ``"time"`` to prioritise runtime instead.
 
 The default weights for sparsity, nnz and the two rotation metrics are ``1.0``
-each with a ``dd_metric_threshold`` of ``0.8`` and rotation‑diversity thresholds
-of ``16`` distinct angles for both phase and amplitude rotations. These values
-– along with ``dd_sparsity_threshold`` and ``dd_nnz_threshold`` – may be tuned
-via the ``QUASAR_DD_*`` environment variables or by overriding
-``config.DEFAULT`` at runtime.  Lowering ``mps_target_fidelity`` reduces the
-required bond dimension
+each with a ``dd_metric_threshold`` of ``0.8``.  Phase rotation diversity is
+limited to ``16`` distinct angles while the amplitude rotation threshold uses
+the same base value but scales with circuit width and sparsity. These values –
+along with ``dd_sparsity_threshold`` and ``dd_nnz_threshold`` – may be tuned via
+the ``QUASAR_DD_*`` environment variables or by overriding ``config.DEFAULT`` at
+runtime.  Lowering ``mps_target_fidelity`` reduces the required bond dimension
 and can therefore make the MPS backend applicable to more circuits.
 
 This lightweight heuristic steers the planner towards specialised backends for

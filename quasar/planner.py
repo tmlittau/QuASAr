@@ -252,18 +252,19 @@ def _supported_backends(
     from .sparsity import adaptive_dd_sparsity_threshold
 
     s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+    amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparse)
     passes = (
         sparse >= s_thresh
         and nnz <= config.DEFAULT.dd_nnz_threshold
         and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-        and amp_rot <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+        and amp_rot <= amp_thresh
     )
     dd_metric = False
     if passes:
         s_score = sparse / s_thresh if s_thresh > 0 else 0.0
         nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
         phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-        amp_score = 1 - amp_rot / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+        amp_score = 1 - amp_rot / amp_thresh
         weight_sum = (
             config.DEFAULT.dd_sparsity_weight
             + config.DEFAULT.dd_nnz_weight
@@ -543,10 +544,12 @@ class Planner:
         are forwarded to :func:`_supported_backends`.
         """
         from .sparsity import adaptive_dd_sparsity_threshold
+        width = len({q for g in gates for q in g.qubits})
         nnz_estimate = None
         if sparsity is not None:
-            nnz_estimate = int((1 - sparsity) * (2 ** len({q for g in gates for q in g.qubits})))
-        s_thresh = adaptive_dd_sparsity_threshold(len({q for g in gates for q in g.qubits}))
+            nnz_estimate = int((1 - sparsity) * (2 ** width))
+        s_thresh = adaptive_dd_sparsity_threshold(width)
+        amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(width, sparsity)
         passes = (
             (sparsity is not None and sparsity >= s_thresh)
             and (
@@ -557,8 +560,7 @@ class Planner:
                  or phase_rotation_diversity <= config.DEFAULT.dd_phase_rotation_diversity_threshold)
                 and (
                     amplitude_rotation_diversity is None
-                    or amplitude_rotation_diversity
-                    <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+                    or amplitude_rotation_diversity <= amp_thresh
                 )
             )
         )
@@ -571,8 +573,7 @@ class Planner:
                 / config.DEFAULT.dd_phase_rotation_diversity_threshold
             )
             amp_score = 1 - (
-                (amplitude_rotation_diversity or 0)
-                / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+                (amplitude_rotation_diversity or 0) / amp_thresh
             )
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
@@ -872,13 +873,15 @@ class Planner:
         from .sparsity import adaptive_dd_sparsity_threshold
         nnz_estimate = int((1 - (sparsity or 0.0)) * (2 ** num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+        amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(
+            num_qubits, sparsity
+        )
         passes = (
             (sparsity or 0.0) >= s_thresh
             and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
             and (phase_rotation_diversity or 0)
             <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-            and (amplitude_rotation_diversity or 0)
-            <= config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+            and (amplitude_rotation_diversity or 0) <= amp_thresh
         )
         dd_metric = False
         if passes:
@@ -889,8 +892,7 @@ class Planner:
                 / config.DEFAULT.dd_phase_rotation_diversity_threshold
             )
             amp_score = 1 - (
-                (amplitude_rotation_diversity or 0)
-                / config.DEFAULT.dd_amplitude_rotation_diversity_threshold
+                (amplitude_rotation_diversity or 0) / amp_thresh
             )
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
