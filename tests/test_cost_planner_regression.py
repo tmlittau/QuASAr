@@ -10,8 +10,10 @@ from quasar import config
 def test_statevector_cost_regression():
     est = CostEstimator()
     cost = est.statevector(num_qubits=3, num_1q_gates=1, num_2q_gates=1, num_meas=1)
-    assert cost.time == 24.0
-    assert cost.memory == 160.0
+    expected_time = 24.0 + est.coeff["sv_base_time"]
+    assert cost.time == expected_time
+    expected_mem = 160.0 + est.coeff["sv_base_mem"]
+    assert cost.memory == expected_mem
     assert math.isclose(cost.log_depth, math.log2(3))
 
 

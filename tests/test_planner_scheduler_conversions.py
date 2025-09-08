@@ -87,7 +87,13 @@ def test_planner_conversions_used():
     )
     planner = Planner(
         estimator=CostEstimator(
-            coeff={"sv_gate_1q": 1e6, "sv_gate_2q": 1e6, "sv_meas": 1e6}
+            coeff={
+                "sv_gate_1q": 1e6,
+                "sv_gate_2q": 1e6,
+                "sv_meas": 1e6,
+                "sv_base_time": 0.0,
+                "sv_base_mem": 0.0,
+            }
         ),
         conversion_cost_multiplier=0.0,
     )

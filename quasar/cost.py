@@ -102,6 +102,11 @@ class CostEstimator:
             # complex128 amplitude for buffers and alignment (Qiskit Aer
             # performance guide).
             "sv_bytes_per_amp": 1.25,
+            # Fixed runtime and memory overhead applied to every statevector
+            # estimate.  Captures Qiskit's initialisation cost measured via a
+            # small benchmark circuit.
+            "sv_base_time": 0.009,
+            "sv_base_mem": 86000.0,
             # Stabilizer tableau coefficients -------------------------------
             # Aaronson & Gottesman (2004) show O(n^2) bit operations per
             # Clifford gate; we approximate the constant factor with 2.
@@ -323,14 +328,16 @@ class CostEstimator:
             + self.coeff["sv_gate_2q"] * num_2q_gates
             + self.coeff["sv_meas"] * num_meas
         )
-        time = gate_time * amp
+        base_time = self.coeff.get("sv_base_time", 0.0)
+        time = base_time + gate_time * amp
         if precision == "complex64":
             bytes_per_amp = 8
         elif precision == "complex128":
             bytes_per_amp = 16
         else:  # pragma: no cover - defensive branch
             raise ValueError(f"unsupported precision: {precision}")
-        memory = self.coeff["sv_bytes_per_amp"] * amp * bytes_per_amp
+        base_mem = self.coeff.get("sv_base_mem", 0.0)
+        memory = base_mem + self.coeff["sv_bytes_per_amp"] * amp * bytes_per_amp
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
