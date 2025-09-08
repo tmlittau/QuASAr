@@ -6,6 +6,7 @@ when processed by the scheduler or simulation engine.
 """
 
 from quasar import Backend, Circuit, SimulationEngine, Scheduler
+from quasar.planner import PlanResult, PlanStep
 from qiskit import QuantumCircuit
 import numpy as np
 
@@ -84,3 +85,22 @@ def test_fifteen_qubit_circuit_single_backend():
     backends = {p.backend for p in result.ssd.partitions}
     assert backends == {Backend.TABLEAU}
     assert not result.ssd.conversions
+
+
+def test_prepare_run_merges_same_backend_steps():
+    circuit = build_bell_circuit()
+    gates = circuit.gates
+    plan = PlanResult(
+        table=[],
+        final_backend=Backend.TABLEAU,
+        gates=gates,
+        explicit_steps=[
+            PlanStep(0, 1, Backend.TABLEAU),
+            PlanStep(1, len(gates), Backend.TABLEAU),
+        ],
+    )
+    scheduler = Scheduler()
+    plan = scheduler.prepare_run(circuit, plan)
+    ssd = scheduler.run(circuit, plan)
+    assert len(ssd.partitions) == 1
+    assert not ssd.conversions

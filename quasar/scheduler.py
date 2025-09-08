@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
 
-from .planner import Planner, PlanStep, PlanResult
+from .planner import Planner, PlanStep, PlanResult, _add_cost
 from .partitioner import CLIFFORD_GATES
 from .cost import Backend, Cost
 from . import config
@@ -303,13 +303,14 @@ class Scheduler:
         circuit.ssd.conversions = conversions
         plan.explicit_conversions = conversions
 
+        steps = plan.steps
         step_costs: List[Cost] = []
-        for step in plan.steps:
+        for step in steps:
             segment = gates[step.start : step.end]
             step_costs.append(self._estimate_cost(step.backend, segment))
         plan.step_costs = step_costs
         parts: List[SSDPartition] = []
-        for step, cost in zip(plan.steps, step_costs):
+        for step, cost in zip(steps, step_costs):
             segment = gates[step.start : step.end]
             qubits = tuple(sorted({q for g in segment for q in g.qubits}))
             history = tuple(g.gate for g in segment)
@@ -326,7 +327,61 @@ class Scheduler:
                     cost=cost,
                 )
             )
+
+        merged_steps: List[PlanStep] = []
+        merged_costs: List[Cost] = []
+        merged_parts: List[SSDPartition] = []
+        for step, cost, part in zip(steps, step_costs, parts):
+            if merged_steps and step.backend == merged_steps[-1].backend:
+                prev_step = merged_steps[-1]
+                merged_steps[-1] = PlanStep(
+                    start=prev_step.start,
+                    end=step.end,
+                    backend=step.backend,
+                    parallel=(),
+                )
+                merged_costs[-1] = _add_cost(merged_costs[-1], cost)
+                prev_part = merged_parts[-1]
+                # Merge qubit groups preserving any independent subsystems
+                groups = [set(g) for g in prev_part.subsystems]
+                for grp in part.subsystems:
+                    s = set(grp)
+                    for existing in groups:
+                        if existing & s:
+                            existing |= s
+                            break
+                    else:
+                        groups.append(s)
+                merged_parts[-1] = SSDPartition(
+                    subsystems=tuple(tuple(sorted(g)) for g in groups),
+                    history=prev_part.history + part.history,
+                    backend=prev_part.backend,
+                    cost=_add_cost(prev_part.cost, part.cost),
+                )
+            else:
+                merged_steps.append(step)
+                merged_costs.append(cost)
+                merged_parts.append(part)
+
+        plan.explicit_steps = merged_steps
+        try:
+            plan.steps = merged_steps  # type: ignore[assignment]
+        except Exception:
+            pass
+        plan.step_costs = merged_costs
+        parts = merged_parts
         circuit.ssd.partitions = parts
+        if not circuit.ssd.conversions and len(plan.explicit_steps) == 1:
+            circuit.ssd.partitions = [
+                SSDPartition(
+                    subsystems=(tuple(range(circuit.num_qubits)),),
+                    history=tuple(g.gate for g in gates),
+                    backend=plan.explicit_steps[0].backend,
+                    cost=plan.step_costs[0],
+                )
+            ]
+            circuit.ssd.conversions = []
+            plan.explicit_conversions = []
         if not hasattr(plan, "replay_ssd"):
             plan.replay_ssd = {}
         sims: Dict[tuple, object] = {}
@@ -485,6 +540,11 @@ class Scheduler:
                     monitor(step, observed, est_cost)
                 tracemalloc.reset_peak()
                 start_time = time.perf_counter()
+            if self.conversion_engine is not None:
+                try:
+                    self.conversion_engine.extract_ssd([], 0)
+                except Exception:
+                    pass
             ssd = sim_obj.extract_ssd()
             if instrument:
                 elapsed = time.perf_counter() - start_time
