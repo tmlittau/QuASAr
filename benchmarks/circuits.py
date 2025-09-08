@@ -447,7 +447,8 @@ def vqe_chain_circuit(num_qubits: int = 6, depth: int = 2) -> Circuit:
     """Parameterized VQE ansatz with linear entanglement chain."""
     qc = EfficientSU2(num_qubits, reps=depth, entanglement="linear")
     qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x", "ry", "rz"])
-    return Circuit.from_qiskit(qc)
+    # Disable classical simplification to avoid issues with unbound parameters
+    return Circuit.from_qiskit(qc, use_classical_simplification=False)
 
 
 def random_hybrid_circuit(num_qubits: int = 6, depth: int = 10, seed: int | None = None) -> Circuit:
