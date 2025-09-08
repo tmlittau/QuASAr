@@ -9,7 +9,15 @@ from quasar.ssd import SSD
 
 @pytest.mark.parametrize("num_qubits", [3, 5])
 def test_notebook_comparison_behaviour(num_qubits: int) -> None:
-    backends = [Backend.STATEVECTOR, Backend.MPS, Backend.TABLEAU, Backend.DECISION_DIAGRAM]
+    backends = {
+        b.name: b
+        for b in (
+            Backend.STATEVECTOR,
+            Backend.MPS,
+            Backend.TABLEAU,
+            Backend.DECISION_DIAGRAM,
+        )
+    }
     runner = BenchmarkRunner()
     engine = SimulationEngine()
 
@@ -22,7 +30,7 @@ def test_notebook_comparison_behaviour(num_qubits: int) -> None:
     records = []
     for name, build in circuits.items():
         base = build(num_qubits, use_classical_simplification=False)
-        for b in backends:
+        for b in backends.values():
             if name == "wstate" and b == Backend.TABLEAU:
                 continue
             try:
