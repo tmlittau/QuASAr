@@ -34,22 +34,22 @@ def ghz_circuit(
     return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
 
-def _qft_spec(n: int) -> dict:
-    """Return a dictionary specification of the QFT circuit."""
-    gates = []
+def _qft_spec(n: int) -> List[Gate]:
+    """Return a list of :class:`Gate` objects for the QFT circuit."""
+    gates: List[Gate] = []
     for i in reversed(range(n)):
-        gates.append({"qubits": [i], "gate": "H"})
+        gates.append(Gate("H", [i]))
         for j, q in enumerate(reversed(range(0, i))):
-            gates.append({"qubits": [q, i], "gate": "CP", "params": {"k": j + 1}})
-    return {"n_qubits": n, "gates": gates}
+            gates.append(Gate("CP", [q, i], {"k": j + 1}))
+    return gates
 
 
 def qft_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
-    spec = _qft_spec(n_qubits)
-    return Circuit(spec["gates"], use_classical_simplification=use_classical_simplification)
+    gates = _qft_spec(n_qubits)
+    return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
 
 def qft_on_ghz_circuit(
