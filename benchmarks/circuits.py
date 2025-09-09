@@ -48,8 +48,10 @@ def qft_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
-    gates = _qft_spec(n_qubits)
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(
+        _qft_spec(n_qubits),
+        use_classical_simplification=use_classical_simplification,
+    )
 
 
 def qft_on_ghz_circuit(
@@ -69,11 +71,11 @@ def qft_on_ghz_circuit(
 
 
 def _w_state_spec(n: int) -> List[Gate]:
-    """Return a list of :class:`Gate` objects for a W state preparation circuit."""
+
+    """Return a gate list for a W state preparation circuit."""
     gates: List[Gate] = []
-    gates.append(
-        Gate("RY", [0], {"theta": 2 * math.acos(math.sqrt(1 / n))})
-    )
+    gates.append(Gate("RY", [0], {"theta": 2 * math.acos(math.sqrt(1 / n))}))
+
     for q in range(1, n - 1):
         gates.append(
             Gate(
