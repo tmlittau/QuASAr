@@ -13,7 +13,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit.library import QFT, VBERippleCarryAdder, CDKMRippleCarryAdder
 import networkx as nx
 
-from quasar.circuit import Circuit
+from quasar.circuit import Circuit, Gate
 
 
 def ripple_carry_modular_circuit(
@@ -197,38 +197,43 @@ def grover_with_oracle_circuit(
     if n_qubits <= 0:
         return Circuit([])
 
-    qc = QuantumCircuit(n_qubits)
-    qc.h(range(n_qubits))
+    gates: list[Gate] = []
+
+    for q in range(n_qubits):
+        gates.append(Gate("H", [q]))
 
     controls = list(range(n_qubits - 1))
     target = n_qubits - 1
 
     for _ in range(iterations):
         # Oracle composed from cascaded Toffoli/CNOT layers.
-        qc.h(target)
+        gates.append(Gate("H", [target]))
         for _ in range(oracle_depth):
             if n_qubits > 1:
-                qc.mcx(controls, target)
+                gates.append(Gate("MCX", controls + [target]))
             else:
-                qc.x(target)
+                gates.append(Gate("X", [target]))
             for q in range(n_qubits - 1):
-                qc.cx(q, q + 1)
+                gates.append(Gate("CX", [q, q + 1]))
             for q in reversed(range(n_qubits - 1)):
-                qc.cx(q, q + 1)
-        qc.h(target)
+                gates.append(Gate("CX", [q, q + 1]))
+        gates.append(Gate("H", [target]))
 
         # Standard Grover diffusion operator.
-        qc.h(range(n_qubits))
-        qc.x(range(n_qubits))
-        qc.h(target)
+        for q in range(n_qubits):
+            gates.append(Gate("H", [q]))
+        for q in range(n_qubits):
+            gates.append(Gate("X", [q]))
+        gates.append(Gate("H", [target]))
         if n_qubits > 1:
-            qc.mcx(controls, target)
-        qc.h(target)
-        qc.x(range(n_qubits))
-        qc.h(range(n_qubits))
+            gates.append(Gate("MCX", controls + [target]))
+        gates.append(Gate("H", [target]))
+        for q in range(n_qubits):
+            gates.append(Gate("X", [q]))
+        for q in range(n_qubits):
+            gates.append(Gate("H", [q]))
 
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t"])
-    return Circuit.from_qiskit(qc)
+    return Circuit(gates)
 
 
 def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:
