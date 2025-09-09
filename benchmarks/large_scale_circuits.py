@@ -15,6 +15,27 @@ from typing import List
 from quasar.circuit import Circuit, Gate
 from .circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates
 
+# Names of gates forming the Clifford group used in benchmark filtering.
+CLIFFORD_GATES = {
+    "I",
+    "X",
+    "Y",
+    "Z",
+    "H",
+    "S",
+    "SDG",
+    "CX",
+    "CY",
+    "CZ",
+    "SWAP",
+}
+
+
+def is_clifford(circuit: Circuit) -> bool:
+    """Return ``True`` if ``circuit`` contains only Clifford gates."""
+
+    return all(g.gate in CLIFFORD_GATES for g in circuit.gates)
+
 
 def ripple_carry_modular_circuit(
     bit_width: int, modulus: int | None = None, arithmetic: str = "cdkm"

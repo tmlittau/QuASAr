@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "benchmarks"))
 import benchmark_cli
 
-from quasar.circuit import Circuit
+from quasar.circuit import Circuit, Gate
 
 
 def dummy_run_quasar_multiple(self, circuit, engine, backend, repetitions, quick=False):
@@ -28,7 +28,10 @@ def test_run_suite_passes_classical_flag(monkeypatch):
 
     def circuit_fn(n, *, use_classical_simplification):
         flags.append(use_classical_simplification)
-        return Circuit([], use_classical_simplification=use_classical_simplification)
+        return Circuit(
+            [Gate("T", [0])],
+            use_classical_simplification=use_classical_simplification,
+        )
 
     monkeypatch.setattr(benchmark_cli, "SimulationEngine", lambda: object())
     monkeypatch.setattr(
@@ -39,3 +42,25 @@ def test_run_suite_passes_classical_flag(monkeypatch):
     )
     assert flags == [False]
     assert results[0]["qubits"] == 1
+
+
+def test_run_suite_skips_clifford(monkeypatch):
+    calls = []
+
+    def circuit_fn(n, *, use_classical_simplification):
+        return Circuit([Gate("H", [0])])
+
+    def dummy_runner(self, circuit, engine, backend, repetitions, quick=False):
+        calls.append(1)
+        return dummy_run_quasar_multiple(
+            self, circuit, engine, backend, repetitions, quick
+        )
+
+    monkeypatch.setattr(benchmark_cli, "SimulationEngine", lambda: object())
+    monkeypatch.setattr(
+        benchmark_cli.BenchmarkRunner, "run_quasar_multiple", dummy_runner
+    )
+    results = benchmark_cli.run_suite(circuit_fn, [1], 1)
+    assert results == []
+    assert calls == []
+

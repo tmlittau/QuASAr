@@ -27,6 +27,9 @@ python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 
 - `--qubits` specifies a `start:end[:step]` range.
 - `--repetitions` repeats each configuration to compute a mean and variance.
 - `--output` is the base path for the generated `.json` and `.csv` files.
+- Circuit families composed solely of Clifford gates (`H`, `S`, `CX`, `CZ`, etc.)
+  are skipped to avoid benchmarking workloads that are trivial for stabiliser
+  simulators.
 
 Each benchmark records separate timings for the preparation and execution
 phases as well as their sum:
