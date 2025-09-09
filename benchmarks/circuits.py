@@ -48,8 +48,10 @@ def qft_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
-    gates = _qft_spec(n_qubits)
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(
+        _qft_spec(n_qubits),
+        use_classical_simplification=use_classical_simplification,
+    )
 
 
 def qft_on_ghz_circuit(
@@ -68,26 +70,32 @@ def qft_on_ghz_circuit(
     )
 
 
-def _w_state_spec(n: int) -> dict:
-    """Return a dictionary specification of a W state preparation circuit."""
-    gates = []
-    gates.append({"gate": "RY", "qubits": [0], "params": {"theta": 2 * math.acos(math.sqrt(1 / n))}})
+def _w_state_spec(n: int) -> List[Gate]:
+
+    """Return a gate list for a W state preparation circuit."""
+    gates: List[Gate] = []
+    gates.append(Gate("RY", [0], {"theta": 2 * math.acos(math.sqrt(1 / n))}))
+
     for q in range(1, n - 1):
-        gates.append({"gate": "CRY", "qubits": [q - 1, q], "params": {"theta": 2 * math.acos(math.sqrt(1 / (n - q)))}})
+        gates.append(
+            Gate(
+                "CRY",
+                [q - 1, q],
+                {"theta": 2 * math.acos(math.sqrt(1 / (n - q)))}
+            )
+        )
     for q in reversed(range(n - 1)):
-        gates.append({"gate": "CX", "qubits": [q, q + 1]})
-    gates.append({"gate": "X", "qubits": [0]})
-    return {"n_qubits": n, "gates": gates}
+        gates.append(Gate("CX", [q, q + 1]))
+    gates.append(Gate("X", [0]))
+    return gates
 
 
 def w_state_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:
     """Create an ``n_qubits`` W state preparation circuit."""
-    spec = _w_state_spec(n_qubits)
-    return Circuit(
-        spec["gates"], use_classical_simplification=use_classical_simplification
-    )
+    gates = _w_state_spec(n_qubits)
+    return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
 
 def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:

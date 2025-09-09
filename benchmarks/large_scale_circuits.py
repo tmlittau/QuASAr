@@ -198,9 +198,8 @@ def grover_with_oracle_circuit(
     if n_qubits <= 0:
         return Circuit([])
 
-    gates: List[Gate] = []
+    gates: list[Gate] = []
 
-    # Initial Hadamards
     for q in range(n_qubits):
         gates.append(Gate("H", [q]))
 
@@ -213,6 +212,7 @@ def grover_with_oracle_circuit(
         gates.append(Gate("H", [target]))
         for _ in range(oracle_depth):
             gates.append(Gate(mcx_name, controls + [target]))
+
             for q in range(n_qubits - 1):
                 gates.append(Gate("CX", [q, q + 1]))
             for q in reversed(range(n_qubits - 1)):
