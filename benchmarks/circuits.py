@@ -2,18 +2,9 @@
 from __future__ import annotations
 
 import math
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
-from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import (
-    QFT,
-    RealAmplitudes,
-    EfficientSU2,
-    TwoLocal,
-    ZZFeatureMap,
-)
-from qiskit.circuit.random import random_circuit as qiskit_random_circuit
 
 from quasar.circuit import Circuit, Gate
 
@@ -422,15 +413,22 @@ def deutsch_jozsa_circuit(num_qubits: int, balanced: bool = True) -> Circuit:
         balanced: Whether to use a balanced oracle; otherwise constant.
     """
 
-    qc = QuantumCircuit(num_qubits + 1)
-    qc.x(num_qubits)
-    qc.h(range(num_qubits + 1))
+    gates: List[Gate] = []
+    if num_qubits < 0:
+        raise ValueError("num_qubits must be non-negative")
+    # Prepare ancilla in |-> state
+    anc = num_qubits
+    gates.append(Gate("X", [anc]))
+    for q in range(num_qubits + 1):
+        gates.append(Gate("H", [q]))
+    # Balanced oracle uses CNOTs from each input to ancilla
     if balanced:
         for i in range(num_qubits):
-            qc.cx(i, num_qubits)
-    qc.h(range(num_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+            gates.append(Gate("CX", [i, anc]))
+    # Decode the result
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
+    return Circuit(gates)
 
 
 def graph_state_circuit(num_qubits: int, degree: int, seed: int | None = None) -> Circuit:
@@ -443,12 +441,12 @@ def graph_state_circuit(num_qubits: int, degree: int, seed: int | None = None) -
     if (num_qubits * degree) % 2 != 0:
         raise ValueError("n * degree must be even for a regular graph")
     g = nx.random_regular_graph(degree, num_qubits, seed=seed)
-    qc = QuantumCircuit(num_qubits)
-    qc.h(range(num_qubits))
+    gates: List[Gate] = []
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
     for u, v in g.edges():
-        qc.cz(u, v)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+        gates.append(Gate("CZ", [u, v]))
+    return Circuit(gates)
 
 
 def hhl_circuit(num_qubits: int) -> Circuit:
@@ -456,16 +454,15 @@ def hhl_circuit(num_qubits: int) -> Circuit:
 
     if num_qubits < 3:
         raise ValueError("HHL requires at least 3 qubits")
-    qc = QuantumCircuit(num_qubits)
-    qc.h(0)
-    qc.cx(0, 1)
-    qc.h(0)
-    qc.cx(1, 2)
-    qc.ry(math.pi / 4, 2)
-    qc.cx(1, 2)
-    qc.h(0)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    gates: List[Gate] = []
+    gates.append(Gate("H", [0]))
+    gates.append(Gate("CX", [0, 1]))
+    gates.append(Gate("H", [0]))
+    gates.append(Gate("CX", [1, 2]))
+    gates.append(Gate("RY", [2], {"theta": math.pi / 4}))
+    gates.append(Gate("CX", [1, 2]))
+    gates.append(Gate("H", [0]))
+    return Circuit(gates)
 
 
 def hrs_circuit(num_qubits: int) -> Circuit:
@@ -473,12 +470,11 @@ def hrs_circuit(num_qubits: int) -> Circuit:
 
     if num_qubits % 2 != 0:
         raise ValueError("num_qubits must be even for HRS circuit")
-    qc = QuantumCircuit(num_qubits)
+    gates: List[Gate] = []
     for i in range(0, num_qubits, 2):
         target = (i + 2) % num_qubits
-        qc.ccx(i, i + 1, target)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+        gates.append(Gate("CCX", [i, i + 1, target]))
+    return Circuit(gates)
 
 
 def qaoa_circuit(num_qubits: int, repetitions: int = 1, seed: int | None = None) -> Circuit:
@@ -488,29 +484,39 @@ def qaoa_circuit(num_qubits: int, repetitions: int = 1, seed: int | None = None)
     gammas = rng.uniform(0, 2 * np.pi, size=repetitions)
     betas = rng.uniform(0, 2 * np.pi, size=repetitions)
     edges = [(i, (i + 1) % num_qubits) for i in range(num_qubits)]
-    qc = QuantumCircuit(num_qubits)
-    qc.h(range(num_qubits))
+    gates: List[Gate] = []
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
     for p in range(repetitions):
         for u, v in edges:
-            qc.rzz(gammas[p], u, v)
+            gates.append(Gate("RZZ", [u, v], {"theta": float(gammas[p])}))
         for q in range(num_qubits):
-            qc.rx(betas[p], q)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+            gates.append(Gate("RX", [q], {"theta": float(betas[p])}))
+    return Circuit(gates)
 
 
 def qnn_circuit(num_qubits: int) -> Circuit:
     """Construct a simple quantum neural network circuit."""
 
-    fm = ZZFeatureMap(num_qubits)
-    ansatz = RealAmplitudes(num_qubits)
-    qc = QuantumCircuit(num_qubits)
-    qc.append(fm, range(num_qubits))
-    qc.append(ansatz, range(num_qubits))
-    params = {p: (i + 1) * 0.1 for i, p in enumerate(qc.parameters)}
-    qc = qc.assign_parameters(params)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    gates: List[Gate] = []
+    param = 0
+    # ZZFeatureMap: Hadamards followed by pairwise ZZ interactions
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
+    for i in range(num_qubits):
+        for j in range(i + 1, num_qubits):
+            param += 1
+            gates.append(Gate("RZZ", [i, j], {"theta": 0.1 * param}))
+    # RealAmplitudes ansatz with a single repetition
+    for q in range(num_qubits):
+        param += 1
+        gates.append(Gate("RY", [q], {"theta": 0.1 * param}))
+    for i in range(num_qubits - 1):
+        gates.append(Gate("CX", [i, i + 1]))
+    for q in range(num_qubits):
+        param += 1
+        gates.append(Gate("RY", [q], {"theta": 0.1 * param}))
+    return Circuit(gates)
 
 
 def qpe_circuit(num_qubits: int, inexact: bool = False) -> Circuit:
@@ -521,29 +527,33 @@ def qpe_circuit(num_qubits: int, inexact: bool = False) -> Circuit:
         inexact: Whether to use an inexact eigenphase.
     """
 
-    qc = QuantumCircuit(num_qubits + 1)
-    theta = 2 * np.pi / (2**num_qubits)
+    gates: List[Gate] = []
+    theta = 2 * math.pi / (2**num_qubits)
     if inexact:
         theta *= 1.1
-    qc.h(range(num_qubits))
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
     for j in range(num_qubits):
-        qc.cp(2 ** j * theta, j, num_qubits)
-    qc.append(QFT(num_qubits, inverse=True), range(num_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+        phi = (2**j) * theta
+        gates.append(Gate("CRZ", [j, num_qubits], {"phi": phi}))
+    gates.extend(_iqft_spec(num_qubits))
+    return Circuit(gates)
 
 
 def quantum_walk_circuit(num_qubits: int, depth: int) -> Circuit:
     """Construct a simple quantum walk circuit."""
 
-    qc = QuantumCircuit(num_qubits)
-    qc.h(range(num_qubits))
+    gates: List[Gate] = []
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
+    mcx_name = "C" * (num_qubits - 1) + "X" if num_qubits > 1 else "X"
     for _ in range(depth):
         if num_qubits > 1:
-            qc.mcx(list(range(num_qubits - 1)), num_qubits - 1)
-        qc.h(range(num_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+            qubits = list(range(num_qubits))
+            gates.append(Gate(mcx_name, qubits))
+        for q in range(num_qubits):
+            gates.append(Gate("H", [q]))
+    return Circuit(gates)
 
 
 def random_circuit(
@@ -554,23 +564,97 @@ def random_circuit(
 ) -> Circuit:
     """Generate a random circuit of depth ``2*num_qubits``."""
 
-    qc = qiskit_random_circuit(num_qubits, 2 * num_qubits, seed=seed)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(
-        qc, use_classical_simplification=use_classical_simplification
-    )
+    rng = np.random.default_rng(seed)
+    gates: List[Gate] = []
+    depth = 2 * num_qubits
+    single_gates = ["H", "RX", "RY"]
+    two_gates = ["CX", "CZ", "RZZ"]
+    for _ in range(depth):
+        for q in range(num_qubits):
+            gate = rng.choice(single_gates)
+            if gate == "H":
+                gates.append(Gate("H", [q]))
+            else:
+                angle = float(rng.uniform(0, 2 * np.pi))
+                gates.append(Gate(gate, [q], {"theta": angle}))
+        if num_qubits > 1:
+            num_two = int(rng.integers(1, num_qubits))
+            used: set[Tuple[int, int]] = set()
+            for _ in range(num_two):
+                a, b = rng.choice(num_qubits, 2, replace=False)
+                if (a, b) in used or (b, a) in used:
+                    continue
+                used.add((a, b))
+                gate = rng.choice(two_gates)
+                if gate == "RZZ":
+                    angle = float(rng.uniform(0, 2 * np.pi))
+                    gates.append(Gate("RZZ", [int(a), int(b)], {"theta": angle}))
+                else:
+                    gates.append(Gate(gate, [int(a), int(b)]))
+    return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
 
 def shor_circuit(circuit_size: int) -> Circuit:
     """Create a toy Shor factoring circuit of a given size."""
 
-    qc = QuantumCircuit(circuit_size)
-    qc.h(range(circuit_size))
+    gates: List[Gate] = []
+    for q in range(circuit_size):
+        gates.append(Gate("H", [q]))
     if circuit_size > 1:
-        qc.cx(0, circuit_size - 1)
-    qc.append(QFT(circuit_size), range(circuit_size))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+        gates.append(Gate("CX", [0, circuit_size - 1]))
+    gates.extend(_qft_spec(circuit_size))
+    return Circuit(gates)
+
+
+def _entanglement_pairs(
+    num_qubits: int, entanglement: str | List[int] | List[List[int]]
+) -> List[Tuple[int, int]]:
+    """Return pairs of qubits to entangle for ansatz circuits."""
+
+    if isinstance(entanglement, str):
+        if entanglement == "full":
+            return [(i, j) for i in range(num_qubits) for j in range(i + 1, num_qubits)]
+        if entanglement == "linear":
+            return [(i, i + 1) for i in range(num_qubits - 1)]
+        raise ValueError("Unsupported entanglement pattern")
+    pairs: List[Tuple[int, int]] = []
+    if not entanglement:
+        return pairs
+    if isinstance(entanglement[0], (list, tuple)):
+        for a, b in entanglement:
+            pairs.append((int(a), int(b)))
+    else:
+        for a, b in zip(entanglement[:-1], entanglement[1:]):
+            pairs.append((int(a), int(b)))
+    return pairs
+
+
+def _two_local_gates(
+    num_qubits: int,
+    reps: int,
+    entanglement: str | List[int] | List[List[int]],
+    rotation_blocks: List[str],
+) -> List[Gate]:
+    """Return gates for a generic two-local style ansatz."""
+
+    pairs = _entanglement_pairs(num_qubits, entanglement)
+    gates: List[Gate] = []
+    param = 0
+    # Initial rotation layer
+    for q in range(num_qubits):
+        for block in rotation_blocks:
+            param += 1
+            name = "phi" if block == "RZ" else "theta"
+            gates.append(Gate(block, [q], {name: 0.1 * param}))
+    for _ in range(reps):
+        for a, b in pairs:
+            gates.append(Gate("CX", [a, b]))
+        for q in range(num_qubits):
+            for block in rotation_blocks:
+                param += 1
+                name = "phi" if block == "RZ" else "theta"
+                gates.append(Gate(block, [q], {name: 0.1 * param}))
+    return gates
 
 
 def real_amplitudes_circuit(
@@ -578,11 +662,8 @@ def real_amplitudes_circuit(
 ) -> Circuit:
     """Construct a ``RealAmplitudes`` ansatz with bound parameters."""
 
-    qc = RealAmplitudes(num_qubits, reps=reps, entanglement=entanglement)
-    params = {p: 0.1 * (i + 1) for i, p in enumerate(qc.parameters)}
-    qc = qc.assign_parameters(params)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    gates = _two_local_gates(num_qubits, reps, entanglement, ["RY"])
+    return Circuit(gates)
 
 
 def efficient_su2_circuit(
@@ -590,11 +671,8 @@ def efficient_su2_circuit(
 ) -> Circuit:
     """Construct an ``EfficientSU2`` ansatz with bound parameters."""
 
-    qc = EfficientSU2(num_qubits, reps=reps, entanglement=entanglement)
-    params = {p: 0.1 * (i + 1) for i, p in enumerate(qc.parameters)}
-    qc = qc.assign_parameters(params)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    gates = _two_local_gates(num_qubits, reps, entanglement, ["RY", "RZ"])
+    return Circuit(gates)
 
 
 def two_local_circuit(
@@ -602,11 +680,8 @@ def two_local_circuit(
 ) -> Circuit:
     """Construct a ``TwoLocal`` ansatz with bound parameters."""
 
-    qc = TwoLocal(num_qubits, reps=reps, entanglement=entanglement)
-    params = {p: 0.1 * (i + 1) for i, p in enumerate(qc.parameters)}
-    qc = qc.assign_parameters(params)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    gates = _two_local_gates(num_qubits, reps, entanglement, ["RY", "RZ"])
+    return Circuit(gates)
 
 
 def clifford_ec_circuit() -> Circuit:
@@ -614,64 +689,55 @@ def clifford_ec_circuit() -> Circuit:
 
     Measurement operations are omitted so the circuit contains only unitary gates.
     """
-    qc = QuantumCircuit(5)
+    gates: List[Gate] = []
     # Encode logical qubit into three data qubits
-    qc.h(0)
-    qc.cx(0, 1)
-    qc.cx(0, 2)
+    gates.append(Gate("H", [0]))
+    gates.append(Gate("CX", [0, 1]))
+    gates.append(Gate("CX", [0, 2]))
     # Syndrome extraction with two ancilla qubits
-    qc.cx(0, 3)
-    qc.cx(1, 3)
-    qc.cx(1, 4)
-    qc.cx(2, 4)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h"])
-    return Circuit.from_qiskit(qc)
+    gates.append(Gate("CX", [0, 3]))
+    gates.append(Gate("CX", [1, 3]))
+    gates.append(Gate("CX", [1, 4]))
+    gates.append(Gate("CX", [2, 4]))
+    return Circuit(gates)
 
 
 def ripple_add_circuit(num_bits: int = 4) -> Circuit:
     """Ripple-carry adder for two ``num_bits``-bit registers."""
-    adder = VBERippleCarryAdder(num_bits)
-    qc = QuantumCircuit(adder.num_qubits)
-    qc.append(adder, range(adder.num_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"], optimization_level=0)
-    return Circuit.from_qiskit(qc)
+
+    return adder_circuit(num_bits, kind="vbe")
 
 
 def vqe_chain_circuit(num_qubits: int = 6, depth: int = 2) -> Circuit:
     """Parameterized VQE ansatz with linear entanglement chain."""
-    qc = EfficientSU2(num_qubits, reps=depth, entanglement="linear")
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x", "ry", "rz"])
-    # Disable classical simplification to avoid issues with unbound parameters
-    return Circuit.from_qiskit(qc, use_classical_simplification=False)
+
+    gates = _two_local_gates(num_qubits, depth, "linear", ["RY", "RZ"])
+    return Circuit(gates, use_classical_simplification=False)
 
 
 def random_hybrid_circuit(num_qubits: int = 6, depth: int = 10, seed: int | None = None) -> Circuit:
     """Random circuit mixing Clifford and non-Clifford gates."""
     rng = np.random.default_rng(seed)
-    qc = QuantumCircuit(num_qubits)
+    gates: List[Gate] = []
     for _ in range(depth):
         for q in range(num_qubits):
-            gate = rng.choice(["h", "s"])
-            getattr(qc, gate)(q)
-        a, b = rng.choice(num_qubits, 2, replace=False)
-        if rng.random() < 0.5:
-            qc.cx(int(a), int(b))
-        else:
-            qc.cz(int(a), int(b))
-        qc.t(int(rng.integers(num_qubits)))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "cz", "h", "s", "t"])
-    return Circuit.from_qiskit(qc)
+            gate = rng.choice(["H", "S"])
+            gates.append(Gate(gate, [q]))
+        if num_qubits > 1:
+            a, b = rng.choice(num_qubits, 2, replace=False)
+            two_gate = "CX" if rng.random() < 0.5 else "CZ"
+            gates.append(Gate(two_gate, [int(a), int(b)]))
+        gates.append(Gate("T", [int(rng.integers(num_qubits))]))
+    return Circuit(gates)
 
 
 def recur_subroutine_circuit(num_qubits: int = 4, depth: int = 3) -> Circuit:
     """Circuit invoking a repeated subroutine across layers."""
-    sub = QuantumCircuit(num_qubits, name="sub")
-    for i in range(num_qubits - 1):
-        sub.cx(i, i + 1)
-    sub.h(range(num_qubits))
-    inst = sub.to_instruction()
-    qc = QuantumCircuit(num_qubits)
+
+    gates: List[Gate] = []
     for _ in range(depth):
-        qc.append(inst, range(num_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+        for i in range(num_qubits - 1):
+            gates.append(Gate("CX", [i, i + 1]))
+        for q in range(num_qubits):
+            gates.append(Gate("H", [q]))
+    return Circuit(gates)

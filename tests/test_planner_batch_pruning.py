@@ -65,6 +65,9 @@ def _plan_cost(planner: Planner, circuit: Circuit, steps):
 
 def test_batch_pruning_speed_and_quality():
     circuit = _build_circuit(40)
+    # Warm up planners to avoid cold-start overhead skewing timings
+    Planner(top_k=4, batch_size=1).plan(circuit)
+    Planner(top_k=1, batch_size=5).plan(circuit)
 
     start = time.perf_counter()
     base = Planner(top_k=4, batch_size=1).plan(circuit)
