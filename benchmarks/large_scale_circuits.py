@@ -9,12 +9,11 @@ included in both cases to demonstrate hybrid behaviour.
 
 from __future__ import annotations
 
-from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import QFT, VBERippleCarryAdder, CDKMRippleCarryAdder
 import networkx as nx
 from typing import List
 
 from quasar.circuit import Circuit, Gate
+from .circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates
 
 
 def ripple_carry_modular_circuit(
@@ -38,60 +37,63 @@ def ripple_carry_modular_circuit(
     Returns
     -------
     Circuit
-        The assembled circuit ready for benchmarking.
+        The assembled gate-level circuit ready for benchmarking.
     """
 
     if bit_width <= 0:
         return Circuit([])
 
     arithmetic = arithmetic.lower()
-    adder_cls = CDKMRippleCarryAdder if arithmetic == "cdkm" else VBERippleCarryAdder
+    if arithmetic == "cdkm":
+        adder_gates = _cdkm_adder_gates(bit_width)
+        helper_count = 0
+    else:
+        adder_gates = _vbe_adder_gates(bit_width)
+        helper_count = max(0, bit_width - 1)
 
     if modulus is None:
-        # Plain ripple-carry adder on two ``bit_width``-wide registers.
-        adder = adder_cls(bit_width)
-        qc = QuantumCircuit(adder.num_qubits)
-        qc.append(adder, range(adder.num_qubits))
-        # Small non-Clifford section.
-        qc.t(0)
-    else:
-        n = bit_width
-        # ``a`` and ``b`` act as inputs; ``p`` accumulates the product.
-        # Total qubits: 3n for the registers plus one extra for carry in the
-        # composed adder below.
-        qc = QuantumCircuit(3 * n + 1)
-        a = list(range(n))
-        b = list(range(n, 2 * n))
-        prod = list(range(2 * n, 3 * n))
-        carry = 3 * n
+        gates = list(adder_gates)
+        gates.append(Gate("T", [0]))
+        return Circuit(gates, use_classical_simplification=False)
 
-        # Schoolbook multiplication using controlled additions of the ``a``
-        # register into the ``prod`` register conditioned on bits of ``b``.
-        adder = adder_cls(n)
-        for i in range(n):
-            ctrl = b[i]
-            # Shifted targets for addition of ``a`` << i
-            targets = prod[i: i + n]
-            if len(targets) < n:
-                # wrap around into higher bits (mod 2**n) for simplicity
-                targets = targets + prod[: n - len(targets)]
-            qc.compose(
-                adder.to_gate().control(1),
-                [ctrl, carry, *a, *targets],
-                inplace=True,
-            )
-        # Insert a few T gates as a tiny non-Clifford routine.
-        for q in range(min(3, qc.num_qubits)):
-            qc.t(q)
+    n = bit_width
+    gates: List[Gate] = []
 
-        # Simple modular reduction by classically subtracting ``modulus`` once.
-        mod_bits = bin(modulus % (1 << n))[2:].zfill(n)[::-1]
-        for idx, bit in enumerate(mod_bits):
-            if bit == "1":
-                qc.x(prod[idx])
+    a = list(range(n))
+    b = list(range(n, 2 * n))
+    prod = list(range(2 * n, 3 * n))
+    carry = 3 * n
+    helpers = [carry + 1 + i for i in range(helper_count)]
+    total_qubits = carry + 1 + helper_count
 
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t"])
-    return Circuit.from_qiskit(qc)
+    for i in range(n):
+        ctrl = b[i]
+        targets = prod[i : i + n]
+        if len(targets) < n:
+            targets = targets + prod[: n - len(targets)]
+
+        mapping = {0: carry}
+        for j in range(n):
+            mapping[1 + j] = a[j]
+            mapping[1 + n + j] = targets[j]
+        mapping[1 + 2 * n] = carry
+        for idx, h in enumerate(helpers):
+            mapping[1 + 2 * n + 1 + idx] = h
+
+        for g in adder_gates:
+            name = "C" + g.gate
+            qubits = [ctrl] + [mapping[q] for q in g.qubits]
+            gates.append(Gate(name, qubits, g.params))
+
+    for q in range(min(3, total_qubits)):
+        gates.append(Gate("T", [q]))
+
+    mod_bits = bin(modulus % (1 << n))[2:].zfill(n)[::-1]
+    for idx, bit in enumerate(mod_bits):
+        if bit == "1":
+            gates.append(Gate("X", [prod[idx]]))
+
+    return Circuit(gates, use_classical_simplification=False)
 
 
 def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") -> Circuit:
@@ -110,69 +112,53 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
     Returns
     -------
     Circuit
-        Circuit implementing ``rounds`` cycles of parity-check interactions without measurements.
+        Circuit of explicit ``CX``/``CZ``/``H`` gates implementing ``rounds``
+        cycles of parity-check interactions without measurements.
     """
 
     if distance <= 0 or rounds <= 0:
         return Circuit([])
 
+    gates: List[Gate] = []
     scheme = scheme.lower()
     if scheme == "repetition":
         data_count = distance
         anc_count = distance - 1
-        total_qubits = data_count + anc_count
-        qc = QuantumCircuit(total_qubits)
         for _ in range(rounds):
             for i in range(anc_count):
                 anc = data_count + i
                 left = i
                 right = i + 1
-                qc.cx(left, anc)
-                qc.cx(right, anc)
+                gates.append(Gate("CX", [left, anc]))
+                gates.append(Gate("CX", [right, anc]))
     else:  # surface code
         d = distance
         data_count = d * d
-        horiz = d * (d - 1)
-        vert = d * (d - 1)
-        anc_count = horiz + vert
-        total_qubits = data_count + anc_count
-        qc = QuantumCircuit(total_qubits)
-
-        def data_index(row: int, col: int) -> int:
-            return row * d + col
-
         anc_start = data_count
         for _ in range(rounds):
             a_offset = 0
-            # Horizontal parity checks
             for row in range(d):
                 for col in range(d - 1):
                     anc = anc_start + a_offset
                     a_offset += 1
-                    q1 = data_index(row, col)
-                    q2 = data_index(row, col + 1)
-                    qc.h(anc)
-                    qc.cz(anc, q1)
-                    qc.cz(anc, q2)
-                    qc.h(anc)
-            # Vertical parity checks
+                    q1 = row * d + col
+                    q2 = row * d + col + 1
+                    gates.append(Gate("H", [anc]))
+                    gates.append(Gate("CZ", [anc, q1]))
+                    gates.append(Gate("CZ", [anc, q2]))
+                    gates.append(Gate("H", [anc]))
             for row in range(d - 1):
                 for col in range(d):
                     anc = anc_start + a_offset
                     a_offset += 1
-                    q1 = data_index(row, col)
-                    q2 = data_index(row + 1, col)
-                    qc.h(anc)
-                    qc.cz(anc, q1)
-                    qc.cz(anc, q2)
-                    qc.h(anc)
+                    q1 = row * d + col
+                    q2 = (row + 1) * d + col
+                    gates.append(Gate("H", [anc]))
+                    gates.append(Gate("CZ", [anc, q1]))
+                    gates.append(Gate("CZ", [anc, q2]))
+                    gates.append(Gate("H", [anc]))
 
-    qc = transpile(
-        qc,
-        basis_gates=["u", "p", "cx", "ccx", "h", "x", "t", "cz"],
-        optimization_level=0,
-    )
-    return Circuit.from_qiskit(qc)
+    return Circuit(gates, use_classical_simplification=False)
 
 
 def grover_with_oracle_circuit(
@@ -232,17 +218,16 @@ def grover_with_oracle_circuit(
         for q in range(n_qubits):
             gates.append(Gate("H", [q]))
 
-    return Circuit(gates)
+    return Circuit(gates, use_classical_simplification=False)
 
 
 def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:
     """Construct a deep QAOA circuit for an input graph.
 
-    The circuit alternates between problem-Hamiltonian layers composed of
-    :class:`~qiskit.circuit.library.RZZGate` interactions for each edge in the
-    ``graph`` and mixing layers of single-qubit :class:`~qiskit.circuit.library.RXGate`
-    rotations.  The number of alternations is controlled by ``p_layers`` and is
-    independent of the graph size.
+    The circuit alternates between problem-Hamiltonian layers of ``RZZ``
+    interactions for each edge in the ``graph`` and mixing layers of single
+    qubit ``RX`` rotations.  The number of alternations is controlled by
+    ``p_layers`` and is independent of the graph size.
 
     Parameters
     ----------
@@ -254,23 +239,20 @@ def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:
     Returns
     -------
     Circuit
-        The assembled circuit ready for benchmarking.
+        The assembled gate-level circuit ready for benchmarking.
     """
 
     if graph.number_of_nodes() == 0 or p_layers <= 0:
         return Circuit([])
 
+    gates: List[Gate] = []
     n_qubits = graph.number_of_nodes()
-    qc = QuantumCircuit(n_qubits)
-
     for _ in range(p_layers):
         for u, v in graph.edges():
-            qc.rzz(0.5, u, v)
+            gates.append(Gate("RZZ", [u, v], {"theta": 0.5}))
         for q in range(n_qubits):
-            qc.rx(0.5, q)
-
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "rx", "rzz"])
-    return Circuit.from_qiskit(qc)
+            gates.append(Gate("RX", [q], {"theta": 0.5}))
+    return Circuit(gates)
 
 
 def phase_estimation_classical_unitary(
@@ -281,8 +263,8 @@ def phase_estimation_classical_unitary(
     The circuit uses ``precision_qubits`` qubits as the phase register and
     ``eigen_qubits`` as the target on which a unitary consisting of
     ``classical_depth`` layers of reversible logic (CNOT/Toffoli gates) is
-    applied. Controlled powers of this unitary are used followed by an inverse
-    quantum Fourier transform.
+    applied.  Controlled powers of this unitary are followed by an explicit
+    inverse quantum Fourier transform implemented via ``CRZ`` and ``H`` gates.
 
     Parameters
     ----------
@@ -296,44 +278,40 @@ def phase_estimation_classical_unitary(
     Returns
     -------
     Circuit
-        The assembled circuit ready for benchmarking.
+        The assembled gate-level circuit ready for benchmarking.
     """
 
     if eigen_qubits <= 0 or precision_qubits <= 0 or classical_depth <= 0:
         return Circuit([])
 
-    # Build the classical reversible unitary composed of the requested depth.
-    unitary = QuantumCircuit(eigen_qubits, name="U")
-    for _ in range(classical_depth):
-        if eigen_qubits == 1:
-            unitary.x(0)
-        else:
+    unitary: List[Gate] = []
+    if eigen_qubits == 1:
+        unitary.append(Gate("X", [0]))
+    else:
+        for _ in range(classical_depth):
             for i in range(eigen_qubits - 1):
-                unitary.cx(i, i + 1)
+                unitary.append(Gate("CX", [i, i + 1]))
             if eigen_qubits >= 3:
                 for i in range(eigen_qubits - 2):
-                    unitary.ccx(i, i + 1, i + 2)
-
-    u_gate = unitary.to_gate()
-    cu_gate = u_gate.control(1)
+                    unitary.append(Gate("CCX", [i, i + 1, i + 2]))
 
     total_qubits = precision_qubits + eigen_qubits
-    qc = QuantumCircuit(total_qubits)
     phase_reg = list(range(precision_qubits))
     eigen_reg = list(range(precision_qubits, total_qubits))
 
-    # Prepare the phase-estimation register.
-    qc.h(phase_reg)
+    gates: List[Gate] = []
 
-    # Apply controlled powers of the unitary.
+    for q in phase_reg:
+        gates.append(Gate("H", [q]))
+
     for j, ctrl in enumerate(phase_reg):
-        repetitions = 2 ** j
-        for _ in range(repetitions):
-            qc.append(cu_gate, [ctrl, *eigen_reg])
+        reps = 2 ** j
+        for _ in range(reps):
+            for g in unitary:
+                name = "C" + g.gate
+                qubits = [ctrl] + [q + precision_qubits for q in g.qubits]
+                gates.append(Gate(name, qubits, g.params))
 
-    # Inverse QFT on the phase register.
-    iqft = QFT(precision_qubits, inverse=True, do_swaps=False).to_gate()
-    qc.append(iqft, phase_reg)
+    gates.extend(_iqft_gates(precision_qubits, 0))
 
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    return Circuit(gates)
