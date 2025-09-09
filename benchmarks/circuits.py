@@ -71,9 +71,11 @@ def qft_on_ghz_circuit(
 
 
 def _w_state_spec(n: int) -> List[Gate]:
+
     """Return a gate list for a W state preparation circuit."""
     gates: List[Gate] = []
     gates.append(Gate("RY", [0], {"theta": 2 * math.acos(math.sqrt(1 / n))}))
+
     for q in range(1, n - 1):
         gates.append(
             Gate(
