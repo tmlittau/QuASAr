@@ -276,6 +276,51 @@ def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:
     return Circuit(gates)
 
 
+def surface_corrected_qaoa(bit_width: int, distance: int, rounds: int) -> Circuit:
+    """Interleave QAOA layers with surface-code error-correction cycles.
+
+    The generator constructs a simple ring ``p``-layer QAOA circuit acting on
+    ``bit_width`` data qubits.  After each problem/mixing layer pair a single
+    round of :func:`surface_code_cycle` is appended to model an error-correction
+    cycle on a ``distance`` x ``distance`` lattice.  Extra data qubits required
+    by the surface code are included automatically and unused by the algorithmic
+    portion.
+
+    Parameters
+    ----------
+    bit_width:
+        Number of problem qubits arranged on a cycle graph.
+    distance:
+        Code distance of the inserted surface-code cycles.  The lattice must
+        contain at least ``bit_width`` data qubits.
+    rounds:
+        Number of QAOA problem/mixing layers to apply.  Each layer is followed
+        by one surface-code stabiliser round.
+
+    Returns
+    -------
+    Circuit
+        The assembled gate-level circuit combining algorithmic and
+        error-correction layers.
+    """
+
+    if bit_width <= 0 or distance <= 0 or rounds <= 0:
+        return Circuit([])
+
+    problem_graph = nx.cycle_graph(bit_width)
+    correction = surface_code_cycle(distance).gates
+
+    gates: List[Gate] = []
+    for _ in range(rounds):
+        for u, v in problem_graph.edges():
+            gates.append(Gate("RZZ", [u, v], {"theta": 0.5}))
+        for q in range(bit_width):
+            gates.append(Gate("RX", [q], {"theta": 0.5}))
+        gates.extend(correction)
+
+    return Circuit(gates)
+
+
 def phase_estimation_classical_unitary(
     eigen_qubits: int, precision_qubits: int, classical_depth: int
 ) -> Circuit:
