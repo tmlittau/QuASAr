@@ -124,7 +124,12 @@ def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
     return Circuit.from_qiskit(qc)
 
 
-def bernstein_vazirani_circuit(n_qubits: int, secret: int = 0) -> Circuit:
+def bernstein_vazirani_circuit(
+    n_qubits: int,
+    secret: int = 0,
+    *,
+    use_classical_simplification: bool = False,
+) -> Circuit:
     """Create a Bernstein-Vazirani circuit for a given secret string.
 
     Args:
@@ -135,18 +140,30 @@ def bernstein_vazirani_circuit(n_qubits: int, secret: int = 0) -> Circuit:
         A :class:`Circuit` implementing the algorithm.
     """
 
-    qc = QuantumCircuit(n_qubits + 1)
-    qc.h(range(n_qubits))
-    qc.x(n_qubits)
-    qc.h(n_qubits)
+    gates: List[Gate] = []
+    if n_qubits <= 0:
+        return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
+    anc = n_qubits
+
+    # Initial Hadamards on the search register.
+    for q in range(n_qubits):
+        gates.append(Gate("H", [q]))
+
+    # Prepare the ancilla in |-> state.
+    gates.append(Gate("X", [anc]))
+    gates.append(Gate("H", [anc]))
+
+    # Oracle marking the secret string using CNOTs.
     for i in range(n_qubits):
         if (secret >> i) & 1:
-            qc.cx(i, n_qubits)
+            gates.append(Gate("CX", [i, anc]))
 
-    qc.h(range(n_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    # Final Hadamards to decode the secret string.
+    for q in range(n_qubits):
+        gates.append(Gate("H", [q]))
+
+    return Circuit(gates, use_classical_simplification=use_classical_simplification)
 
 
 def amplitude_estimation_circuit(num_qubits: int, probability: float) -> Circuit:
