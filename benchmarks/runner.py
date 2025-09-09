@@ -18,11 +18,12 @@ Two entry points are exposed:
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
+from contextlib import contextmanager
+import copy
+import signal
+import statistics
 import time
 import tracemalloc
-import statistics
-import copy
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
     import pandas as pd  # type: ignore
@@ -33,6 +34,22 @@ except Exception:  # pragma: no cover - pandas is optional
 RunCallable = Callable[[Any], Any]
 
 from quasar.cost import Backend
+
+
+@contextmanager
+def _time_limit(seconds: float) -> None:
+    """Raise :class:`TimeoutError` after ``seconds`` have elapsed."""
+
+    def handler(signum: int, frame: Any) -> None:  # pragma: no cover - external
+        raise TimeoutError("operation timed out")
+
+    previous = signal.signal(signal.SIGALRM, handler)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:  # pragma: no cover - reset alarm
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 @dataclass
@@ -216,25 +233,20 @@ class BenchmarkRunner:
 
         start = time.perf_counter()
         for i in range(repetitions):
-            if run_timeout is not None:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(_run_once)
-                    try:
-                        rec = future.result(timeout=run_timeout)
-                    except TimeoutError:
-                        failures.append(
-                            f"run {i + 1} timed out after {run_timeout} seconds"
-                        )
-                        continue
-                    except Exception as exc:  # pragma: no cover - safety net
-                        failures.append(f"run {i + 1} failed: {exc}")
-                        continue
-            else:
-                try:
+            try:
+                if run_timeout is not None:
+                    with _time_limit(run_timeout):
+                        rec = _run_once()
+                else:
                     rec = _run_once()
-                except Exception as exc:  # pragma: no cover - safety net
-                    failures.append(f"run {i + 1} failed: {exc}")
-                    continue
+            except TimeoutError:
+                failures.append(
+                    f"run {i + 1} timed out after {run_timeout} seconds"
+                )
+                continue
+            except Exception as exc:  # pragma: no cover - safety net
+                failures.append(f"run {i + 1} failed: {exc}")
+                continue
 
             if rec.get("unsupported"):
                 unsupported_comment = rec.get("error", "backend not supported")
@@ -484,7 +496,9 @@ class BenchmarkRunner:
         When ``backend`` is provided it is forwarded to each
         :meth:`run_quasar` invocation to force a specific backend.  Setting
         ``quick`` to ``True`` forces quick-path execution for each run.  The
-        summary record includes the chosen ``backend``.
+        optional ``run_timeout`` aborts individual executions after the given
+        number of seconds.  Timed out runs are omitted from the final
+        statistics.  The summary record includes the chosen ``backend``.
         """
 
         metrics = [
@@ -606,25 +620,20 @@ class BenchmarkRunner:
 
         start = time.perf_counter()
         for i in range(repetitions):
-            if run_timeout is not None:
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(_run_once)
-                    try:
-                        rec = future.result(timeout=run_timeout)
-                    except TimeoutError:
-                        failures.append(
-                            f"run {i + 1} timed out after {run_timeout} seconds"
-                        )
-                        continue
-                    except Exception as exc:  # pragma: no cover - safety net
-                        failures.append(f"run {i + 1} failed: {exc}")
-                        continue
-            else:
-                try:
+            try:
+                if run_timeout is not None:
+                    with _time_limit(run_timeout):
+                        rec = _run_once()
+                else:
                     rec = _run_once()
-                except Exception as exc:  # pragma: no cover - safety net
-                    failures.append(f"run {i + 1} failed: {exc}")
-                    continue
+            except TimeoutError:
+                failures.append(
+                    f"run {i + 1} timed out after {run_timeout} seconds"
+                )
+                continue
+            except Exception as exc:  # pragma: no cover - safety net
+                failures.append(f"run {i + 1} failed: {exc}")
+                continue
 
             if rec.get("failed"):
                 failures.append(
