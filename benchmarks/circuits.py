@@ -48,8 +48,10 @@ def qft_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
-    gates = _qft_spec(n_qubits)
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(
+        _qft_spec(n_qubits),
+        use_classical_simplification=use_classical_simplification,
+    )
 
 
 def qft_on_ghz_circuit(
