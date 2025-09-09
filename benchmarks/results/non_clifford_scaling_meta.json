@@ -1,0 +1,14 @@
+{
+  "hardware": {
+    "cpu": "Intel i9 13900K",
+    "memory_gb": 64
+  },
+  "qubit_range": [
+    8,
+    16
+  ],
+  "circuits": [
+    "random_hybrid",
+    "surface_corrected_qaoa"
+  ]
+}

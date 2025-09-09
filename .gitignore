@@ -5,3 +5,5 @@ quasar_convert/build/
 Pipfile
 .vscode/
 benchmark-results/
+benchmarks/figures/*
+!benchmarks/figures/.gitkeep
