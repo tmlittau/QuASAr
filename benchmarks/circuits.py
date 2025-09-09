@@ -9,6 +9,28 @@ import numpy as np
 from quasar.circuit import Circuit, Gate
 
 
+# Names of gates forming the Clifford group used in benchmark filtering.
+CLIFFORD_GATES = {
+    "I",
+    "X",
+    "Y",
+    "Z",
+    "H",
+    "S",
+    "SDG",
+    "CX",
+    "CY",
+    "CZ",
+    "SWAP",
+}
+
+
+def is_clifford(circuit: Circuit) -> bool:
+    """Return ``True`` if ``circuit`` contains only Clifford gates."""
+
+    return all(g.gate in CLIFFORD_GATES for g in circuit.gates)
+
+
 def ghz_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:

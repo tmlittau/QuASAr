@@ -16,6 +16,7 @@ from runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.cost import Backend
 import circuits as circuit_lib
+from circuits import is_clifford
 
 
 def parse_qubit_range(spec: str) -> List[int]:
@@ -50,13 +51,14 @@ def run_suite(
 ) -> List[dict]:
     """Execute ``circuit_fn`` for each qubit count using a fixed backend.
 
-    The helper runs QuASAr's scheduler multiple times, forcing the
+    Circuits consisting solely of Clifford gates are ignored.  The helper runs
+    QuASAr's scheduler multiple times, forcing the
     :class:`~quasar.cost.Backend.STATEVECTOR` backend so that results are
     comparable to single-method simulators.  Each summary record returned by
     :meth:`BenchmarkRunner.run_quasar_multiple` is expected to include the
-    final simulation state under the ``"result"`` key.  The state is retained
-    in memory for potential downstream analysis but is intentionally omitted
-    from serialised output.
+    final simulation state under the ``"result"`` key.  The state is retained in
+    memory for potential downstream analysis but is intentionally omitted from
+    serialised output.
     """
 
     engine = SimulationEngine()
@@ -76,6 +78,8 @@ def run_suite(
                     circuit.use_classical_simplification = True
             else:
                 circuit.use_classical_simplification = False
+        if is_clifford(circuit):
+            continue
         runner = BenchmarkRunner()
         rec = runner.run_quasar_multiple(
             circuit,
