@@ -531,11 +531,24 @@ class BenchmarkRunner:
             plan = None
             original_ssd = None
         else:
-            if planner is not None:
-                plan = planner.plan(circuit, backend=backend)
-                plan = scheduler.prepare_run(circuit, plan, backend=backend)
-            else:
-                plan = scheduler.prepare_run(circuit, backend=backend)
+            try:
+                if planner is not None:
+                    plan = planner.plan(circuit, backend=backend)
+                    plan = scheduler.prepare_run(circuit, plan, backend=backend)
+                else:
+                    plan = scheduler.prepare_run(circuit, backend=backend)
+            except ValueError as exc:
+                backend_name = getattr(backend, "name", str(backend))
+                summary = {
+                    "framework": "quasar",
+                    "backend": backend_name,
+                    "repetitions": 0,
+                    "unsupported": True,
+                    "comment": str(exc),
+                }
+                self.results.append(summary)
+                return summary
+
             original_ssd = (
                 copy.deepcopy(getattr(circuit, "ssd", None)) if circuit is not None else None
             )
@@ -646,7 +659,17 @@ class BenchmarkRunner:
                 break
 
         if not records:
-            raise RuntimeError(f"no runs executed: {failures}")
+            backend_name = getattr(backend, "name", str(backend))
+            summary = {
+                "framework": "quasar",
+                "backend": backend_name,
+                "repetitions": 0,
+                "failed_runs": failures,
+                "failed": True,
+                "comment": "all runs failed",
+            }
+            self.results.append(summary)
+            return summary
 
         summary: Dict[str, Any] = {
             "framework": "quasar",

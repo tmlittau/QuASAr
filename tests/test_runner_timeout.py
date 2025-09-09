@@ -34,15 +34,16 @@ def test_run_quasar_multiple_timeout() -> None:
     engine = SimpleNamespace(scheduler=DummyScheduler())
     circuit = SimpleNamespace(num_qubits=1, gates=[], ssd=None)
 
-    with pytest.raises(RuntimeError):
-        runner.run_quasar_multiple(
-            circuit,
-            engine,
-            backend=Backend.STATEVECTOR,
-            repetitions=1,
-            run_timeout=0.01,
-            quick=True,
-        )
+    res = runner.run_quasar_multiple(
+        circuit,
+        engine,
+        backend=Backend.STATEVECTOR,
+        repetitions=1,
+        run_timeout=0.01,
+        quick=True,
+    )
+    assert res["repetitions"] == 0
+    assert res.get("failed_runs")
 
     res = runner.run_quasar_multiple(
         circuit,

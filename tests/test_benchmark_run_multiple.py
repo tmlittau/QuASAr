@@ -376,11 +376,12 @@ def test_run_quasar_returns_failure_record_on_run_error():
     assert record["backend"] is None
 
 
-def test_run_quasar_multiple_raises_runtime_error_with_failures():
+def test_run_quasar_multiple_reports_failures():
     runner = BenchmarkRunner()
     scheduler = RunErrorScheduler()
-    with pytest.raises(RuntimeError) as exc:
-        runner.run_quasar_multiple(None, scheduler, repetitions=2)
-    assert "run boom" in str(exc.value)
+    record = runner.run_quasar_multiple(None, scheduler, repetitions=2)
+    assert record["repetitions"] == 0
+    assert record.get("failed") is True
+    assert record.get("failed_runs")
 
 

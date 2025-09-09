@@ -300,6 +300,15 @@ class Circuit:
         gates = []
         for ci in circuit.data:
             op = ci.operation
+
+            # Measurements require classical bits for the destination which
+            # ``Circuit`` does not track.  Since measurements collapse qubits
+            # and QuASAr focuses on unitary evolution, simply drop them during
+            # conversion so that benchmark circuits containing measurements can
+            # still be simulated on unitary backends.
+            if op.name.lower() == "measure":
+                continue
+
             qubits = [q._index for q in ci.qubits]
             params: Dict[str, Any] = {}
             if getattr(op, "params", None):

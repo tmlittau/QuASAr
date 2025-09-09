@@ -25,25 +25,22 @@ def test_notebook_comparison_behaviour(num_qubits: int) -> None:
         for b in backends:
             if name == "wstate" and b == Backend.TABLEAU:
                 continue
-            try:
-                rec = runner.run_quasar_multiple(
-                    base, engine, backend=b, repetitions=1, quick=True
-                )
-                rec.update({"circuit": name, "mode": "forced"})
-                records.append(rec)
-                state_rec = runner.run_quasar(base, engine, backend=b, quick=True)
-                assert isinstance(state_rec["result"], SSD)
-            except RuntimeError:
-                pass
-        try:
-            auto = build(num_qubits, use_classical_simplification=True)
-            rec = runner.run_quasar_multiple(auto, engine, repetitions=1)
+            rec = runner.run_quasar_multiple(
+                base, engine, backend=b, repetitions=1, quick=True
+            )
+            if rec.get("failed") or rec.get("unsupported"):
+                continue
+            rec.update({"circuit": name, "mode": "forced"})
+            records.append(rec)
+            state_rec = runner.run_quasar(base, engine, backend=b, quick=True)
+            assert isinstance(state_rec["result"], SSD)
+        auto = build(num_qubits, use_classical_simplification=True)
+        rec = runner.run_quasar_multiple(auto, engine, repetitions=1)
+        if not (rec.get("failed") or rec.get("unsupported")):
             rec.update({"circuit": name, "mode": "auto"})
             records.append(rec)
             state_rec = runner.run_quasar(auto, engine)
             assert isinstance(state_rec["result"], SSD)
-        except RuntimeError:
-            pass
 
     df = pd.DataFrame(records)
     forced = df[df["mode"] == "forced"]
