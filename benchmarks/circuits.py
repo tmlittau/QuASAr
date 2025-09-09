@@ -417,8 +417,11 @@ def two_local_circuit(
 
 
 def clifford_ec_circuit() -> Circuit:
-    """Three-qubit bit-flip error-correction circuit using Clifford gates."""
-    qc = QuantumCircuit(5, 2)
+    """Three-qubit bit-flip error-correction circuit using Clifford gates.
+
+    Measurement operations are omitted so the circuit contains only unitary gates.
+    """
+    qc = QuantumCircuit(5)
     # Encode logical qubit into three data qubits
     qc.h(0)
     qc.cx(0, 1)
@@ -428,8 +431,6 @@ def clifford_ec_circuit() -> Circuit:
     qc.cx(1, 3)
     qc.cx(1, 4)
     qc.cx(2, 4)
-    qc.measure(3, 0)
-    qc.measure(4, 1)
     qc = transpile(qc, basis_gates=["u", "p", "cx", "h"])
     return Circuit.from_qiskit(qc)
 
