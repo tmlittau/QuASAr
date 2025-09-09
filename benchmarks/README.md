@@ -41,6 +41,12 @@ phases as well as their sum:
 - For QuASAr runs, **backend** – the simulator backend selected by the
   scheduler.
 
+Statevector simulations are skipped when the circuit width exceeds the
+available memory. A default budget of 64 GiB (about 32 qubits) is assumed but
+can be adjusted via the ``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` environment
+variable or by passing ``memory_bytes`` to
+``BenchmarkRunner.run_quasar``/``run_quasar_multiple``.
+
 ### Timing semantics
 
 The recorded times capture only backend execution and the minimal preparation
