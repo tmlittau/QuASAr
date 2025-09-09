@@ -185,20 +185,20 @@ def bmw_quark_circuit(num_qubits: int, depth: int, kind: str = "cardinality") ->
         The requested ansatz circuit as a :class:`Circuit`.
     """
 
-    qc = QuantumCircuit(num_qubits)
+    gates: List[Gate] = []
+    theta = np.pi / 2
     for _ in range(depth):
         for q in range(num_qubits):
-            qc.rx(np.pi / 2, q)
+            gates.append(Gate("RX", [q], {"theta": theta}))
         if kind == "cardinality":
             for q in range(0, num_qubits - 1, 2):
-                qc.rxx(np.pi / 2, q, q + 1)
+                gates.append(Gate("RXX", [q, q + 1], {"theta": theta}))
             for q in range(1, num_qubits - 1, 2):
-                qc.rxx(np.pi / 2, q, q + 1)
+                gates.append(Gate("RXX", [q, q + 1], {"theta": theta}))
         else:  # circular
             for q in range(num_qubits):
-                qc.rxx(np.pi / 2, q, (q + 1) % num_qubits)
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+                gates.append(Gate("RXX", [q, (q + 1) % num_qubits], {"theta": theta}))
+    return Circuit(gates)
 
 
 def adder_circuit(num_qubits: int, kind: str = "cdkm") -> Circuit:

@@ -5,6 +5,7 @@ from quasar.circuit import Circuit, Gate
 from quasar.backends.statevector import StatevectorBackend
 from benchmarks.circuits import (
     ghz_circuit,
+    bmw_quark_circuit,
     w_state_circuit,
     grover_circuit,
     bernstein_vazirani_circuit,
@@ -75,3 +76,27 @@ def test_bernstein_vazirani_circuit_state():
     expected[idx0] = 1 / math.sqrt(2)
     expected[idx1] = -1 / math.sqrt(2)
     _assert_equivalent(state, expected)
+
+
+def test_bmw_quark_circuit_cardinality():
+    num_qubits = 4
+    depth = 2
+    circ = bmw_quark_circuit(num_qubits, depth, kind="cardinality")
+    per_layer = num_qubits + num_qubits - 1
+    assert len(circ.gates) == depth * per_layer
+    layer = circ.gates[:per_layer]
+    for q, gate in enumerate(layer[:num_qubits]):
+        assert gate.gate == "RX"
+        assert gate.qubits == [q]
+    expected_pairs = [[0, 1], [2, 3], [1, 2]]
+    for gate, pair in zip(layer[num_qubits:], expected_pairs):
+        assert gate.gate == "RXX"
+        assert gate.qubits == pair
+
+
+def test_bmw_quark_circuit_circular():
+    num_qubits = 3
+    circ = bmw_quark_circuit(num_qubits, 1, kind="circular")
+    assert [g.gate for g in circ.gates[:num_qubits]] == ["RX"] * num_qubits
+    entanglers = [g.qubits for g in circ.gates[num_qubits:]]
+    assert entanglers == [[0, 1], [1, 2], [2, 0]]
