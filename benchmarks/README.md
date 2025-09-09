@@ -15,8 +15,10 @@ pip install pandas jupyter
 
 ## Running `run_benchmarks.py`
 
-The `run_benchmarks.py` script executes parameterised circuit families and
-records average runtimes:
+The `run_benchmarks.py` script executes parameterised circuit families on
+QuASAr and all available single‑method simulators. For each configuration the
+fastest non‑QuASAr backend is determined and only this aggregate baseline is
+stored alongside the QuASAr result:
 
 ```bash
 python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 5 --output results/ghz
@@ -38,8 +40,8 @@ phases as well as their sum:
   compilation that happens before execution.
 - **run_time** – execution of the prepared circuit on the backend.
 - **total_time** – combined runtime of both phases.
-- For QuASAr runs, **backend** – the simulator backend selected by the
-  scheduler.
+- **backend** – for QuASAr rows, the simulator chosen by the scheduler; for
+  baseline entries, the backend that achieved the minimum runtime.
 
 Statevector simulations are skipped when the circuit width exceeds the
 available memory. A default budget of 64 GiB (about 32 qubits) is assumed but
@@ -69,13 +71,10 @@ reflects only the backend's execution.
 
 ## Comparing with baseline backends
 
-When results for several baseline simulators have been collected alongside
-QuASAr timings, the helper functions in [`plot_utils.py`](plot_utils.py) can
-highlight how QuASAr compares to the fastest individual backend. The function
-`compute_baseline_best` determines the per‑circuit minimum of `run_time_mean`
-and `total_time_mean` across all non‑QuASAr frameworks. `plot_quasar_vs_baseline_best`
-then overlays this "baseline_best" curve with the QuASAr measurements and can
-annotate QuASAr points with the backend chosen by the scheduler:
+`run_benchmarks.py` already aggregates the baseline measurements into a single
+"baseline_best" curve. The helper functions in
+[`plot_utils.py`](plot_utils.py) can visualise these results and annotate both
+baseline and QuASAr points with the corresponding backend when requested:
 
 ```python
 from benchmarks.plot_utils import plot_quasar_vs_baseline_best

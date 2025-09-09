@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import pandas as pd
+import pytest
 
 from benchmarks.plot_utils import compute_baseline_best, plot_quasar_vs_baseline_best
 
@@ -24,14 +25,16 @@ def test_compute_baseline_best():
     assert set(best["circuit"]) == {"c1", "c2"}
     assert best.loc[best["circuit"] == "c1", "run_time_mean"].iloc[0] == 0.5
     assert best.loc[best["circuit"] == "c2", "run_time_mean"].iloc[0] == 3.0
+    assert best.loc[best["circuit"] == "c1", "backend"].iloc[0] == "mps"
+    assert best.loc[best["circuit"] == "c2", "backend"].iloc[0] == "sv"
 
 
 def test_plot_quasar_vs_baseline_best_annotations():
     df = sample_df()
     ax = plot_quasar_vs_baseline_best(df, annotate_backend=True)
-    texts = {t.get_text() for t in ax.texts}
-    assert "mps" in texts
-    assert "sv" in texts
+    texts = [t.get_text() for t in ax.texts]
+    assert texts.count("mps") == 2
+    assert texts.count("sv") == 2
     assert len(ax.lines) == 2
 
 
@@ -40,6 +43,7 @@ def test_compute_baseline_best_handles_unsupported():
     df.loc[df["framework"] == "sv", "unsupported"] = True
     best = compute_baseline_best(df)
     assert set(best["circuit"]) == {"c1"}
+    assert best.loc[best["circuit"] == "c1", "backend"].iloc[0] == "mps"
 
 
 def test_plot_marks_unsupported():
@@ -48,3 +52,9 @@ def test_plot_marks_unsupported():
     ax = plot_quasar_vs_baseline_best(df)
     legend_labels = [t.get_text() for t in ax.get_legend().get_texts()]
     assert "not supported" in legend_labels
+
+
+def test_compute_baseline_best_requires_framework_column():
+    df = pd.DataFrame([{"circuit": "c1", "run_time_mean": 1.0}])
+    with pytest.raises(ValueError):
+        compute_baseline_best(df)
