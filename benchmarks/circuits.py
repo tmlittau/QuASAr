@@ -12,9 +12,6 @@ from qiskit.circuit.library import (
     EfficientSU2,
     TwoLocal,
     ZZFeatureMap,
-    CDKMRippleCarryAdder,
-    DraperQFTAdder,
-    VBERippleCarryAdder,
 )
 from qiskit.circuit.random import random_circuit as qiskit_random_circuit
 
@@ -201,6 +198,148 @@ def bmw_quark_circuit(num_qubits: int, depth: int, kind: str = "cardinality") ->
     return Circuit.from_qiskit(qc)
 
 
+def _cdkm_adder_gates(n: int) -> List[Gate]:
+    """Gate sequence for the CDKM ripple-carry adder.
+
+    This implements the ``full`` variant of the adder from
+    Cuccaro et al. [quant-ph/0410184], acting on two ``n``-qubit
+    registers ``a`` and ``b`` with an additional carry qubit at the
+    beginning and the end of the layout.  The result is stored in
+    ``b`` while ``a`` is restored to its input value.
+    """
+
+    if n <= 0:
+        return []
+
+    gates: List[Gate] = []
+    cin = 0
+    a_start = 1
+    b_start = 1 + n
+    cout = 1 + 2 * n
+
+    def maj(a: int, b: int, c: int) -> None:
+        gates.append(Gate("CX", [a, b]))
+        gates.append(Gate("CX", [a, c]))
+        gates.append(Gate("CCX", [c, b, a]))
+
+    def uma(a: int, b: int, c: int) -> None:
+        gates.append(Gate("CCX", [c, b, a]))
+        gates.append(Gate("CX", [a, c]))
+        gates.append(Gate("CX", [c, b]))
+
+    maj(a_start, b_start, cin)
+    for i in range(n - 1):
+        maj(a_start + i + 1, b_start + i + 1, a_start + i)
+
+    gates.append(Gate("CX", [a_start + n - 1, cout]))
+
+    for i in reversed(range(n - 1)):
+        uma(a_start + i + 1, b_start + i + 1, a_start + i)
+    uma(a_start, b_start, cin)
+
+    return gates
+
+
+def _iqft_gates(n: int, offset: int) -> List[Gate]:
+    """Inverse QFT on ``n`` qubits starting at ``offset``."""
+
+    gates: List[Gate] = []
+    for j in reversed(range(n)):
+        qubit = offset + j
+        for k in range(j):
+            ctrl = offset + k
+            angle = -math.pi / (2 ** (j - k))
+            gates.append(Gate("CRZ", [ctrl, qubit], {"theta": angle}))
+        gates.append(Gate("H", [qubit]))
+    return gates
+
+
+def _qft_gates(n: int, offset: int) -> List[Gate]:
+    """QFT on ``n`` qubits starting at ``offset``."""
+
+    gates: List[Gate] = []
+    for j in range(n):
+        qubit = offset + j
+        gates.append(Gate("H", [qubit]))
+        for k in range(j + 1, n):
+            ctrl = offset + k
+            angle = math.pi / (2 ** (k - j))
+            gates.append(Gate("CRZ", [ctrl, qubit], {"theta": angle}))
+    return gates
+
+
+def _draper_adder_gates(n: int) -> List[Gate]:
+    """Gate sequence for the Draper QFT adder (fixed-point variant)."""
+
+    if n <= 0:
+        return []
+
+    gates: List[Gate] = []
+    a_start = 0
+    b_start = n
+
+    gates.extend(_qft_gates(n, b_start))
+
+    for j in range(n):
+        for k in range(n - j):
+            ctrl = a_start + j
+            tgt = b_start + j + k
+            angle = math.pi / (2 ** k)
+            gates.append(Gate("CRZ", [ctrl, tgt], {"theta": angle}))
+
+    gates.extend(_iqft_gates(n, b_start))
+    return gates
+
+
+def _vbe_adder_gates(n: int) -> List[Gate]:
+    """Gate sequence for the VBE ripple-carry adder."""
+
+    if n <= 0:
+        return []
+
+    gates: List[Gate] = []
+    cin = 0
+    a_start = 1
+    b_start = 1 + n
+    cout = 1 + 2 * n
+    helpers = [cout + 1 + i for i in range(max(0, n - 1))]
+    carries = [cin] + helpers + [cout]
+
+    i = 0
+    for inp, out in zip(carries[:-1], carries[1:]):
+        a_i = a_start + i
+        b_i = b_start + i
+        gates.append(Gate("CCX", [a_i, b_i, out]))
+        gates.append(Gate("CX", [a_i, b_i]))
+        gates.append(Gate("CCX", [inp, b_i, out]))
+        i += 1
+
+    gates.append(Gate("CX", [a_start + n - 1, b_start + n - 1]))
+    if len(carries) > 1:
+        inp = carries[-2]
+        a_i = a_start + n - 1
+        b_i = b_start + n - 1
+        gates.append(Gate("CX", [a_i, b_i]))
+        gates.append(Gate("CX", [inp, b_i]))
+
+    i -= 2
+    for j, (inp, out) in enumerate(
+        zip(reversed(carries[:-1]), reversed(carries[1:]))
+    ):
+        if j == 0:
+            continue
+        a_i = a_start + i
+        b_i = b_start + i
+        gates.append(Gate("CCX", [inp, b_i, out]))
+        gates.append(Gate("CX", [a_i, b_i]))
+        gates.append(Gate("CCX", [a_i, b_i, out]))
+        gates.append(Gate("CX", [inp, b_i]))
+        gates.append(Gate("CX", [a_i, b_i]))
+        i -= 1
+
+    return gates
+
+
 def adder_circuit(num_qubits: int, kind: str = "cdkm") -> Circuit:
     """Construct CDKM, Draper or VBE adder circuits.
 
@@ -209,16 +348,16 @@ def adder_circuit(num_qubits: int, kind: str = "cdkm") -> Circuit:
         kind: ``"cdkm"``, ``"draper"`` or ``"vbe"``.
     """
 
+    kind = kind.lower()
     if kind == "cdkm":
-        qc = CDKMRippleCarryAdder(num_qubits)
+        gates = _cdkm_adder_gates(num_qubits)
     elif kind == "draper":
-        qc = DraperQFTAdder(num_qubits)
+        gates = _draper_adder_gates(num_qubits)
     elif kind == "vbe":
-        qc = VBERippleCarryAdder(num_qubits)
+        gates = _vbe_adder_gates(num_qubits)
     else:
         raise ValueError("Unknown adder kind")
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    return Circuit(gates, use_classical_simplification=False)
 
 
 def deutsch_jozsa_circuit(num_qubits: int, balanced: bool = True) -> Circuit:
