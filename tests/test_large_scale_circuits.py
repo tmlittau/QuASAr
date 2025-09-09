@@ -6,6 +6,7 @@ from benchmarks.large_scale_circuits import (
     surface_code_cycle,
     deep_qaoa_circuit,
     phase_estimation_classical_unitary,
+    surface_corrected_qaoa,
 )
 from benchmarks.circuits import _cdkm_adder_gates
 
@@ -47,6 +48,14 @@ def test_deep_qaoa_circuit_structure():
     circ = deep_qaoa_circuit(g, p_layers=2)
     assert len(circ.gates) == 12
     assert all(gate.gate in {"RZZ", "RX"} for gate in circ.gates)
+
+
+def test_surface_corrected_qaoa_interleaves_cycles():
+    circ = surface_corrected_qaoa(3, distance=2, rounds=2)
+    assert len(circ.gates) == 44
+    assert [g.gate for g in circ.gates[:6]] == ["RZZ", "RZZ", "RZZ", "RX", "RX", "RX"]
+    assert circ.gates[6].gate == "H"
+    assert circ.gates[22].gate == "RZZ"
 
 
 def test_phase_estimation_gate_count():

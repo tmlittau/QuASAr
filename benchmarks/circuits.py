@@ -753,6 +753,40 @@ def random_hybrid_circuit(num_qubits: int = 6, depth: int = 10, seed: int | None
     return Circuit(gates)
 
 
+def surface_corrected_qaoa_circuit(
+    bit_width: int, distance: int = 3, rounds: int = 1
+) -> Circuit:
+    """QAOA on a ring with interleaved surface-code stabiliser cycles.
+
+    This is a thin wrapper around
+    :func:`benchmarks.large_scale_circuits.surface_corrected_qaoa` that exposes
+    the combined error-correction and algorithmic layers through the CLI.  The
+    function accepts a ``bit_width`` for the problem size and inserts a single
+    surface-code cycle after each of ``rounds`` QAOA layers on a
+    ``distance`` x ``distance`` lattice.
+
+    Parameters
+    ----------
+    bit_width:
+        Number of problem qubits arranged on a cycle graph.
+    distance:
+        Code distance of the surface-code cycles.  The lattice must contain at
+        least ``bit_width`` data qubits.
+    rounds:
+        Number of QAOA layers, each followed by one surface-code round.
+
+    Returns
+    -------
+    Circuit
+        The assembled circuit interleaving algorithmic and error-correction
+        layers.
+    """
+
+    from .large_scale_circuits import surface_corrected_qaoa
+
+    return surface_corrected_qaoa(bit_width, distance, rounds)
+
+
 def recur_subroutine_circuit(num_qubits: int = 4, depth: int = 3) -> Circuit:
     """Circuit invoking a repeated subroutine across layers."""
 
