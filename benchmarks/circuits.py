@@ -109,27 +109,39 @@ def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
         A :class:`Circuit` implementing the algorithm.
     """
 
-    qc = QuantumCircuit(n_qubits)
-    qc.h(range(n_qubits))
+    if n_qubits <= 0:
+        return Circuit([])
+
+    gates: List[Gate] = []
+
+    # Initial Hadamards
+    for q in range(n_qubits):
+        gates.append(Gate("H", [q]))
+
+    controls = list(range(n_qubits - 1))
+    target = n_qubits - 1
+    mcx_name = "C" * len(controls) + "X" if controls else "X"
+
     for _ in range(n_iterations):
         # Oracle marking the all-ones state
-        qc.h(n_qubits - 1)
-        if n_qubits > 1:
-            qc.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-        qc.h(n_qubits - 1)
+        gates.append(Gate("H", [target]))
+        gates.append(Gate(mcx_name, controls + [target]))
+        gates.append(Gate("H", [target]))
 
         # Diffuser
-        qc.h(range(n_qubits))
-        qc.x(range(n_qubits))
-        qc.h(n_qubits - 1)
-        if n_qubits > 1:
-            qc.mcx(list(range(n_qubits - 1)), n_qubits - 1)
-        qc.h(n_qubits - 1)
-        qc.x(range(n_qubits))
-        qc.h(range(n_qubits))
+        for q in range(n_qubits):
+            gates.append(Gate("H", [q]))
+        for q in range(n_qubits):
+            gates.append(Gate("X", [q]))
+        gates.append(Gate("H", [target]))
+        gates.append(Gate(mcx_name, controls + [target]))
+        gates.append(Gate("H", [target]))
+        for q in range(n_qubits):
+            gates.append(Gate("X", [q]))
+        for q in range(n_qubits):
+            gates.append(Gate("H", [q]))
 
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+    return Circuit(gates)
 
 
 def bernstein_vazirani_circuit(n_qubits: int, secret: int = 0) -> Circuit:

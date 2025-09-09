@@ -12,6 +12,7 @@ from __future__ import annotations
 from qiskit import QuantumCircuit, transpile
 from qiskit.circuit.library import QFT, VBERippleCarryAdder, CDKMRippleCarryAdder
 import networkx as nx
+from typing import List
 
 from quasar.circuit import Circuit, Gate
 
@@ -204,15 +205,14 @@ def grover_with_oracle_circuit(
 
     controls = list(range(n_qubits - 1))
     target = n_qubits - 1
+    mcx_name = "C" * len(controls) + "X" if controls else "X"
 
     for _ in range(iterations):
         # Oracle composed from cascaded Toffoli/CNOT layers.
         gates.append(Gate("H", [target]))
         for _ in range(oracle_depth):
-            if n_qubits > 1:
-                gates.append(Gate("MCX", controls + [target]))
-            else:
-                gates.append(Gate("X", [target]))
+            gates.append(Gate(mcx_name, controls + [target]))
+
             for q in range(n_qubits - 1):
                 gates.append(Gate("CX", [q, q + 1]))
             for q in reversed(range(n_qubits - 1)):
@@ -225,8 +225,7 @@ def grover_with_oracle_circuit(
         for q in range(n_qubits):
             gates.append(Gate("X", [q]))
         gates.append(Gate("H", [target]))
-        if n_qubits > 1:
-            gates.append(Gate("MCX", controls + [target]))
+        gates.append(Gate(mcx_name, controls + [target]))
         gates.append(Gate("H", [target]))
         for q in range(n_qubits):
             gates.append(Gate("X", [q]))
