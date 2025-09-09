@@ -99,6 +99,8 @@ def run_all(
         records.append(quasar_rec)
 
     df = pd.DataFrame(records)
+    if df.empty or "framework" not in df.columns:
+        return df
     try:
         baseline_best = compute_baseline_best(df)
         quasar_df = df[df["framework"] == "quasar"]

@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import pandas as pd
+import pytest
 
 from benchmarks.plot_utils import compute_baseline_best, plot_quasar_vs_baseline_best
 
@@ -51,3 +52,9 @@ def test_plot_marks_unsupported():
     ax = plot_quasar_vs_baseline_best(df)
     legend_labels = [t.get_text() for t in ax.get_legend().get_texts()]
     assert "not supported" in legend_labels
+
+
+def test_compute_baseline_best_requires_framework_column():
+    df = pd.DataFrame([{"circuit": "c1", "run_time_mean": 1.0}])
+    with pytest.raises(ValueError):
+        compute_baseline_best(df)

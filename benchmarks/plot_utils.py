@@ -35,6 +35,8 @@ def compute_baseline_best(
 
     if df.empty:
         raise ValueError("results DataFrame is empty")
+    if "framework" not in df.columns:
+        raise ValueError("results DataFrame lacks 'framework' column")
 
     baselines = df[df["framework"] != "quasar"]
     if "unsupported" in baselines.columns:
