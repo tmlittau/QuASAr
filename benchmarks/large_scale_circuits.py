@@ -166,7 +166,11 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
                     qc.cz(anc, q2)
                     qc.h(anc)
 
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t", "cz"])
+    qc = transpile(
+        qc,
+        basis_gates=["u", "p", "cx", "ccx", "h", "x", "t", "cz"],
+        optimization_level=0,
+    )
     return Circuit.from_qiskit(qc)
 
 
