@@ -94,14 +94,14 @@ def ripple_carry_modular_circuit(
 
 
 def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") -> Circuit:
-    """Construct repeated stabiliser-measurement cycles for simple error-correction codes.
+    """Construct repeated stabiliser cycles for simple error-correction codes.
 
     Parameters
     ----------
     distance:
         Code distance determining the number of data qubits.
     rounds:
-        Number of stabiliser-measurement rounds to repeat.
+        Number of stabiliser rounds to repeat.
     scheme:
         ``"surface"`` arranges qubits on a 2-D square lattice while ``"repetition"``
         uses a 1-D chain.
@@ -109,7 +109,7 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
     Returns
     -------
     Circuit
-        Circuit implementing ``rounds`` cycles of parity-check measurements.
+        Circuit implementing ``rounds`` cycles of parity-check interactions without measurements.
     """
 
     if distance <= 0 or rounds <= 0:
@@ -120,15 +120,14 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
         data_count = distance
         anc_count = distance - 1
         total_qubits = data_count + anc_count
-        qc = QuantumCircuit(total_qubits, anc_count * rounds)
-        for r in range(rounds):
+        qc = QuantumCircuit(total_qubits)
+        for _ in range(rounds):
             for i in range(anc_count):
                 anc = data_count + i
                 left = i
                 right = i + 1
                 qc.cx(left, anc)
                 qc.cx(right, anc)
-                qc.measure(anc, r * anc_count + i)
     else:  # surface code
         d = distance
         data_count = d * d
@@ -136,13 +135,13 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
         vert = d * (d - 1)
         anc_count = horiz + vert
         total_qubits = data_count + anc_count
-        qc = QuantumCircuit(total_qubits, anc_count * rounds)
+        qc = QuantumCircuit(total_qubits)
 
         def data_index(row: int, col: int) -> int:
             return row * d + col
 
         anc_start = data_count
-        for r in range(rounds):
+        for _ in range(rounds):
             a_offset = 0
             # Horizontal parity checks
             for row in range(d):
@@ -155,7 +154,6 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
                     qc.cz(anc, q1)
                     qc.cz(anc, q2)
                     qc.h(anc)
-                    qc.measure(anc, r * anc_count + (a_offset - 1))
             # Vertical parity checks
             for row in range(d - 1):
                 for col in range(d):
@@ -167,9 +165,8 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
                     qc.cz(anc, q1)
                     qc.cz(anc, q2)
                     qc.h(anc)
-                    qc.measure(anc, r * anc_count + (a_offset - 1))
 
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t", "cz", "measure"])
+    qc = transpile(qc, basis_gates=["u", "p", "cx", "ccx", "h", "x", "t", "cz"])
     return Circuit.from_qiskit(qc)
 
 
