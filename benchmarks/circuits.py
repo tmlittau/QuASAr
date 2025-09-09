@@ -41,6 +41,21 @@ def _qft_spec(n: int) -> List[Gate]:
     return gates
 
 
+def _iqft_spec(n: int) -> List[Gate]:
+    """Return a list of :class:`Gate` objects for the inverse QFT."""
+    gates: List[Gate] = []
+    for gate in reversed(_qft_spec(n)):
+        if gate.gate == "H":
+            gates.append(Gate("H", gate.qubits))
+        elif gate.gate == "CP":
+            k = float(gate.params.get("k", 0))
+            phi = -2 * math.pi / (2**k)
+            gates.append(Gate("CRZ", gate.qubits, {"phi": phi}))
+        else:
+            raise ValueError(f"Unsupported gate {gate.gate} in QFT spec")
+    return gates
+
+
 def qft_circuit(
     n_qubits: int, *, use_classical_simplification: bool = False
 ) -> Circuit:
@@ -196,15 +211,17 @@ def amplitude_estimation_circuit(num_qubits: int, probability: float) -> Circuit
 
     if not 0.0 <= probability <= 1.0:
         raise ValueError("probability must lie in [0, 1]")
-    qc = QuantumCircuit(num_qubits + 1)
+
     theta = 2 * math.asin(math.sqrt(probability))
-    qc.h(range(num_qubits))
-    qc.ry(theta, num_qubits)
+    gates: List[Gate] = []
+    for q in range(num_qubits):
+        gates.append(Gate("H", [q]))
+    gates.append(Gate("RY", [num_qubits], {"theta": theta}))
     for i in range(num_qubits):
-        qc.crz(2 ** i * 2 * theta, i, num_qubits)
-    qc.append(QFT(num_qubits, inverse=True), range(num_qubits))
-    qc = transpile(qc, basis_gates=["u", "p", "cx", "h", "x"])
-    return Circuit.from_qiskit(qc)
+        phi = (2 ** i) * 2 * theta
+        gates.append(Gate("CRZ", [i, num_qubits], {"phi": phi}))
+    gates.extend(_iqft_spec(num_qubits))
+    return Circuit(gates)
 
 
 def bmw_quark_circuit(num_qubits: int, depth: int, kind: str = "cardinality") -> Circuit:
