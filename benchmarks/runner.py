@@ -24,6 +24,7 @@ import signal
 import statistics
 import time
 import tracemalloc
+import warnings
 
 try:  # ``pandas`` is optional; benchmarks fall back to plain records.
     import pandas as pd  # type: ignore
@@ -34,6 +35,11 @@ except Exception:  # pragma: no cover - pandas is optional
 RunCallable = Callable[[Any], Any]
 
 from quasar.cost import Backend
+
+try:  # Allow importing when executed as a script
+    from .memory_utils import max_qubits_statevector
+except Exception:  # pragma: no cover - fallback for script execution
+    from memory_utils import max_qubits_statevector
 
 
 @contextmanager
@@ -305,6 +311,7 @@ class BenchmarkRunner:
         *,
         backend: Backend | None = None,
         quick: bool = False,
+        memory_bytes: int | None = None,
     ) -> Dict[str, Any]:
         """Execute ``circuit`` using a QuASAr scheduler ``engine``.
 
@@ -357,6 +364,32 @@ class BenchmarkRunner:
                 else:
                     backend_choice = backend
 
+                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
+                if backend_choice == Backend.STATEVECTOR:
+                    max_q = max_qubits_statevector(memory_bytes)
+                    if getattr(circuit, "num_qubits", 0) > max_q:
+                        msg = (
+                            f"circuit width {circuit.num_qubits} exceeds statevector "
+                            f"limit of {max_q} qubits"
+                        )
+                        warnings.warn(msg)
+                        tracemalloc.stop()
+                        record = {
+                            "framework": "quasar",
+                            "prepare_time": 0.0,
+                            "run_time": 0.0,
+                            "total_time": 0.0,
+                            "prepare_peak_memory": 0,
+                            "run_peak_memory": 0,
+                            "result": None,
+                            "failed": False,
+                            "backend": backend_choice_name,
+                            "unsupported": True,
+                            "comment": msg,
+                        }
+                        self.results.append(record)
+                        return record
+
                 start_prepare = time.perf_counter()
                 sim = type(scheduler.backends[backend_choice])()
                 sim.load(circuit.num_qubits)
@@ -369,9 +402,9 @@ class BenchmarkRunner:
                 result = sim.extract_ssd()
                 run_time = time.perf_counter() - start_run
                 result = result if result is not None else getattr(circuit, "ssd", None)
-                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
+                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
             else:
                 tracemalloc.start()
                 if planner is not None:
@@ -490,6 +523,7 @@ class BenchmarkRunner:
         timeout: float | None = None,
         run_timeout: float | None = None,
         quick: bool = False,
+        memory_bytes: int | None = None,
     ) -> Dict[str, Any]:
         """Execute :meth:`run_quasar` repeatedly and aggregate statistics.
 
@@ -527,6 +561,25 @@ class BenchmarkRunner:
 
         simple_backend: Backend | None = None
         simple_gates: List[Any] | None = None
+        max_q = max_qubits_statevector(memory_bytes)
+        if (
+            backend == Backend.STATEVECTOR
+            and getattr(circuit, "num_qubits", 0) > max_q
+        ):
+            msg = (
+                f"circuit width {circuit.num_qubits} exceeds statevector "
+                f"limit of {max_q} qubits"
+            )
+            warnings.warn(msg)
+            summary = {
+                "framework": "quasar",
+                "repetitions": 0,
+                "backend": Backend.STATEVECTOR.name,
+                "unsupported": True,
+                "comment": msg,
+            }
+            self.results.append(summary)
+            return summary
         if use_quick:
             plan = None
             original_ssd = None
@@ -562,9 +615,34 @@ class BenchmarkRunner:
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
 
+        if (
+            simple_backend == Backend.STATEVECTOR
+            and getattr(circuit, "num_qubits", 0) > max_q
+        ):
+            msg = (
+                f"circuit width {circuit.num_qubits} exceeds statevector "
+                f"limit of {max_q} qubits"
+            )
+            warnings.warn(msg)
+            summary = {
+                "framework": "quasar",
+                "repetitions": 0,
+                "backend": Backend.STATEVECTOR.name,
+                "unsupported": True,
+                "comment": msg,
+            }
+            self.results.append(summary)
+            return summary
+
         def _run_once() -> Dict[str, Any]:
             if use_quick:
-                rec = self.run_quasar(circuit, engine, backend=backend, quick=True)
+                rec = self.run_quasar(
+                    circuit,
+                    engine,
+                    backend=backend,
+                    quick=True,
+                    memory_bytes=memory_bytes,
+                )
                 self.results.pop()
                 return rec
             if simple_backend is not None and simple_gates is not None:
@@ -634,6 +712,17 @@ class BenchmarkRunner:
             except Exception as exc:  # pragma: no cover - safety net
                 failures.append(f"run {i + 1} failed: {exc}")
                 continue
+
+            if rec.get("unsupported"):
+                summary = {
+                    "framework": "quasar",
+                    "repetitions": 0,
+                    "backend": rec.get("backend"),
+                    "unsupported": True,
+                    "comment": rec.get("comment"),
+                }
+                self.results.append(summary)
+                return summary
 
             if rec.get("failed"):
                 failures.append(
