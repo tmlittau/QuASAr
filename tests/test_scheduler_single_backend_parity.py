@@ -24,7 +24,7 @@ def test_single_backend_auto_and_fixed_runtime_parity(monkeypatch):
         "quasar.scheduler.tracemalloc.get_traced_memory", lambda: (0, 0)
     )
 
-    _, auto_cost = scheduler.run(auto_circ, instrument=True)
-    _, fixed_cost = scheduler.run(fixed_circ, instrument=True, backend=backend)
+    _, auto_metrics = scheduler.run(auto_circ, instrument=True)
+    _, fixed_metrics = scheduler.run(fixed_circ, instrument=True, backend=backend)
 
-    assert auto_cost.time == fixed_cost.time
+    assert auto_metrics.cost.time == fixed_metrics.cost.time
