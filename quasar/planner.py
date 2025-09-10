@@ -18,6 +18,7 @@ from .partitioner import CLIFFORD_GATES, Partitioner
 from .ssd import ConversionLayer, SSD
 from . import config
 from .analyzer import AnalysisResult
+from .method_selector import MethodSelector
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -447,6 +448,7 @@ class Planner:
         backend_order: Optional[List[Backend]] = None,
         conversion_cost_multiplier: float = 1.0,
         perf_prio: str = "memory",
+        selector: MethodSelector | None = None,
     ):
         """Create a new planner instance.
 
@@ -486,6 +488,7 @@ class Planner:
         """
 
         self.estimator = estimator or CostEstimator()
+        self.selector = selector or MethodSelector(self.estimator)
         self.top_k = top_k
         self.batch_size = batch_size
         self.max_memory = max_memory
@@ -844,114 +847,25 @@ class Planner:
         phase_rotation_diversity: int | None = None,
         amplitude_rotation_diversity: int | None = None,
         allow_tableau: bool = True,
+        target_accuracy: float | None = None,
+        max_time: float | None = None,
     ) -> Tuple[Backend, Cost]:
-        """Return best single-backend estimate for the full gate list.
-
-        Parameters
-        ----------
-        gates:
-            Gate sequence to estimate.
-        max_memory:
-            Optional memory threshold.
-        symmetry, sparsity:
-            Optional heuristic metrics for the overall circuit.
-        phase_rotation_diversity, amplitude_rotation_diversity:
-            Optional counts of distinct rotation angles used by the circuit.
-        allow_tableau:
-            Propagate the circuit-level Clifford check.  When ``False`` the
-            tableau backend is never considered even if ``gates`` are
-            individually Clifford.
-        """
+        """Return best single-backend estimate for the full gate list."""
 
         qubits = {q for g in gates for q in g.qubits}
         num_qubits = len(qubits)
-        num_gates = len(gates)
-        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
-        num_1q = sum(
-            1
-            for g in gates
-            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        backend, cost = self.selector.select(
+            gates,
+            num_qubits,
+            sparsity=sparsity,
+            phase_rotation_diversity=phase_rotation_diversity,
+            amplitude_rotation_diversity=amplitude_rotation_diversity,
+            allow_tableau=allow_tableau,
+            max_memory=max_memory,
+            max_time=max_time,
+            target_accuracy=target_accuracy,
         )
-        num_2q = num_gates - num_1q - num_meas
-        from .sparsity import adaptive_dd_sparsity_threshold
-        nnz_estimate = int((1 - (sparsity or 0.0)) * (2 ** num_qubits))
-        s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
-        amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(
-            num_qubits, sparsity
-        )
-        passes = (
-            (sparsity or 0.0) >= s_thresh
-            and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
-            and (phase_rotation_diversity or 0)
-            <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-            and (amplitude_rotation_diversity or 0) <= amp_thresh
-        )
-        dd_metric = False
-        if passes:
-            s_score = (sparsity or 0.0) / s_thresh if s_thresh > 0 else 0.0
-            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-            phase_score = 1 - (
-                (phase_rotation_diversity or 0)
-                / config.DEFAULT.dd_phase_rotation_diversity_threshold
-            )
-            amp_score = 1 - (
-                (amplitude_rotation_diversity or 0) / amp_thresh
-            )
-            weight_sum = (
-                config.DEFAULT.dd_sparsity_weight
-                + config.DEFAULT.dd_nnz_weight
-                + config.DEFAULT.dd_phase_rotation_weight
-                + config.DEFAULT.dd_amplitude_rotation_weight
-            )
-            weighted = (
-                config.DEFAULT.dd_sparsity_weight * s_score
-                + config.DEFAULT.dd_nnz_weight * nnz_score
-                + config.DEFAULT.dd_phase_rotation_weight * phase_score
-                + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
-            )
-            metric = weighted / weight_sum if weight_sum else 0.0
-            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
-        backends = self._order_backends(
-            _supported_backends(
-                gates,
-                sparsity=sparsity,
-                phase_rotation_diversity=phase_rotation_diversity,
-                amplitude_rotation_diversity=amplitude_rotation_diversity,
-                allow_tableau=allow_tableau,
-                estimator=self.estimator,
-                max_memory=max_memory,
-            ),
-            dd_metric=dd_metric,
-        )
-        if not backends:
-            # Ensure planning proceeds even if all estimates exceed limits.
-            backends = [Backend.STATEVECTOR]
-        candidates: List[Tuple[Backend, Cost]] = []
-        for backend in backends:
-            cost = _simulation_cost(
-                self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
-            )
-            if max_memory is not None and cost.memory > max_memory:
-                continue
-            candidates.append((backend, cost))
-        if not candidates:
-            candidates = [
-                (
-                    backend,
-                    _simulation_cost(
-                        self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
-                    ),
-                )
-                for backend in backends
-            ]
-
-        def cost_key(kv: Tuple[Backend, Cost]) -> tuple[float, float]:
-            cost = kv[1]
-            if self.perf_prio == "time":
-                return (cost.time, cost.memory)
-            return (cost.memory, cost.time)
-
-        return min(candidates, key=cost_key)
+        return backend, cost
 
     def plan(
         self,
@@ -986,10 +900,12 @@ class Planner:
         backend:
             Optional backend hint forcing execution on a single simulator.
         target_accuracy:
-            Desired lower bound on simulation fidelity.
+            Desired lower bound on simulation fidelity. Forwarded to the
+            :class:`MethodSelector` when evaluating candidate methods.
         max_time:
             Maximum allowed execution time in seconds according to the cost
-            model.
+            model. Propagated to the :class:`MethodSelector` during backend
+            selection.
         optimization_level:
             Heuristic tuning knob influencing cost comparisons.
         """
@@ -1049,6 +965,19 @@ class Planner:
             if backend == Backend.TABLEAU:
                 if names and not all(name in CLIFFORD_GATES for name in names):
                     raise ValueError(f"Backend {backend} unsupported for given circuit")
+            # Invoke the selector for parity with automatic planning so that
+            # benchmarking treats both paths equally.
+            self.selector.select(
+                gates,
+                num_qubits,
+                sparsity=circuit.sparsity,
+                phase_rotation_diversity=circuit.phase_rotation_diversity,
+                amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+                allow_tableau=allow_tableau,
+                max_memory=threshold,
+                max_time=max_time,
+                target_accuracy=target_accuracy,
+            )
             cost = _simulation_cost(
                 self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
             )
@@ -1081,6 +1010,8 @@ class Planner:
             phase_rotation_diversity=circuit.phase_rotation_diversity,
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
             allow_tableau=allow_tableau,
+            target_accuracy=target_accuracy,
+            max_time=max_time,
         )
 
         quick = True

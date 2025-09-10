@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple, TYPE_CHECKING, Set
 
 from .ssd import SSD, SSDPartition, ConversionLayer
 from .cost import Backend, CostEstimator, Cost
-from . import config
+from .method_selector import MethodSelector
 
 if TYPE_CHECKING:  # pragma: no cover
     from .circuit import Circuit, Gate
@@ -30,8 +30,20 @@ CLIFFORD_GATES = {
 class Partitioner:
     """Partition circuits and assign simulation methods."""
 
-    def __init__(self, estimator: CostEstimator | None = None):
+    def __init__(
+        self,
+        estimator: CostEstimator | None = None,
+        selector: MethodSelector | None = None,
+        *,
+        max_memory: float | None = None,
+        max_time: float | None = None,
+        target_accuracy: float | None = None,
+    ):
         self.estimator = estimator or CostEstimator()
+        self.selector = selector or MethodSelector(self.estimator)
+        self.max_memory = max_memory
+        self.max_time = max_time
+        self.target_accuracy = target_accuracy
 
     def partition(self, circuit: 'Circuit') -> SSD:
         if not circuit.gates:
@@ -59,7 +71,7 @@ class Partitioner:
         sparsity = getattr(circuit, "sparsity", None)
         phase_rot = getattr(circuit, "phase_rotation_diversity", None)
         amp_rot = getattr(circuit, "amplitude_rotation_diversity", None)
-        from .sparsity import adaptive_dd_sparsity_threshold, sparsity_estimate
+        from .sparsity import sparsity_estimate
         from .symmetry import (
             phase_rotation_diversity as rot_phase,
             amplitude_rotation_diversity as rot_amp,
@@ -70,43 +82,18 @@ class Partitioner:
             phase_rot = rot_phase(circuit)
         if amp_rot is None:
             amp_rot = rot_amp(circuit)
-        nnz_estimate = int((1 - sparsity) * (2 ** circuit.num_qubits))
-        s_thresh = adaptive_dd_sparsity_threshold(circuit.num_qubits)
-        amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(
-            circuit.num_qubits, sparsity
-        )
-        passes = (
-            sparsity >= s_thresh
-            and nnz_estimate <= config.DEFAULT.dd_nnz_threshold
-            and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-            and amp_rot <= amp_thresh
-        )
-        dd_metric = False
-        if passes:
-            s_score = sparsity / s_thresh if s_thresh > 0 else 0.0
-            nnz_score = 1 - nnz_estimate / config.DEFAULT.dd_nnz_threshold
-            phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-            amp_score = 1 - amp_rot / amp_thresh
-            weight_sum = (
-                config.DEFAULT.dd_sparsity_weight
-                + config.DEFAULT.dd_nnz_weight
-                + config.DEFAULT.dd_phase_rotation_weight
-                + config.DEFAULT.dd_amplitude_rotation_weight
-            )
-            weighted = (
-                config.DEFAULT.dd_sparsity_weight * s_score
-                + config.DEFAULT.dd_nnz_weight * nnz_score
-                + config.DEFAULT.dd_phase_rotation_weight * phase_score
-                + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
-            )
-            metric = weighted / weight_sum if weight_sum else 0.0
-            dd_metric = metric >= config.DEFAULT.dd_metric_threshold
-
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]
             trial_qubits = current_qubits | set(gate.qubits)
-            backend_trial, cost_trial = self._choose_backend(
-                trial_gates, len(trial_qubits), dd_metric=dd_metric
+            backend_trial, cost_trial = self.selector.select(
+                trial_gates,
+                len(trial_qubits),
+                sparsity=sparsity,
+                phase_rotation_diversity=phase_rot,
+                amplitude_rotation_diversity=amp_rot,
+                max_memory=self.max_memory,
+                max_time=self.max_time,
+                target_accuracy=self.target_accuracy,
             )
 
             # If we've already committed to a statevector simulation, keep it
@@ -257,54 +244,6 @@ class Partitioner:
             result.append((tuple(sorted(qubits)), gate_list))
         return result
 
-    # ------------------------------------------------------------------
-    def _choose_backend(
-        self, gates: List['Gate'], num_qubits: int, *, dd_metric: bool = False
-    ) -> Tuple[Backend, 'Cost']:
-        """Select the best simulation backend for a partition."""
-
-        names = [g.gate.upper() for g in gates]
-        num_gates = len(gates)
-        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
-        num_1q = sum(
-            1 for g in gates if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
-        )
-        num_2q = num_gates - num_1q - num_meas
-
-        if all(name in CLIFFORD_GATES for name in names):
-            backend = Backend.TABLEAU
-            cost = self.estimator.tableau(num_qubits, num_gates)
-            return backend, cost
-
-        multi = [g for g in gates if len(g.qubits) > 1]
-        local = multi and all(
-            len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
-        )
-
-        candidates: List[Tuple[Backend, Cost]] = []
-        # Candidate costs computed using calibrated coefficients.
-        if dd_metric:
-            dd_cost = self.estimator.decision_diagram(
-                num_gates=num_gates, frontier=num_qubits
-            )
-            candidates.append((Backend.DECISION_DIAGRAM, dd_cost))
-        if local:
-            mps_cost = self.estimator.mps(
-                num_qubits,
-                num_1q + num_meas,
-                num_2q,
-                chi=4,
-                svd=True,
-            )
-            candidates.append((Backend.MPS, mps_cost))
-        sv_cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
-        candidates.append((Backend.STATEVECTOR, sv_cost))
-
-        # Selection leverages calibrated coefficients for realism.
-        backend, cost = min(candidates, key=lambda bc: (bc[1].memory, bc[1].time))
-        return backend, cost
-
-    # ------------------------------------------------------------------
     def _build_partitions(
         self, gates: List['Gate'], backend: Backend, cost: Cost
     ) -> List[SSDPartition]:
