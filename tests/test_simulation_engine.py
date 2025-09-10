@@ -20,6 +20,9 @@ def test_simulation_engine_simulate_returns_metrics():
     assert isinstance(result.analysis_time, float)
     assert isinstance(result.planning_time, float)
     assert isinstance(result.execution_time, float)
+    assert isinstance(result.backend_switches, int)
+    assert isinstance(result.conversion_durations, list)
+    assert isinstance(result.plan_cache_hits, int)
 
 
 def test_partition_state_extraction():
@@ -109,3 +112,22 @@ def test_simulation_enforces_max_time():
     engine = SimulationEngine()
     with pytest.raises(ValueError):
         engine.simulate(circuit, max_time=1e-9)
+
+
+def test_plan_cache_hits_accumulate():
+    circuit = Circuit([{ "gate": "H", "qubits": [0] }])
+    engine = SimulationEngine()
+    first = engine.simulate(circuit, backend=Backend.STATEVECTOR, optimization_level=0)
+    second = engine.simulate(circuit, backend=Backend.STATEVECTOR, optimization_level=0)
+    assert first.plan_cache_hits == 0
+    assert second.plan_cache_hits >= 1
+
+
+def test_fidelity_against_reference():
+    circuit = Circuit([{"gate": "H", "qubits": [0]}])
+    engine = SimulationEngine()
+    import numpy as np
+
+    ref = np.array([1 / np.sqrt(2), 1 / np.sqrt(2)], dtype=complex)
+    result = engine.simulate(circuit, backend=Backend.STATEVECTOR, reference_state=ref)
+    assert result.fidelity is not None and abs(result.fidelity - 1.0) < 1e-6

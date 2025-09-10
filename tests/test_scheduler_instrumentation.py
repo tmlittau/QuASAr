@@ -75,5 +75,5 @@ def test_run_reports_instrumentation(monkeypatch):
     )
     monkeypatch.setattr("quasar.scheduler.tracemalloc.reset_peak", lambda: None)
 
-    _, run_cost = scheduler.run(circuit, plan, instrument=True)
-    assert run_cost.time > 0
+    _, metrics = scheduler.run(circuit, plan, instrument=True)
+    assert metrics.cost.time > 0

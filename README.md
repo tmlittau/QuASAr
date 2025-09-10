@@ -44,6 +44,12 @@ for part in result.ssd.partitions:
 Depending on the backend, ``state`` may be a dense NumPy vector, a list of MPS
 tensors, a ``stim.Tableau`` or a decision diagram node.
 
+Alongside the final :class:`~quasar.ssd.SSD`, the returned
+:class:`~quasar.simulation_engine.SimulationResult` records execution metrics
+such as the number of backend switches, individual conversion durations, plan
+cache hits and optional state fidelity when a reference statevector is
+supplied.
+
 The :func:`SimulationEngine.simulate` method accepts an optional ``backend``
 argument to explicitly choose the simulation backend (e.g.,
 ``Backend.TABLEAU`` for Clifford circuits).  When ``backend`` is ``None`` (the
@@ -54,11 +60,13 @@ simulators and default to the specialised TABLEAU backend, though a
 general-purpose backend like ``Backend.STATEVECTOR`` can be requested
 explicitly.
 
-The simulation API also accepts optional ``target_accuracy``, ``max_time`` and
-``optimization_level`` parameters.  ``target_accuracy`` specifies the minimum
-fidelity the planner should maintain, ``max_time`` bounds the estimated runtime
-and causes planning to abort when exceeded, while ``optimization_level``
-controls how aggressively the planner and scheduler pursue runtime optimisations.
+The simulation API also accepts optional ``target_accuracy``, ``max_time``,
+``optimization_level`` and ``reference_state`` parameters.  ``target_accuracy``
+specifies the minimum fidelity the planner should maintain, ``max_time`` bounds
+the estimated runtime and causes planning to abort when exceeded, while
+``optimization_level`` controls how aggressively the planner and scheduler
+pursue runtime optimisations.  Supplying ``reference_state`` computes the
+fidelity of the resulting statevector against the provided reference.
 
 ```python
 from quasar import Backend, Circuit, SimulationEngine

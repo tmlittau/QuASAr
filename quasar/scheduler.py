@@ -7,6 +7,7 @@ from typing import Callable, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
+import numpy as np
 
 from .planner import Planner, PlanStep, PlanResult, _add_cost
 from .analyzer import AnalysisResult
@@ -25,6 +26,31 @@ from quasar_convert import ConversionEngine, SSD as CESD
 
 # Type alias for cost monitoring hook
 CostHook = Callable[[PlanStep, Cost, Cost], bool]
+
+
+@dataclass
+class RunMetrics:
+    """Aggregated execution metrics produced by :meth:`Scheduler.run`.
+
+    Attributes
+    ----------
+    cost:
+        Wall-clock and memory cost of gate execution and conversions.
+    backend_switches:
+        Number of times execution changed between backends.
+    conversion_durations:
+        List of wall-clock durations for each conversion.
+    plan_cache_hits:
+        Number of reused plans retrieved from the planner cache.
+    fidelity:
+        Optional state fidelity against a reference state.
+    """
+
+    cost: Cost = field(default_factory=lambda: Cost(time=0.0, memory=0.0))
+    backend_switches: int = 0
+    conversion_durations: List[float] = field(default_factory=list)
+    plan_cache_hits: int = 0
+    fidelity: float | None = None
 
 
 @dataclass
@@ -300,6 +326,8 @@ class Scheduler:
             Upper bound on estimated runtime in seconds.
         optimization_level:
             Heuristic tuning knob influencing planner behaviour.
+        reference_state:
+            Optional statevector used to compute fidelity of the final state.
         """
 
         gates = circuit.simplify_classical_controls()
@@ -513,7 +541,8 @@ class Scheduler:
         target_accuracy: float | None = None,
         max_time: float | None = None,
         optimization_level: int | None = None,
-    ) -> SSD | tuple[SSD, Cost]:
+        reference_state: List[complex] | np.ndarray | None = None,
+    ) -> SSD | tuple[SSD, RunMetrics]:
         """Execute ``circuit`` according to a plan.
 
         When ``plan`` is ``None`` the method performs planning internally using
@@ -549,10 +578,18 @@ class Scheduler:
         SSD
             Descriptor of the simulated state after all gates have been
             executed.  When ``instrument`` is ``True`` a tuple of
-            ``(ssd, cost)`` is returned where ``cost`` records the
-            aggregated wall-clock time and peak memory spent applying gates
-            and extracting state, excluding setup and conversion overhead.
+            ``(ssd, metrics)`` is returned where ``metrics`` records the
+            aggregated wall-clock and memory cost of gate execution, the
+            number of backend switches, individual conversion durations and
+            any plan cache hits.  ``metrics.fidelity`` contains the state
+            fidelity when ``reference_state`` is provided.
         """
+        backend_switches = 0
+        prev_backend: Backend | None = None
+        conversion_durations: List[float] = []
+        cache_hits_before = (
+            self.planner.cache_hits if self.planner is not None else 0
+        )
 
         if plan is None or plan.step_costs is None:
             plan = self.prepare_run(
@@ -587,6 +624,7 @@ class Scheduler:
             est_cost = est_costs[0]
             sim_obj = type(self.backends[target])()
             sim_obj.load(circuit.num_qubits)
+            prev_backend = target
             if instrument:
                 tracemalloc.start()
                 tracemalloc.reset_peak()
@@ -640,6 +678,7 @@ class Scheduler:
                 elapsed = time.perf_counter() - start_time
                 _, peak = tracemalloc.get_traced_memory()
                 conversion_time = elapsed
+                conversion_durations.append(elapsed)
                 total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 run_cost = Cost(
                     time=total_gate_time.time,
@@ -648,7 +687,42 @@ class Scheduler:
                     replay=0.0,
                 )
                 tracemalloc.stop()
-                return ssd if ssd is not None else circuit.ssd, run_cost
+                fidelity = None
+                if reference_state is not None:
+                    final_sv = None
+                    try:
+                        if self.conversion_engine is not None:
+                            final_sv = self.conversion_engine.convert_boundary_to_statevector(
+                                ssd if ssd is not None else circuit.ssd
+                            )
+                    except Exception:
+                        pass
+                    if final_sv is None and ssd is not None:
+                        part_state = ssd.extract_state(0)
+                        if part_state is not None:
+                            if self.conversion_engine is not None:
+                                try:
+                                    final_sv = self.conversion_engine.tableau_to_statevector(part_state)
+                                except Exception:
+                                    final_sv = part_state
+                            else:
+                                final_sv = part_state
+                    if isinstance(final_sv, (list, tuple, np.ndarray)):
+                        ref = np.asarray(reference_state, dtype=complex)
+                        state = np.asarray(final_sv, dtype=complex)
+                        fidelity = float(abs(np.vdot(ref, state)) ** 2)
+                metrics = RunMetrics(
+                    cost=run_cost,
+                    backend_switches=backend_switches,
+                    conversion_durations=conversion_durations,
+                    plan_cache_hits=(
+                        (self.planner.cache_hits - cache_hits_before)
+                        if self.planner is not None
+                        else 0
+                    ),
+                    fidelity=fidelity,
+                )
+                return ssd if ssd is not None else circuit.ssd, metrics
             return ssd if ssd is not None else circuit.ssd
 
         sims: Dict[tuple, object] = {}
@@ -663,6 +737,10 @@ class Scheduler:
         while i < len(steps):
             step = steps[i]
             target = step.backend
+            if target != prev_backend:
+                if prev_backend is not None:
+                    backend_switches += 1
+                prev_backend = target
             segment = gates[step.start : step.end]
 
             if (
@@ -786,6 +864,7 @@ class Scheduler:
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
                         conversion_time += elapsed
+                        conversion_durations.append(elapsed)
                         total_gate_time.memory = max(
                             total_gate_time.memory, float(peak)
                         )
@@ -820,6 +899,7 @@ class Scheduler:
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
                         conversion_time += elapsed
+                        conversion_durations.append(elapsed)
                         total_gate_time.memory = max(
                             total_gate_time.memory, float(peak)
                         )
@@ -920,6 +1000,7 @@ class Scheduler:
                             elapsed = time.perf_counter() - start_time
                             _, peak = tracemalloc.get_traced_memory()
                             conversion_time += elapsed
+                            conversion_durations.append(elapsed)
                             total_gate_time.memory = max(
                                 total_gate_time.memory, float(peak)
                             )
@@ -988,6 +1069,7 @@ class Scheduler:
                     elapsed = time.perf_counter() - start_time
                     _, peak = tracemalloc.get_traced_memory()
                     conversion_time += elapsed
+                    conversion_durations.append(elapsed)
                     total_gate_time.memory = max(total_gate_time.memory, float(peak))
                 else:
                     ssd = sim.extract_ssd()
@@ -1012,7 +1094,46 @@ class Scheduler:
                     replay=replay_time,
                 )
                 tracemalloc.stop()
-                return ssd_res, run_cost
+                fidelity = None
+                if reference_state is not None:
+                    final_sv = None
+                    try:
+                        if self.conversion_engine is not None:
+                            final_sv = self.conversion_engine.convert_boundary_to_statevector(
+                                ssd_res
+                            )
+                    except Exception:
+                        pass
+                    if final_sv is None and ssd_res is not None:
+                        try:
+                            part_state = ssd_res.extract_state(0)
+                        except Exception:
+                            part_state = None
+                        if part_state is not None:
+                            if self.conversion_engine is not None:
+                                try:
+                                    final_sv = self.conversion_engine.tableau_to_statevector(part_state)
+                                except Exception:
+                                    final_sv = part_state
+                            else:
+                                final_sv = part_state
+                    if isinstance(final_sv, (list, tuple, np.ndarray)):
+                        ref = np.asarray(reference_state, dtype=complex)
+                        state = np.asarray(final_sv, dtype=complex)
+                        fidelity = float(abs(np.vdot(ref, state)) ** 2)
+                plan_cache_hits = (
+                    self.planner.cache_hits - cache_hits_before
+                    if self.planner is not None
+                    else 0
+                )
+                metrics = RunMetrics(
+                    cost=run_cost,
+                    backend_switches=backend_switches,
+                    conversion_durations=conversion_durations,
+                    plan_cache_hits=plan_cache_hits,
+                    fidelity=fidelity,
+                )
+                return ssd_res, metrics
             return ssd_res
         ssd_res = circuit.ssd
         ssd_res.build_metadata()
@@ -1024,7 +1145,46 @@ class Scheduler:
                 replay=replay_time,
             )
             tracemalloc.stop()
-            return ssd_res, run_cost
+            fidelity = None
+            if reference_state is not None:
+                final_sv = None
+                try:
+                    if self.conversion_engine is not None:
+                        final_sv = self.conversion_engine.convert_boundary_to_statevector(
+                            ssd_res
+                        )
+                except Exception:
+                    pass
+                if final_sv is None:
+                    try:
+                        part_state = ssd_res.extract_state(0)
+                    except Exception:
+                        part_state = None
+                    if part_state is not None:
+                        if self.conversion_engine is not None:
+                            try:
+                                final_sv = self.conversion_engine.tableau_to_statevector(part_state)
+                            except Exception:
+                                final_sv = part_state
+                        else:
+                            final_sv = part_state
+                if isinstance(final_sv, (list, tuple, np.ndarray)):
+                    ref = np.asarray(reference_state, dtype=complex)
+                    state = np.asarray(final_sv, dtype=complex)
+                    fidelity = float(abs(np.vdot(ref, state)) ** 2)
+            plan_cache_hits = (
+                self.planner.cache_hits - cache_hits_before
+                if self.planner is not None
+                else 0
+            )
+            metrics = RunMetrics(
+                cost=run_cost,
+                backend_switches=backend_switches,
+                conversion_durations=conversion_durations,
+                plan_cache_hits=plan_cache_hits,
+                fidelity=fidelity,
+            )
+            return ssd_res, metrics
         return ssd_res
 
     # ------------------------------------------------------------------
