@@ -17,6 +17,7 @@ from .cost import Backend, Cost, CostEstimator
 from .partitioner import CLIFFORD_GATES, Partitioner
 from .ssd import ConversionLayer, SSD
 from . import config
+from .analyzer import AnalysisResult
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -72,6 +73,7 @@ class PlanResult:
     explicit_conversions: Optional[List["ConversionLayer"]] = None
     step_costs: Optional[List[Cost]] = None
     replay_ssd: Dict[int, "SSD"] = field(default_factory=dict)
+    analysis: AnalysisResult | None = None
 
     # The ``steps`` property recovers the final plan lazily using the
     # backpointers contained in ``table``.  If ``explicit_steps`` is provided
@@ -955,6 +957,7 @@ class Planner:
         self,
         circuit: Circuit,
         *,
+        analysis: AnalysisResult | None = None,
         use_cache: bool = True,
         max_memory: float | None = None,
         backend: Backend | None = None,
@@ -1004,6 +1007,8 @@ class Planner:
             cached = self.cache_lookup(gates, backend)
             if cached is not None:
                 circuit.ssd.conversions = list(cached.conversions)
+                if analysis is not None:
+                    cached.analysis = analysis
                 return cached
 
         num_qubits = circuit.num_qubits
@@ -1056,6 +1061,7 @@ class Planner:
                 gates=gates,
                 explicit_steps=[step],
                 explicit_conversions=conversions,
+                analysis=analysis,
             )
             if use_cache:
                 self.cache_insert(gates, result, backend)
@@ -1100,6 +1106,7 @@ class Planner:
                     gates=gates,
                     explicit_steps=[step],
                     explicit_conversions=[],
+                    analysis=analysis,
                 )
                 circuit.ssd.conversions = []
                 if use_cache:
@@ -1141,6 +1148,7 @@ class Planner:
                 gates=gates,
                 explicit_steps=[step],
                 explicit_conversions=[],
+                analysis=analysis,
             )
             circuit.ssd.conversions = []
             if use_cache:
@@ -1182,6 +1190,7 @@ class Planner:
                 gates=gates,
                 explicit_steps=[step],
                 explicit_conversions=[],
+                analysis=analysis,
             )
             circuit.ssd.conversions = []
             if use_cache:
@@ -1199,6 +1208,8 @@ class Planner:
             coarse.explicit_conversions = conversions
             if use_cache:
                 self.cache_insert(gates, coarse)
+            if analysis is not None:
+                coarse.analysis = analysis
             return coarse
 
         # Refine each coarse segment individually.
@@ -1257,6 +1268,7 @@ class Planner:
             gates=gates,
             explicit_steps=refined_steps,
             explicit_conversions=conversions,
+            analysis=analysis,
         )
         if use_cache:
             self.cache_insert(gates, result)

@@ -9,6 +9,7 @@ import time
 import tracemalloc
 
 from .planner import Planner, PlanStep, PlanResult, _add_cost
+from .analyzer import AnalysisResult
 from .partitioner import CLIFFORD_GATES
 from .cost import Backend, Cost
 from . import config
@@ -272,6 +273,7 @@ class Scheduler:
         circuit: Circuit,
         plan: PlanResult | None = None,
         *,
+        analysis: AnalysisResult | None = None,
         backend: Backend | None = None,
         target_accuracy: float | None = None,
         max_time: float | None = None,
@@ -315,6 +317,7 @@ class Scheduler:
                 final_backend=backend_choice,
                 gates=gates,
                 explicit_steps=[PlanStep(0, len(gates), backend_choice)],
+                analysis=analysis,
             )
             plan.explicit_conversions = []
             if self.planner is not None:
@@ -351,6 +354,7 @@ class Scheduler:
             if plan is None:
                 plan = self.planner.plan(
                     circuit,
+                    analysis=analysis,
                     backend=backend,
                     target_accuracy=target_accuracy,
                     max_time=max_time,
@@ -503,6 +507,7 @@ class Scheduler:
         plan: PlanResult | None = None,
         monitor: CostHook | None = None,
         *,
+        analysis: AnalysisResult | None = None,
         instrument: bool = False,
         backend: Backend | None = None,
         target_accuracy: float | None = None,
@@ -553,6 +558,7 @@ class Scheduler:
             plan = self.prepare_run(
                 circuit,
                 plan,
+                analysis=analysis,
                 backend=backend,
                 target_accuracy=target_accuracy,
                 max_time=max_time,

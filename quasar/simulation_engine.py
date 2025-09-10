@@ -118,6 +118,7 @@ class SimulationEngine:
         ):
             plan = self.scheduler.prepare_run(
                 circuit,
+                analysis=analysis,
                 backend=backend,
                 target_accuracy=target_accuracy,
                 max_time=max_time,
@@ -126,6 +127,7 @@ class SimulationEngine:
         else:
             plan = self.planner.plan(
                 circuit,
+                analysis=analysis,
                 max_memory=threshold,
                 backend=backend,
                 target_accuracy=target_accuracy,
@@ -138,6 +140,7 @@ class SimulationEngine:
         ssd = self.scheduler.run(
             circuit,
             plan,
+            analysis=analysis,
             backend=backend,
             target_accuracy=target_accuracy,
             max_time=max_time,
