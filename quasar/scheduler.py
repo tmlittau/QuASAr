@@ -136,7 +136,7 @@ class Scheduler:
 
         quick = True
         num_qubits = circuit.num_qubits
-        num_gates = len(circuit.gates)
+        num_gates = len(circuit.topological())
         depth = circuit.depth
         if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
             quick = False
@@ -191,7 +191,7 @@ class Scheduler:
         ):
             return None
 
-        names = [g.gate.upper() for g in circuit.gates]
+        names = [g.gate.upper() for g in circuit.topological()]
         num_qubits = circuit.num_qubits
 
         sparsity = getattr(circuit, "sparsity", None)
@@ -239,7 +239,7 @@ class Scheduler:
         )
         dd_metric = passes and metric >= config.DEFAULT.dd_metric_threshold
 
-        multi = [g for g in circuit.gates if len(g.qubits) > 1]
+        multi = [g for g in circuit.topological() if len(g.qubits) > 1]
         local = bool(multi) and all(
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
