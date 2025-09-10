@@ -367,15 +367,18 @@ class Scheduler:
                 raise ValueError("Estimated runtime exceeds max_time")
             return plan
 
+        if self.conversion_engine is None:
+            self.conversion_engine = ConversionEngine()
         if self.planner is None:
             self.planner = Planner(
                 quick_max_qubits=self.quick_max_qubits,
                 quick_max_gates=self.quick_max_gates,
                 quick_max_depth=self.quick_max_depth,
                 backend_order=self.backend_order,
+                conversion_engine=self.conversion_engine,
             )
-        if self.conversion_engine is None:
-            self.conversion_engine = ConversionEngine()
+        elif getattr(self.planner, "conversion_engine", None) is None:
+            self.planner.conversion_engine = self.conversion_engine
 
         if plan is None:
             plan = self.planner.cache_lookup(gates, backend)
@@ -859,7 +862,24 @@ class Scheduler:
                                 )
                             sim_obj.ingest(rep, num_qubits=circuit.num_qubits)
                         else:
-                            sim_obj.load(circuit.num_qubits)
+                            if (
+                                target == Backend.TABLEAU
+                                and self.conversion_engine is not None
+                            ):
+                                try:
+                                    rep = self.conversion_engine.try_build_tableau(
+                                        prepared
+                                    )
+                                    if rep is not None:
+                                        sim_obj.ingest(
+                                            rep, num_qubits=circuit.num_qubits
+                                        )
+                                    else:
+                                        sim_obj.load(circuit.num_qubits)
+                                except Exception:
+                                    sim_obj.load(circuit.num_qubits)
+                            else:
+                                sim_obj.load(circuit.num_qubits)
                     if instrument:
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
@@ -994,7 +1014,35 @@ class Scheduler:
                                 mapping=boundary,
                             )
                     except Exception:
-                        sim_obj.load(circuit.num_qubits)
+                        if (
+                            target == Backend.TABLEAU
+                            and self.conversion_engine is not None
+                        ):
+                            try:
+                                state = None
+                                if current_sim is not None:
+                                    try:
+                                        state = current_sim.statevector()
+                                    except Exception:
+                                        state = None
+                                if state is not None:
+                                    rep = self.conversion_engine.try_build_tableau(
+                                        state
+                                    )
+                                    if rep is not None:
+                                        sim_obj.ingest(
+                                            rep,
+                                            num_qubits=circuit.num_qubits,
+                                            mapping=boundary,
+                                        )
+                                    else:
+                                        sim_obj.load(circuit.num_qubits)
+                                else:
+                                    sim_obj.load(circuit.num_qubits)
+                            except Exception:
+                                sim_obj.load(circuit.num_qubits)
+                        else:
+                            sim_obj.load(circuit.num_qubits)
                     finally:
                         if instrument:
                             elapsed = time.perf_counter() - start_time
