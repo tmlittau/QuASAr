@@ -23,7 +23,15 @@ from .cost import Backend, Cost, CostEstimator
 
 @dataclass
 class AnalysisResult:
-    """Container bundling the results of a circuit analysis."""
+    """Container bundling the results of a circuit analysis.
+
+    Attributes
+    ----------
+    gate_entanglement:
+        Entanglement annotation for each gate in topological order.
+    method_compatibility:
+        Simulation backends compatible with each gate.
+    """
 
     gate_distribution: Dict[str, int]
     entanglement: Dict[str, float]
@@ -34,6 +42,8 @@ class AnalysisResult:
     graph_metrics: Dict[str, float]
     clifford_counts: Dict[str, int]
     gate_depths: Dict[str, int]
+    gate_entanglement: List[str]
+    method_compatibility: List[List[str]]
 
 
 class CircuitAnalyzer:
@@ -204,6 +214,64 @@ class CircuitAnalyzer:
         return dict(depth)
 
     # ------------------------------------------------------------------
+    def gate_entanglement(self) -> List[str]:
+        """Return per-gate entanglement annotations.
+
+        Gates are tagged as ``"none"`` if they act on a single qubit,
+        ``"creates"`` if they introduce entanglement between previously
+        separate qubit sets and ``"modifies"`` when operating within an
+        already entangled group.
+        """
+
+        max_index = max((q for g in self.circuit.gates for q in g.qubits), default=-1)
+        parent = list(range(max_index + 1))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        annotations: List[str] = []
+        for gate in self.circuit.topological():
+            qubits = gate.qubits
+            if len(qubits) < 2:
+                tag = "none"
+            else:
+                roots = {find(q) for q in qubits}
+                if len(roots) > 1:
+                    tag = "creates"
+                    base = qubits[0]
+                    for q in qubits[1:]:
+                        union(base, q)
+                else:
+                    tag = "modifies"
+            annotations.append(tag)
+            gate.entanglement = tag
+        return annotations
+
+    # ------------------------------------------------------------------
+    def method_compatibility(self) -> List[List[str]]:
+        """Return compatible simulation backends for each gate."""
+
+        from .planner import _supported_backends
+
+        compat: List[List[str]] = []
+        for gate in self.circuit.topological():
+            backends = _supported_backends(
+                [gate], circuit=self.circuit, estimator=self.estimator
+            )
+            methods = [b.name.lower() for b in backends]
+            gate.compatible_methods = methods
+            compat.append(methods)
+        return compat
+
+    # ------------------------------------------------------------------
     def _dependency_graph(self) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
         """Construct a gate dependency graph.
 
@@ -296,4 +364,6 @@ class CircuitAnalyzer:
             graph_metrics=self.graph_metrics(),
             clifford_counts=self.clifford_counts(),
             gate_depths=self.gate_depths(layers),
+            gate_entanglement=self.gate_entanglement(),
+            method_compatibility=self.method_compatibility(),
         )

@@ -27,7 +27,8 @@ class Gate:
     """Simple gate description used when constructing circuits.
 
     The structure now also carries explicit predecessor/successor links and
-    per‑gate metadata used by the planner and scheduler.
+    per‑gate metadata used by the planner and scheduler, including
+    entanglement annotations and backend compatibility.
     """
 
     gate: str
@@ -35,7 +36,7 @@ class Gate:
     params: Dict[str, Any] = field(default_factory=dict)
     predecessors: List["Gate"] = field(default_factory=list)
     successors: List["Gate"] = field(default_factory=list)
-    entangling: bool = False
+    entanglement: str = "none"
     compatible_methods: List[str] = field(default_factory=list)
     resource_estimates: Dict[str, "Cost"] = field(default_factory=dict)
 
@@ -135,16 +136,42 @@ class Circuit:
         from .planner import _supported_backends
 
         estimator = CostEstimator()
+        max_index = max((q for g in self.gates for q in g.qubits), default=-1)
+        parent = list(range(max_index + 1))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
         for gate in self.gates:
-            gate.entangling = len(gate.qubits) > 1
+            qubits = gate.qubits
+            if len(qubits) < 2:
+                gate.entanglement = "none"
+            else:
+                roots = {find(q) for q in qubits}
+                if len(roots) > 1:
+                    gate.entanglement = "creates"
+                    base = qubits[0]
+                    for q in qubits[1:]:
+                        union(base, q)
+                else:
+                    gate.entanglement = "modifies"
+
             backends = _supported_backends([gate], circuit=self, estimator=estimator)
             gate.compatible_methods = [b.name.lower() for b in backends]
             resources: Dict[str, Cost] = {}
-            num_qubits = (max(gate.qubits) + 1) if gate.qubits else 0
+            num_qubits = (max(qubits) + 1) if qubits else 0
             name = gate.gate.upper()
             num_meas = 1 if name in {"MEASURE", "RESET"} else 0
-            num_1q = 1 if len(gate.qubits) == 1 and not num_meas else 0
-            num_2q = 1 if len(gate.qubits) > 1 else 0
+            num_1q = 1 if len(qubits) == 1 and not num_meas else 0
+            num_2q = 1 if len(qubits) > 1 else 0
             for backend in backends:
                 if backend == Backend.STATEVECTOR:
                     resources[backend.name.lower()] = estimator.statevector(
