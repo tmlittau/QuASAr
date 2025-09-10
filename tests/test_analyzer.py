@@ -32,6 +32,12 @@ def test_entanglement_metrics(sample_circuit):
     assert metrics["max_connected_size"] == 3
 
 
+def test_gate_annotations(sample_circuit):
+    analysis = CircuitAnalyzer(sample_circuit).analyze()
+    assert analysis.gate_entanglement == ["none", "creates", "creates", "none"]
+    assert analysis.method_compatibility == [["tableau"]] * 4
+
+
 def test_resource_estimates(sample_circuit):
     analyzer = CircuitAnalyzer(sample_circuit)
     estimates = analyzer.resource_estimates()
@@ -83,6 +89,14 @@ def test_rotation_and_clifford_metrics():
     assert depths["T"] == 1
     assert depths["RZ"] == 2
     assert depths["CX"] == 3
+
+
+def test_method_compatibility_non_clifford():
+    circ = Circuit.from_dict([{"gate": "T", "qubits": [0]}], use_classical_simplification=False)
+    analysis = CircuitAnalyzer(circ).analyze()
+    methods = analysis.method_compatibility[0]
+    assert "statevector" in methods
+    assert "tableau" not in methods
 
 
 def test_graph_clustering_metric():
