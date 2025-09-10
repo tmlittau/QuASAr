@@ -45,7 +45,20 @@ class Partitioner:
         self.max_time = max_time
         self.target_accuracy = target_accuracy
 
-    def partition(self, circuit: 'Circuit') -> SSD:
+    def partition(self, circuit: 'Circuit', *, graph_cut: bool = False) -> SSD:
+        """Partition ``circuit`` into simulation segments.
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to partition.
+        graph_cut:
+            When ``True`` evaluate multiple partition candidates using a
+            graph-based heuristic that balances load and minimises conversion
+            boundaries.  The default ``False`` uses the original sequential
+            heuristic.
+        """
+
         if not circuit.gates:
             return SSD([])
 
@@ -113,6 +126,76 @@ class Partitioner:
                 continue
 
             if backend_trial != current_backend:
+                if graph_cut and current_gates:
+                    cut_idx, boundary = self._select_cut_point(
+                        current_gates, gate, future_qubits[idx]
+                    )
+                    prefix = current_gates[:cut_idx]
+                    suffix = current_gates[cut_idx:]
+
+                    if prefix:
+                        p_qubits = {
+                            q for g in prefix for q in g.qubits
+                        }
+                        p_backend, p_cost = self.selector.select(
+                            prefix,
+                            len(p_qubits),
+                            sparsity=sparsity,
+                            phase_rotation_diversity=phase_rot,
+                            amplitude_rotation_diversity=amp_rot,
+                            max_memory=self.max_memory,
+                            max_time=self.max_time,
+                            target_accuracy=self.target_accuracy,
+                        )
+                        partitions.extend(
+                            self._build_partitions(prefix, p_backend, p_cost)
+                        )
+                    else:
+                        p_backend = current_backend
+
+                    s_gates = suffix + [gate]
+                    s_qubits = {
+                        q for g in s_gates for q in g.qubits
+                    }
+                    s_backend, s_cost = self.selector.select(
+                        s_gates,
+                        len(s_qubits),
+                        sparsity=sparsity,
+                        phase_rotation_diversity=phase_rot,
+                        amplitude_rotation_diversity=amp_rot,
+                        max_memory=self.max_memory,
+                        max_time=self.max_time,
+                        target_accuracy=self.target_accuracy,
+                    )
+                    if boundary:
+                        boundary = sorted(boundary)
+                        rank = 2 ** len(boundary)
+                        frontier = len(boundary)
+                        conv_est = self.estimator.conversion(
+                            p_backend,
+                            s_backend,
+                            num_qubits=len(boundary),
+                            rank=rank,
+                            frontier=frontier,
+                        )
+                        conversions.append(
+                            ConversionLayer(
+                                boundary=tuple(boundary),
+                                source=p_backend,
+                                target=s_backend,
+                                rank=rank,
+                                frontier=frontier,
+                                primitive=conv_est.primitive,
+                                cost=conv_est.cost,
+                            )
+                        )
+
+                    current_gates = s_gates
+                    current_qubits = s_qubits
+                    current_backend = s_backend
+                    current_cost = s_cost
+                    continue
+
                 # If no multi-qubit gate has been processed yet, simply switch
                 # the backend without creating a conversion cut. This avoids
                 # spurious partitions for early single-qubit preamble.
@@ -124,7 +207,11 @@ class Partitioner:
                     continue
 
                 # Finalise current partition before switching backends
-                partitions.extend(self._build_partitions(current_gates, current_backend, current_cost))
+                partitions.extend(
+                    self._build_partitions(
+                        current_gates, current_backend, current_cost
+                    )
+                )
 
                 boundary = sorted(current_qubits & future_qubits[idx])
                 if boundary:
@@ -243,6 +330,53 @@ class Partitioner:
             qubits = tuple(idx_to_q[i] for i in range(n) if find(i) == root)
             result.append((tuple(sorted(qubits)), gate_list))
         return result
+
+    def _select_cut_point(
+        self, gates: List['Gate'], gate: 'Gate', future: Set[int]
+    ) -> Tuple[int, Set[int]]:
+        """Return a cut index and boundary for ``gates``.
+
+        A simple graph-based heuristic evaluates all possible cut positions
+        within ``gates`` and chooses the one that minimises a cost function
+        combining boundary size and load imbalance.  ``gate`` is the first
+        operation of the new fragment and ``future`` are the qubits used by
+        the remaining gates in the circuit.
+        """
+
+        if not gates:
+            return 0, set()
+
+        # Prefix and suffix qubit sets -------------------------------
+        prefix: List[Set[int]] = []
+        running: Set[int] = set()
+        for g in gates:
+            running |= set(g.qubits)
+            prefix.append(running.copy())
+
+        suffix: List[Set[int]] = []
+        running = set(gate.qubits) | set(future)
+        suffix.append(running.copy())
+        for g in reversed(gates):
+            running |= set(g.qubits)
+            suffix.append(running.copy())
+        suffix.reverse()  # index i corresponds to cut after gates[:i]
+
+        best_cost: float | None = None
+        best_idx = len(gates)
+        best_boundary: Set[int] = set()
+
+        for idx in range(1, len(gates) + 1):
+            left = prefix[idx - 1]
+            right = suffix[idx]
+            boundary = left & right
+            load_diff = abs(idx - (len(gates) - idx + 1))
+            cost = len(boundary) * 10 + load_diff
+            if best_cost is None or cost < best_cost:
+                best_cost = cost
+                best_idx = idx
+                best_boundary = boundary
+
+        return best_idx, best_boundary
 
     def _build_partitions(
         self, gates: List['Gate'], backend: Backend, cost: Cost
