@@ -8,7 +8,13 @@ from .method_selector import MethodSelector
 from .scheduler import Scheduler
 from .simulation_engine import SimulationEngine, SimulationResult
 from .ssd import SSD, SSDPartition, ConversionLayer
-from .calibration import run_calibration, save_coefficients
+from .calibration import (
+    run_calibration,
+    save_coefficients,
+    load_coefficients,
+    latest_coefficients,
+    apply_calibration,
+)
 from .backends import (
     Backend as SimulatorBackend,
     StatevectorBackend,
@@ -41,6 +47,9 @@ __all__ = [
     "ConversionLayer",
     "run_calibration",
     "save_coefficients",
+    "load_coefficients",
+    "latest_coefficients",
+    "apply_calibration",
     "SimulatorBackend",
     "StatevectorBackend",
     "AerStatevectorBackend",

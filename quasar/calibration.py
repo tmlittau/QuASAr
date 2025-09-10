@@ -14,11 +14,17 @@ performance on the current machine.
 from __future__ import annotations
 
 from time import perf_counter
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 import argparse
 import json
 from pathlib import Path
 import math
+
+if TYPE_CHECKING:  # pragma: no cover - type hints only
+    from .cost import CostEstimator
+
+
+CALIBRATION_DIR = Path(__file__).resolve().parent.parent / "calibration"
 
 
 def _bench_loop(iters: int) -> float:
@@ -184,6 +190,36 @@ def run_calibration() -> Dict[str, float]:
 def save_coefficients(path: str | Path, coeff: Dict[str, float]) -> None:
     with Path(path).open("w") as fh:
         json.dump(coeff, fh, indent=2, sort_keys=True)
+
+
+def load_coefficients(path: str | Path) -> Dict[str, float]:
+    """Load calibration coefficients from ``path``."""
+
+    with Path(path).open() as fh:
+        data = json.load(fh)
+    # Support files storing a top-level mapping or nested under ``coeff``
+    return data.get("coeff", data)
+
+
+def latest_coefficients() -> Dict[str, float] | None:
+    """Return coefficients from the newest JSON file in ``CALIBRATION_DIR``.
+
+    Files follow the ``coeff_v*.json`` naming convention.  ``None`` is
+    returned if the directory does not contain any calibration file.
+    """
+
+    if not CALIBRATION_DIR.exists():
+        return None
+    files = sorted(CALIBRATION_DIR.glob("coeff_v*.json"))
+    if not files:
+        return None
+    return load_coefficients(files[-1])
+
+
+def apply_calibration(estimator: "CostEstimator", coeff: Dict[str, float]) -> None:
+    """Update ``estimator`` with calibrated ``coeff`` values."""
+
+    estimator.update_coefficients(coeff)
 
 
 def main(argv: list[str] | None = None) -> None:
