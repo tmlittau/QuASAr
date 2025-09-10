@@ -200,6 +200,47 @@ def _better(
     return (a.memory, a.time) < (b.memory, b.time)
 
 
+def _dominates(a: Cost, b: Cost, epsilon: float) -> bool:
+    """Return ``True`` if cost ``a`` dominates ``b`` within ``epsilon``.
+
+    A cost ``a`` dominates ``b`` when both its runtime and memory are less
+    than or equal to ``b`` up to a relative tolerance of ``epsilon``.  The
+    helper is used for epsilon-dominance merging and branch-and-bound
+    pruning of dynamic programming states.
+    """
+
+    return a.time <= b.time * (1 + epsilon) and a.memory <= b.memory * (1 + epsilon)
+
+
+def _prune_epsilon(
+    entries: Dict[Optional[Backend], DPEntry],
+    *,
+    epsilon: float,
+    perf_prio: str,
+) -> Dict[Optional[Backend], DPEntry]:
+    """Merge near-identical states for the same backend within ``epsilon``.
+
+    The planner tracks a single entry per backend.  The helper therefore only
+    needs to resolve the unlikely case where multiple entries for the same
+    backend arise.  Cross-backend pruning is intentionally avoided so that
+    alternative backends remain available for later conversions.
+    """
+
+    pruned: Dict[Optional[Backend], DPEntry] = {}
+    for backend, entry in entries.items():
+        existing = pruned.get(backend)
+        if existing is None:
+            pruned[backend] = entry
+            continue
+        if _dominates(existing.cost, entry.cost, epsilon):
+            continue
+        if _dominates(entry.cost, existing.cost, epsilon) or _better(
+            entry.cost, existing.cost, perf_prio
+        ):
+            pruned[backend] = entry
+    return pruned
+
+
 def _supported_backends(
     gates: Iterable[Gate],
     *,
@@ -511,6 +552,8 @@ class Planner:
         backend_order: Optional[List[Backend]] = None,
         conversion_cost_multiplier: float = 1.0,
         perf_prio: str = "memory",
+        horizon: int | None = None,
+        epsilon: float = 0.01,
         selector: MethodSelector | None = None,
         conversion_engine: ConversionEngine | None = None,
     ):
@@ -549,6 +592,12 @@ class Planner:
             Performance priority used when comparing candidate costs.  Set to
             ``"time"`` to favour runtime over memory or ``"memory"`` to
             prioritise lower memory consumption.  Defaults to ``"memory"``.
+        horizon:
+            Optional sliding window limiting the dynamic programming look-back
+            range in number of gates.  ``None`` disables the limit.
+        epsilon:
+            Relative tolerance for epsilon-dominance comparisons during state
+            pruning.  Larger values merge more nearly equivalent states.
         conversion_engine:
             Optional conversion engine supplying refined cost estimates for
             backend switches.
@@ -569,6 +618,8 @@ class Planner:
         )
         self.conversion_cost_multiplier = conversion_cost_multiplier
         self.perf_prio = perf_prio
+        self.horizon = horizon
+        self.epsilon = epsilon
         self.conversion_engine = conversion_engine
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
@@ -609,6 +660,9 @@ class Planner:
         sparsity: float | None = None,
         phase_rotation_diversity: int | None = None,
         amplitude_rotation_diversity: int | None = None,
+        horizon: int | None = None,
+        epsilon: float | None = None,
+        upper_bound: Cost | None = None,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning.
 
@@ -618,6 +672,9 @@ class Planner:
         are forwarded to :func:`_supported_backends`.
         """
         from .sparsity import adaptive_dd_sparsity_threshold
+        eps = self.epsilon if epsilon is None else epsilon
+        window = self.horizon if horizon is None else horizon
+        bound = upper_bound
         width = len({q for g in gates for q in g.qubits})
         nnz_estimate = None
         if sparsity is not None:
@@ -701,6 +758,8 @@ class Planner:
             i = indices[idx_i]
             for idx_j in range(idx_i):
                 j = indices[idx_j]
+                if window is not None and i - j > window:
+                    continue
                 segment = gates[j:i]
                 qubits = {q for g in segment for q in g.qubits}
                 num_qubits = len(qubits)
@@ -762,6 +821,8 @@ class Planner:
                         candidates.append((backend, cost))
                 for backend, sim_cost in candidates:
                     for prev_backend, prev_entry in table[j].items():
+                        if bound is not None and _dominates(bound, prev_entry.cost, eps):
+                            continue
                         conv_cost = Cost(0.0, 0.0)
                         if prev_backend is not None and prev_backend != backend:
                             boundary = boundaries[j]
@@ -798,6 +859,8 @@ class Planner:
                         total_cost = _add_cost(
                             _add_cost(prev_entry.cost, conv_cost), sim_cost
                         )
+                        if bound is not None and _dominates(bound, total_cost, eps):
+                            continue
                         entry = table[i].get(backend)
                         if entry is None or _better(total_cost, entry.cost, self.perf_prio):
                             table[i][backend] = DPEntry(
@@ -805,6 +868,13 @@ class Planner:
                                 prev_index=j,
                                 prev_backend=prev_backend,
                             )
+                            if i == n:
+                                if bound is None or _better(total_cost, bound, self.perf_prio):
+                                    bound = total_cost
+            if table[i]:
+                table[i] = _prune_epsilon(
+                    table[i], epsilon=eps, perf_prio=self.perf_prio
+                )
             if self.top_k and len(table[i]) > self.top_k:
                 def cost_key(cost: Cost) -> tuple[float, float]:
                     if self.perf_prio == "time":
@@ -1155,6 +1225,7 @@ class Planner:
             sparsity=circuit.sparsity,
             phase_rotation_diversity=circuit.phase_rotation_diversity,
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+            horizon=self.horizon,
         )
         pre_cost = (
             pre.table[-1][pre.final_backend].cost
@@ -1196,6 +1267,7 @@ class Planner:
             sparsity=circuit.sparsity,
             phase_rotation_diversity=circuit.phase_rotation_diversity,
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+            horizon=self.horizon,
         )
 
         dp_cost = (
@@ -1261,6 +1333,7 @@ class Planner:
                 sparsity=circuit.sparsity,
                 phase_rotation_diversity=circuit.phase_rotation_diversity,
                 amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+                horizon=self.horizon,
             )
             for sub_step in sub.steps:
                 refined_steps.append(
