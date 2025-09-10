@@ -1003,13 +1003,20 @@ class Planner:
 
         threshold = max_memory if max_memory is not None else self.max_memory
 
+        def finalize(res: PlanResult) -> PlanResult:
+            circuit.ssd.build_metadata()
+            for part in circuit.ssd.partitions:
+                if part.backend not in part.compatible_methods:
+                    raise ValueError("Assigned backend incompatible with partition")
+            return res
+
         if use_cache:
             cached = self.cache_lookup(gates, backend)
             if cached is not None:
                 circuit.ssd.conversions = list(cached.conversions)
                 if analysis is not None:
                     cached.analysis = analysis
-                return cached
+                return finalize(cached)
 
         num_qubits = circuit.num_qubits
         num_gates = circuit.num_gates
@@ -1065,7 +1072,7 @@ class Planner:
             )
             if use_cache:
                 self.cache_insert(gates, result, backend)
-            return result
+            return finalize(result)
         # Pre-compute the cost of executing the full circuit on a single backend
         single_backend_choice, single_cost = self._single_backend(
             gates,
@@ -1111,7 +1118,7 @@ class Planner:
                 circuit.ssd.conversions = []
                 if use_cache:
                     self.cache_insert(gates, result, single_backend_choice)
-                return result
+                return finalize(result)
 
         # Lightweight pre-pass comparing single backend to coarse partitioning
         pre_batch = max(1, len(gates) // 4)
@@ -1153,7 +1160,7 @@ class Planner:
             circuit.ssd.conversions = []
             if use_cache:
                 self.cache_insert(gates, result, single_backend_choice)
-            return result
+            return finalize(result)
 
         # Perform a coarse plan using the configured batch size for refinement
         coarse = self._dp(
@@ -1195,7 +1202,7 @@ class Planner:
             circuit.ssd.conversions = []
             if use_cache:
                 self.cache_insert(gates, result, single_backend_choice)
-            return result
+            return finalize(result)
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
@@ -1210,7 +1217,7 @@ class Planner:
                 self.cache_insert(gates, coarse)
             if analysis is not None:
                 coarse.analysis = analysis
-            return coarse
+            return finalize(coarse)
 
         # Refine each coarse segment individually.
         refined_steps: List[PlanStep] = []
@@ -1276,7 +1283,7 @@ class Planner:
             total = total_cost if refined_steps else dp_cost
             if total.time > max_time:
                 raise ValueError("Estimated plan runtime exceeds max_time")
-        return result
+        return finalize(result)
 
 
 __all__ = ["Planner", "PlanResult", "PlanStep", "DPEntry"]

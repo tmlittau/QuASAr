@@ -1000,6 +1000,10 @@ class Scheduler:
                 if all(q not in used_qubits for q in part.qubits):
                     parts.append(part)
             ssd_res = SSD(parts, circuit.ssd.conversions)
+            ssd_res.build_metadata()
+            for part in ssd_res.partitions:
+                if part.backend not in part.compatible_methods:
+                    raise ValueError("Assigned backend incompatible with partition")
             if instrument:
                 run_cost = Cost(
                     time=total_gate_time.time,
@@ -1011,6 +1015,7 @@ class Scheduler:
                 return ssd_res, run_cost
             return ssd_res
         ssd_res = circuit.ssd
+        ssd_res.build_metadata()
         if instrument:
             run_cost = Cost(
                 time=total_gate_time.time,

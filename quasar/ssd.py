@@ -6,7 +6,7 @@ from typing import Tuple, List, Dict
 from .cost import Backend, Cost
 
 
-@dataclass(frozen=True)
+@dataclass
 class SSDPartition:
     """Represents a set of identical subsystems along with metadata.
 
@@ -15,7 +15,9 @@ class SSDPartition:
     partition also records the execution history, the chosen simulation
     backend, an estimated cost for simulating one representative
     subsystem, and optionally the backend specific ``state`` object
-    describing the terminal state of the subsystem.
+    describing the terminal state of the subsystem.  Additional metadata
+    tracks dependency edges, entanglement between partitions, compatible
+    simulation methods and generic resource estimates.
     """
 
     subsystems: Tuple[Tuple[int, ...], ...]
@@ -23,6 +25,10 @@ class SSDPartition:
     backend: Backend = Backend.STATEVECTOR
     cost: Cost = field(default_factory=lambda: Cost(time=0.0, memory=0.0))
     state: object | None = field(default=None, repr=False, compare=False, hash=False)
+    dependencies: Tuple[int, ...] = ()
+    entangled_with: Tuple[int, ...] = ()
+    compatible_methods: Tuple[Backend, ...] = ()
+    resources: Dict[str, float] = field(default_factory=dict)
 
     @property
     def multiplicity(self) -> int:
@@ -74,6 +80,46 @@ class SSD:
         if isinstance(partition, int):
             partition = self.partitions[partition]
         return partition.state
+
+    # ------------------------------------------------------------------
+    def build_metadata(self) -> None:
+        """Populate dependency, entanglement and resource metadata.
+
+        This routine infers dependencies and entanglement annotations from
+        :attr:`conversions`.  Each partition's compatible methods default to
+        the assigned backend if not explicitly provided and resource
+        estimates fall back to the recorded :class:`~quasar.cost.Cost`
+        values.
+        """
+
+        qubit_sets: List[set[int]] = [set(p.qubits) for p in self.partitions]
+
+        dep_sets: List[set[int]] = [set(p.dependencies) for p in self.partitions]
+        ent_sets: List[set[int]] = [set(p.entangled_with) for p in self.partitions]
+
+        for idx, part in enumerate(self.partitions):
+            if not part.compatible_methods:
+                part.compatible_methods = (part.backend,)
+            if not part.resources:
+                part.resources = {"time": part.cost.time, "memory": part.cost.memory}
+
+        for conv in self.conversions:
+            boundary = set(conv.boundary)
+            involved = [i for i, qs in enumerate(qubit_sets) if qs & boundary]
+            if len(involved) < 2:
+                continue
+            src = min(involved)
+            for tgt in involved:
+                if tgt == src:
+                    continue
+                dep_sets[tgt].add(src)
+                ent_sets[src].add(tgt)
+                ent_sets[tgt].add(src)
+
+        for idx, part in enumerate(self.partitions):
+            part.dependencies = tuple(sorted(dep_sets[idx]))
+            part.entangled_with = tuple(sorted(ent_sets[idx]))
+
 
 
 @dataclass(frozen=True)
