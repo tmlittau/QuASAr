@@ -17,6 +17,8 @@ import math
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Sequence, TYPE_CHECKING
 
+from .calibration import latest_coefficients
+
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .circuit import Gate
 
@@ -185,6 +187,8 @@ class CostEstimator:
             "parallel_time_overhead": 0.0,
             "parallel_memory_overhead": 0.0,
         }
+        if coeff is None:
+            coeff = latest_coefficients()
         if coeff:
             self.coeff.update(coeff)
         # Policy caps for planner heuristics
@@ -206,8 +210,9 @@ class CostEstimator:
     @classmethod
     def from_file(cls, path: str | Path) -> "CostEstimator":
         """Construct an estimator with coefficients loaded from ``path``."""
-        with Path(path).open() as fh:
-            coeff = json.load(fh)
+        from .calibration import load_coefficients
+
+        coeff = load_coefficients(path)
         return cls(coeff=coeff)
 
     # ------------------------------------------------------------------

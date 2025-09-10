@@ -47,36 +47,29 @@ characteristics of the target hardware.
 
 ## Running the benchmarks
 
-Run the calibration script to measure the cost of the supported
-simulation backends and conversion primitives:
+Run the benchmarking utility in ``tools/`` to measure the cost of the
+supported simulation backends and conversion primitives:
 
 ```bash
-python -m quasar.calibration --output coeff.json
+python tools/benchmark_coefficients.py
 ```
 
-A JSON file with the measured coefficients will be written to
-`coeff.json`.  The file can be supplied to :class:`~quasar.cost.CostEstimator`
-when creating an estimator instance:
+Each invocation writes a new versioned JSON file under the top-level
+``calibration/`` directory, e.g. ``calibration/coeff_v1.json``.  The
+latest available file is loaded automatically by
+:class:`~quasar.cost.CostEstimator` when instantiated with default
+arguments.
+
+Existing estimators can be updated in place using the calibration
+helpers:
 
 ```python
-from quasar import CostEstimator
-est = CostEstimator.from_file("coeff.json")
-```
+from quasar import CostEstimator, latest_coefficients, apply_calibration
 
-Existing estimators can be updated in place using the measured values:
-
-```python
-from quasar import run_calibration
-
-coeff = run_calibration()
 estimator = CostEstimator()
-estimator.update_coefficients(coeff)
-```
-
-To persist coefficients from an existing estimator:
-
-```python
-estimator.to_file("coeff.json")
+coeff = latest_coefficients()
+if coeff:
+    apply_calibration(estimator, coeff)
 ```
 
 These utilities allow coefficients to be tuned once and reused across
