@@ -152,13 +152,24 @@ class PlanResult:
 # ---------------------------------------------------------------------------
 
 
-def _add_cost(a: Cost, b: Cost) -> Cost:
-    """Combine two cost estimates sequentially.
+def _add_cost(a: Cost, b: Cost, *, parallel: bool = False) -> Cost:
+    """Combine two cost estimates.
 
-    Runtime costs add up whereas memory requirements are assumed to be
-    dominated by the larger of the two contributions.
+    When ``parallel`` is ``False`` the costs are composed sequentially:
+    runtimes add up while memory requirements are dominated by the larger
+    contribution.  For ``parallel=True`` the operands represent
+    independent groups executed concurrently where runtime is governed by
+    the slower branch and memory adds up across groups.
     """
 
+    if parallel:
+        return Cost(
+            time=max(a.time, b.time),
+            memory=a.memory + b.memory,
+            log_depth=max(a.log_depth, b.log_depth),
+            conversion=a.conversion + b.conversion,
+            replay=a.replay + b.replay,
+        )
     return Cost(
         time=a.time + b.time,
         memory=max(a.memory, b.memory),
@@ -168,16 +179,22 @@ def _add_cost(a: Cost, b: Cost) -> Cost:
     )
 
 
-def _better(a: Cost, b: Cost, perf_prio: str = "memory") -> bool:
+def _better(
+    a: Cost,
+    b: Cost,
+    perf_prio: str = "memory",
+    *,
+    parallel: bool = False,
+) -> bool:
     """Return ``True`` if cost ``a`` is preferable over ``b``.
 
     The comparison can prioritise either runtime or memory based on
-    ``perf_prio``.  When set to ``"time"`` the original behaviour of
-    comparing ``(time, memory)`` is used.  The default prioritises
-    memory and therefore compares ``(memory, time)``.  Any other value
-    falls back to the memory‑first ordering.
+    ``perf_prio``.  When ``parallel`` is ``True`` and both costs are
+    identical a parallel plan is considered preferable to break ties.
     """
 
+    if parallel and a.time == b.time and a.memory == b.memory:
+        return True
     if perf_prio == "time":
         return (a.time, a.memory) < (b.time, b.memory)
     return (a.memory, a.time) < (b.memory, b.time)
@@ -439,6 +456,40 @@ def _simulation_cost(
     return estimator.statevector(num_qubits, num_1q_gates, num_2q_gates, num_meas)
 
 
+def _parallel_simulation_cost(
+    estimator: CostEstimator,
+    backend: Backend,
+    groups: List[Tuple[Tuple[int, ...], List["Gate"]]],
+) -> Cost:
+    """Estimate cost for executing independent groups in parallel."""
+
+    if not groups:
+        return Cost(0.0, 0.0)
+    costs: List[Cost] = []
+    for qubits, gates in groups:
+        m = len(gates)
+        meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+        one = sum(
+            1
+            for g in gates
+            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        two = m - one - meas
+        costs.append(
+            _simulation_cost(estimator, backend, len(qubits), one, two, meas)
+        )
+    total = costs[0]
+    for cost in costs[1:]:
+        total = _add_cost(total, cost, parallel=True)
+    return Cost(
+        time=total.time + estimator.parallel_time_overhead(len(groups)),
+        memory=total.memory + estimator.parallel_memory_overhead(len(groups)),
+        log_depth=total.log_depth,
+        conversion=total.conversion,
+        replay=total.replay,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Planner implementation
 # ---------------------------------------------------------------------------
@@ -621,6 +672,8 @@ class Planner:
             ]
             return PlanResult(table=table, final_backend=init, gates=gates)
 
+        part = Partitioner()
+
         # Pre-compute prefix and future qubit sets to derive boundary sizes.
         prefix_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
         running: Set[int] = set()
@@ -661,6 +714,7 @@ class Planner:
                     if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
                 )
                 num_2q = num_gates - num_1q - num_meas
+                groups = part.parallel_groups(segment) if num_qubits > 1 else []
                 backends = self._order_backends(
                     _supported_backends(
                         segment,
@@ -684,24 +738,28 @@ class Planner:
                     cost = _simulation_cost(
                         self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
                     )
+                    if len(groups) > 1:
+                        par_cost = _parallel_simulation_cost(
+                            self.estimator, backend, groups
+                        )
+                        if _better(par_cost, cost, self.perf_prio, parallel=True):
+                            cost = par_cost
                     if max_memory is not None and cost.memory > max_memory:
                         continue
                     candidates.append((backend, cost))
                 if not candidates:
-                    candidates = [
-                        (
-                            backend,
-                            _simulation_cost(
-                                self.estimator,
-                                backend,
-                                num_qubits,
-                                num_1q,
-                                num_2q,
-                                num_meas,
-                            ),
+                    candidates = []
+                    for backend in backends:
+                        cost = _simulation_cost(
+                            self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
                         )
-                        for backend in backends
-                    ]
+                        if len(groups) > 1:
+                            par_cost = _parallel_simulation_cost(
+                                self.estimator, backend, groups
+                            )
+                            if _better(par_cost, cost, self.perf_prio, parallel=True):
+                                cost = par_cost
+                        candidates.append((backend, cost))
                 for backend, sim_cost in candidates:
                     for prev_backend, prev_entry in table[j].items():
                         conv_cost = Cost(0.0, 0.0)
@@ -1041,6 +1099,15 @@ class Planner:
             max_time=max_time,
         )
 
+        part = Partitioner()
+        groups = part.parallel_groups(gates) if num_qubits > 1 else []
+        if len(groups) > 1:
+            par_cost = _parallel_simulation_cost(
+                self.estimator, single_backend_choice, groups
+            )
+            if _better(par_cost, single_cost, perf_prio, parallel=True):
+                single_cost = par_cost
+
         quick = True
         if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
             quick = False
@@ -1181,6 +1248,7 @@ class Planner:
         refined_steps: List[PlanStep] = []
         prev_backend: Optional[Backend] = None
         total_cost = Cost(time=0.0, memory=0.0)
+        part = Partitioner()
         for step in coarse.steps:
             segment = gates[step.start : step.end]
             sub = self._dp(
@@ -1217,12 +1285,15 @@ class Planner:
                     if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
                 )
                 two = m - one - meas
-                total_cost = _add_cost(
-                    total_cost,
-                    _simulation_cost(
-                        self.estimator, sub_step.backend, n, one, two, meas
-                    ),
-                )
+                groups = part.parallel_groups(seg) if n > 1 else []
+                cost = _simulation_cost(self.estimator, sub_step.backend, n, one, two, meas)
+                if len(groups) > 1:
+                    par_cost = _parallel_simulation_cost(
+                        self.estimator, sub_step.backend, groups
+                    )
+                    if _better(par_cost, cost, self.perf_prio, parallel=True):
+                        cost = par_cost
+                total_cost = _add_cost(total_cost, cost)
 
         final_backend = refined_steps[-1].backend if refined_steps else None
         conversions = self._conversions_for_steps(gates, refined_steps)
