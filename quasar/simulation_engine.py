@@ -73,8 +73,30 @@ class SimulationEngine:
         *,
         memory_threshold: float | None = None,
         backend: Backend | None = None,
+        target_accuracy: float | None = None,
+        max_time: float | None = None,
+        optimization_level: int | None = None,
     ) -> SimulationResult:
-        """Simulate ``circuit`` and return the final :class:`SSD` and metrics."""
+        """Simulate ``circuit`` and return the final :class:`SSD` and metrics.
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to simulate.
+        memory_threshold:
+            Optional memory ceiling in bytes for planning.  Overrides the value
+            supplied when constructing the engine.
+        backend:
+            Optional backend hint used during planning and scheduling.
+        target_accuracy:
+            Desired lower bound on simulation fidelity.  Forwarded to the
+            planner which adjusts the cost model accordingly.
+        max_time:
+            Upper bound on the estimated execution time in seconds.  Plans
+            exceeding this value raise a :class:`ValueError`.
+        optimization_level:
+            Heuristic tuning knob influencing planner and scheduler behaviour.
+        """
 
         start = time.perf_counter()
         analyzer = CircuitAnalyzer(circuit, estimator=self.planner.estimator)
@@ -87,15 +109,40 @@ class SimulationEngine:
         )
         if (
             memory_threshold is None
-            and self.scheduler.should_use_quick_path(circuit, backend=backend)
+            and self.scheduler.should_use_quick_path(
+                circuit,
+                backend=backend,
+                max_time=max_time,
+                optimization_level=optimization_level,
+            )
         ):
-            plan = self.scheduler.prepare_run(circuit, backend=backend)
+            plan = self.scheduler.prepare_run(
+                circuit,
+                backend=backend,
+                target_accuracy=target_accuracy,
+                max_time=max_time,
+                optimization_level=optimization_level,
+            )
         else:
-            plan = self.planner.plan(circuit, max_memory=threshold, backend=backend)
+            plan = self.planner.plan(
+                circuit,
+                max_memory=threshold,
+                backend=backend,
+                target_accuracy=target_accuracy,
+                max_time=max_time,
+                optimization_level=optimization_level,
+            )
         planning_time = time.perf_counter() - start
 
         start = time.perf_counter()
-        ssd = self.scheduler.run(circuit, plan, backend=backend)
+        ssd = self.scheduler.run(
+            circuit,
+            plan,
+            backend=backend,
+            target_accuracy=target_accuracy,
+            max_time=max_time,
+            optimization_level=optimization_level,
+        )
         execution_time = time.perf_counter() - start
 
         return SimulationResult(

@@ -66,6 +66,8 @@ class Scheduler:
         circuit: Circuit,
         *,
         backend: Backend | None = None,
+        max_time: float | None = None,
+        optimization_level: int | None = None,
         force: bool = False,
     ) -> bool:
         """Return ``True`` if ``circuit`` can bypass planning.
@@ -82,6 +84,12 @@ class Scheduler:
             Circuit to simulate.
         backend:
             Optional override selecting a specific backend.
+        max_time:
+            When provided, quick-path execution is disabled to ensure the plan
+            can be checked against the runtime constraint.
+        optimization_level:
+            Heuristic tuning knob.  ``0`` forces full planning regardless of
+            circuit size.
         force:
             When ``True`` skip heuristic checks and force quick-path execution.
 
@@ -94,6 +102,10 @@ class Scheduler:
 
         if force:
             return True
+        if max_time is not None:
+            return False
+        if optimization_level is not None and optimization_level <= 0:
+            return False
 
         quick = True
         num_qubits = circuit.num_qubits
@@ -113,7 +125,12 @@ class Scheduler:
 
     # ------------------------------------------------------------------
     def select_backend(
-        self, circuit: Circuit, *, backend: Backend | None = None
+        self,
+        circuit: Circuit,
+        *,
+        backend: Backend | None = None,
+        max_time: float | None = None,
+        optimization_level: int | None = None,
     ) -> Backend | None:
         """Return the backend ``run`` would use for ``circuit``.
 
@@ -124,6 +141,11 @@ class Scheduler:
         backend:
             Optional override selecting a specific backend.  When provided the
             returned value will always be this backend.
+        max_time:
+            Runtime constraint in seconds.  When set, quick-path execution is
+            disabled to ensure the constraint can be validated.
+        optimization_level:
+            Heuristic tuning knob influencing quick-path checks.
 
         Returns
         -------
@@ -135,7 +157,11 @@ class Scheduler:
         if backend is not None:
             return backend
 
-        if not self.should_use_quick_path(circuit):
+        if not self.should_use_quick_path(
+            circuit,
+            max_time=max_time,
+            optimization_level=optimization_level,
+        ):
             return None
 
         names = [g.gate.upper() for g in circuit.gates]
@@ -247,6 +273,9 @@ class Scheduler:
         plan: PlanResult | None = None,
         *,
         backend: Backend | None = None,
+        target_accuracy: float | None = None,
+        max_time: float | None = None,
+        optimization_level: int | None = None,
     ) -> PlanResult:
         """Prepare an execution plan for ``circuit``.
 
@@ -254,11 +283,31 @@ class Scheduler:
         execute any gates.  The returned :class:`PlanResult` contains
         precomputed cost estimates for each step which allows
         :meth:`run` to execute without invoking the planner again.
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to simulate.
+        plan:
+            Optional pre-computed plan to reuse.
+        backend:
+            Optional backend hint for planning.
+        target_accuracy:
+            Desired lower bound on simulation fidelity.
+        max_time:
+            Upper bound on estimated runtime in seconds.
+        optimization_level:
+            Heuristic tuning knob influencing planner behaviour.
         """
 
         gates = circuit.simplify_classical_controls()
 
-        backend_choice = self.select_backend(circuit, backend=backend)
+        backend_choice = self.select_backend(
+            circuit,
+            backend=backend,
+            max_time=max_time,
+            optimization_level=optimization_level,
+        )
         if plan is None and backend_choice is not None:
             # Quick path – execute the entire circuit on a single backend
             plan = PlanResult(
@@ -283,6 +332,8 @@ class Scheduler:
                     cost=plan.step_costs[0],
                 )
             ]
+            if max_time is not None and plan.step_costs[0].time > max_time:
+                raise ValueError("Estimated runtime exceeds max_time")
             return plan
 
         if self.planner is None:
@@ -298,7 +349,13 @@ class Scheduler:
         if plan is None:
             plan = self.planner.cache_lookup(gates, backend)
             if plan is None:
-                plan = self.planner.plan(circuit, backend=backend)
+                plan = self.planner.plan(
+                    circuit,
+                    backend=backend,
+                    target_accuracy=target_accuracy,
+                    max_time=max_time,
+                    optimization_level=optimization_level,
+                )
 
         conversions = list(getattr(plan, "conversions", []))
         circuit.ssd.conversions = conversions
@@ -311,6 +368,7 @@ class Scheduler:
             step_costs.append(self._estimate_cost(step.backend, segment))
         plan.step_costs = step_costs
         parts: List[SSDPartition] = []
+        total_cost = Cost(time=0.0, memory=0.0)
         for step, cost in zip(steps, step_costs):
             segment = gates[step.start : step.end]
             qubits = tuple(sorted({q for g in segment for q in g.qubits}))
@@ -328,6 +386,7 @@ class Scheduler:
                     cost=cost,
                 )
             )
+            total_cost = _add_cost(total_cost, cost)
 
         merged_steps: List[PlanStep] = []
         merged_costs: List[Cost] = []
@@ -433,6 +492,8 @@ class Scheduler:
                     sims.pop(k)
             sims[(qubits, target)] = object()
 
+        if max_time is not None and total_cost.time > max_time:
+            raise ValueError("Estimated runtime exceeds max_time")
         return plan
 
     # ------------------------------------------------------------------
@@ -444,6 +505,9 @@ class Scheduler:
         *,
         instrument: bool = False,
         backend: Backend | None = None,
+        target_accuracy: float | None = None,
+        max_time: float | None = None,
+        optimization_level: int | None = None,
     ) -> SSD | tuple[SSD, Cost]:
         """Execute ``circuit`` according to a plan.
 
@@ -468,6 +532,12 @@ class Scheduler:
             are skipped and any supplied ``monitor`` callback is not invoked.
         backend:
             Optional backend hint used when planning is performed internally.
+        target_accuracy:
+            Desired lower bound on simulation fidelity.
+        max_time:
+            Upper bound on estimated runtime in seconds.
+        optimization_level:
+            Heuristic tuning knob influencing planner behaviour.
 
         Returns
         -------
@@ -480,7 +550,14 @@ class Scheduler:
         """
 
         if plan is None or plan.step_costs is None:
-            plan = self.prepare_run(circuit, plan, backend=backend)
+            plan = self.prepare_run(
+                circuit,
+                plan,
+                backend=backend,
+                target_accuracy=target_accuracy,
+                max_time=max_time,
+                optimization_level=optimization_level,
+            )
 
         gates = circuit.simplify_classical_controls()
 
@@ -488,6 +565,12 @@ class Scheduler:
         conv_layers = list(getattr(plan, "conversions", []))
         conv_idx = 0
         est_costs = plan.step_costs or [Cost(time=0.0, memory=0.0)] * len(steps)
+        if max_time is not None:
+            total_est = Cost(time=0.0, memory=0.0)
+            for c in est_costs:
+                total_est = _add_cost(total_est, c)
+            if total_est.time > max_time:
+                raise ValueError("Estimated runtime exceeds max_time")
 
         if len(steps) == 1 and not conv_layers and not getattr(
             plan, "explicit_conversions", None
@@ -948,11 +1031,12 @@ class Scheduler:
         if backend == Backend.TABLEAU:
             return est.tableau(n, m)
         if backend == Backend.MPS:
+            chi = getattr(est, "chi_max", None) or 4
             return est.mps(
                 n,
                 num_1q + num_meas,
                 num_2q,
-                chi=4,
+                chi=chi,
                 svd=True,
             )
         if backend == Backend.DECISION_DIAGRAM:
