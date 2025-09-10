@@ -14,7 +14,7 @@ several high level metrics:
 
 from dataclasses import dataclass
 from collections import Counter, defaultdict, deque
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, List, Tuple
 
 from .circuit import Circuit
 from .cost import Backend, Cost, CostEstimator
@@ -27,6 +27,8 @@ class AnalysisResult:
     gate_distribution: Dict[str, int]
     entanglement: Dict[str, float]
     resources: Dict[Backend, Cost]
+    parallel_layers: List[List[int]]
+    critical_path_length: int
 
 
 class CircuitAnalyzer:
@@ -109,6 +111,54 @@ class CircuitAnalyzer:
         }
 
     # ------------------------------------------------------------------
+    def _dependency_graph(self) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
+        """Construct a gate dependency graph.
+
+        Returns
+        -------
+        tuple
+            ``(preds, succs)`` adjacency lists where ``preds[i]`` contains the
+            indices of gates that must precede gate ``i`` and ``succs[i]`` the
+            gates depending on ``i``.
+        """
+
+        n = len(self.circuit.gates)
+        preds: Dict[int, Set[int]] = {i: set() for i in range(n)}
+        succs: Dict[int, Set[int]] = {i: set() for i in range(n)}
+        last_seen: Dict[int, int] = {}
+        for idx, gate in enumerate(self.circuit.gates):
+            for q in gate.qubits:
+                if q in last_seen:
+                    dep = last_seen[q]
+                    preds[idx].add(dep)
+                    succs[dep].add(idx)
+                last_seen[q] = idx
+        return preds, succs
+
+    def parallel_layers(self) -> List[List[int]]:
+        """Return groups of gates that can execute in parallel."""
+
+        preds, succs = self._dependency_graph()
+        indegree = {i: len(p) for i, p in preds.items()}
+        ready = sorted(i for i, d in indegree.items() if d == 0)
+        layers: List[List[int]] = []
+        while ready:
+            layers.append(ready)
+            next_ready: List[int] = []
+            for node in ready:
+                for nb in succs[node]:
+                    indegree[nb] -= 1
+                    if indegree[nb] == 0:
+                        next_ready.append(nb)
+            ready = sorted(next_ready)
+        return layers
+
+    def critical_path_length(self) -> int:
+        """Return the circuit depth derived from dependencies."""
+
+        return len(self.parallel_layers())
+
+    # ------------------------------------------------------------------
     def resource_estimates(self) -> Dict[Backend, Cost]:
         """Estimate runtime and memory for supported simulation backends."""
 
@@ -145,8 +195,11 @@ class CircuitAnalyzer:
     def analyze(self) -> AnalysisResult:
         """Return all analysis information in a single structure."""
 
+        layers = self.parallel_layers()
         return AnalysisResult(
             gate_distribution=self.gate_distribution(),
             entanglement=self.entanglement_metrics(),
             resources=self.resource_estimates(),
+            parallel_layers=layers,
+            critical_path_length=len(layers),
         )

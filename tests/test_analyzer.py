@@ -46,3 +46,16 @@ def test_resource_estimates(sample_circuit):
         assert isinstance(cost, Cost)
         assert cost.time >= 0
         assert cost.memory >= 0
+
+
+def test_temporal_metrics():
+    circ = Circuit.from_dict(
+        [
+            {"gate": "H", "qubits": [0]},
+            {"gate": "H", "qubits": [1]},
+            {"gate": "CX", "qubits": [0, 1]},
+        ]
+    )
+    analysis = CircuitAnalyzer(circ).analyze()
+    assert analysis.parallel_layers == [[0, 1], [2]]
+    assert analysis.critical_path_length == 2

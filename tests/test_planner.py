@@ -1,4 +1,4 @@
-from quasar import Circuit, Planner, Backend, CostEstimator
+from quasar import Circuit, Planner, Backend, CostEstimator, CircuitAnalyzer
 
 
 def test_tableau_for_clifford():
@@ -114,3 +114,16 @@ def test_conversion_cost_multiplier_discourages_switch():
     )
     steps2 = penalized.plan(circ).steps
     assert all(s.backend == Backend.STATEVECTOR for s in steps2)
+
+
+def test_planner_receives_analysis_metrics():
+    gates = [
+        {"gate": "H", "qubits": [0]},
+        {"gate": "H", "qubits": [1]},
+        {"gate": "CX", "qubits": [0, 1]},
+    ]
+    circ = Circuit.from_dict(gates)
+    analysis = CircuitAnalyzer(circ).analyze()
+    plan = Planner().plan(circ, analysis=analysis)
+    assert plan.analysis is analysis
+    assert plan.analysis.critical_path_length == 2
