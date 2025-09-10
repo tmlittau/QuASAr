@@ -15,7 +15,7 @@ from .partitioner import CLIFFORD_GATES
 from .cost import Backend, Cost
 from . import config
 from .circuit import Circuit, Gate
-from .ssd import SSD, ConversionLayer, SSDPartition
+from .ssd import SSD, ConversionLayer, SSDPartition, SSDCache
 from .backends import (
     AerStatevectorBackend,
     AerMPSBackend,
@@ -73,6 +73,7 @@ class Scheduler:
     verbose_selection: bool = config.DEFAULT.verbose_selection
     # Fractional tolerance before triggering a replan due to cost mismatch
     replan_tolerance: float = 0.05
+    ssd_cache: SSDCache = field(default_factory=SSDCache)
 
     def __post_init__(self) -> None:
         if self.backends is None:
@@ -499,7 +500,13 @@ class Scheduler:
                         self.conversion_engine = ConversionEngine()
                     l_ssd = CESD(boundary_qubits=[gate.qubits[0]], top_s=2)
                     r_ssd = CESD(boundary_qubits=[gate.qubits[1]], top_s=2)
-                    self.conversion_engine.build_bridge_tensor(l_ssd, r_ssd)
+                    l_ssd.fingerprint = (tuple(l_ssd.boundary_qubits or []), l_ssd.top_s)
+                    r_ssd.fingerprint = (tuple(r_ssd.boundary_qubits or []), r_ssd.top_s)
+                    self.ssd_cache.bridge_tensor(
+                        l_ssd,
+                        r_ssd,
+                        lambda: self.conversion_engine.build_bridge_tensor(l_ssd, r_ssd),
+                    )
                     layer = ConversionLayer(
                         boundary=tuple(gate.qubits),
                         source=left_info[0][1],
@@ -695,8 +702,13 @@ class Scheduler:
                     final_sv = None
                     try:
                         if self.conversion_engine is not None:
-                            final_sv = self.conversion_engine.convert_boundary_to_statevector(
-                                ssd if ssd is not None else circuit.ssd
+                            target_ssd = ssd if ssd is not None else circuit.ssd
+                            final_sv = self.ssd_cache.convert(
+                                target_ssd,
+                                "sv",
+                                lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                    target_ssd
+                                ),
                             )
                     except Exception:
                         pass
@@ -847,18 +859,28 @@ class Scheduler:
                     except Exception:
                         if isinstance(prepared, SSD):
                             if target == Backend.TABLEAU:
-                                rep = (
-                                    self.conversion_engine.convert_boundary_to_tableau(
+                                rep = self.ssd_cache.convert(
+                                    prepared,
+                                    "tab",
+                                    lambda: self.conversion_engine.convert_boundary_to_tableau(
                                         prepared
-                                    )
+                                    ),
                                 )
                             elif target == Backend.DECISION_DIAGRAM:
-                                rep = self.conversion_engine.convert_boundary_to_dd(
-                                    prepared
+                                rep = self.ssd_cache.convert(
+                                    prepared,
+                                    "dd",
+                                    lambda: self.conversion_engine.convert_boundary_to_dd(
+                                        prepared
+                                    ),
                                 )
                             else:
-                                rep = self.conversion_engine.convert_boundary_to_statevector(
-                                    prepared
+                                rep = self.ssd_cache.convert(
+                                    prepared,
+                                    "sv",
+                                    lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                        prepared
+                                    ),
                                 )
                             sim_obj.ingest(rep, num_qubits=circuit.num_qubits)
                         else:
@@ -947,6 +969,10 @@ class Scheduler:
                         rank = 2 ** len(boundary)
                         primitive = "Full"
                     conv_ssd = CESD(boundary_qubits=list(boundary), top_s=rank)
+                    conv_ssd.fingerprint = (
+                        tuple(conv_ssd.boundary_qubits or []),
+                        conv_ssd.top_s,
+                    )
                     if instrument:
                         tracemalloc.reset_peak()
                         start_time = time.perf_counter()
@@ -958,16 +984,28 @@ class Scheduler:
                                 )
                             except Exception:
                                 if target == Backend.TABLEAU:
-                                    rep = self.conversion_engine.convert_boundary_to_tableau(
-                                        conv_ssd
+                                    rep = self.ssd_cache.convert(
+                                        conv_ssd,
+                                        "tab",
+                                        lambda: self.conversion_engine.convert_boundary_to_tableau(
+                                            conv_ssd
+                                        ),
                                     )
                                 elif target == Backend.DECISION_DIAGRAM:
-                                    rep = self.conversion_engine.convert_boundary_to_dd(
-                                        conv_ssd
+                                    rep = self.ssd_cache.convert(
+                                        conv_ssd,
+                                        "dd",
+                                        lambda: self.conversion_engine.convert_boundary_to_dd(
+                                            conv_ssd
+                                        ),
                                     )
                                 else:
-                                    rep = self.conversion_engine.convert_boundary_to_statevector(
-                                        conv_ssd
+                                    rep = self.ssd_cache.convert(
+                                        conv_ssd,
+                                        "sv",
+                                        lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                            conv_ssd
+                                        ),
                                     )
                                 sim_obj.ingest(
                                     rep,
@@ -985,8 +1023,12 @@ class Scheduler:
                                 mapping=boundary,
                             )
                         elif primitive == "ST":
-                            rep = self.conversion_engine.build_bridge_tensor(
-                                conv_ssd, conv_ssd
+                            rep = self.ssd_cache.bridge_tensor(
+                                conv_ssd,
+                                conv_ssd,
+                                lambda: self.conversion_engine.build_bridge_tensor(
+                                    conv_ssd, conv_ssd
+                                ),
                             )
                             sim_obj.ingest(
                                 rep,
@@ -995,18 +1037,28 @@ class Scheduler:
                             )
                         else:
                             if target == Backend.TABLEAU:
-                                rep = (
-                                    self.conversion_engine.convert_boundary_to_tableau(
+                                rep = self.ssd_cache.convert(
+                                    conv_ssd,
+                                    "tab",
+                                    lambda: self.conversion_engine.convert_boundary_to_tableau(
                                         conv_ssd
-                                    )
+                                    ),
                                 )
                             elif target == Backend.DECISION_DIAGRAM:
-                                rep = self.conversion_engine.convert_boundary_to_dd(
-                                    conv_ssd
+                                rep = self.ssd_cache.convert(
+                                    conv_ssd,
+                                    "dd",
+                                    lambda: self.conversion_engine.convert_boundary_to_dd(
+                                        conv_ssd
+                                    ),
                                 )
                             else:
-                                rep = self.conversion_engine.convert_boundary_to_statevector(
-                                    conv_ssd
+                                rep = self.ssd_cache.convert(
+                                    conv_ssd,
+                                    "sv",
+                                    lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                        conv_ssd
+                                    ),
                                 )
                             sim_obj.ingest(
                                 rep,
@@ -1147,8 +1199,12 @@ class Scheduler:
                     final_sv = None
                     try:
                         if self.conversion_engine is not None:
-                            final_sv = self.conversion_engine.convert_boundary_to_statevector(
-                                ssd_res
+                            final_sv = self.ssd_cache.convert(
+                                ssd_res,
+                                "sv",
+                                lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                    ssd_res
+                                ),
                             )
                     except Exception:
                         pass
@@ -1198,8 +1254,12 @@ class Scheduler:
                 final_sv = None
                 try:
                     if self.conversion_engine is not None:
-                        final_sv = self.conversion_engine.convert_boundary_to_statevector(
-                            ssd_res
+                        final_sv = self.ssd_cache.convert(
+                            ssd_res,
+                            "sv",
+                            lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                ssd_res
+                            ),
                         )
                 except Exception:
                     pass
