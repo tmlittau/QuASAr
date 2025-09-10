@@ -196,7 +196,9 @@ class Partitioner:
         if current_gates:
             partitions.extend(self._build_partitions(current_gates, current_backend, current_cost))
 
-        return SSD(partitions=partitions, conversions=conversions)
+        ssd = SSD(partitions=partitions, conversions=conversions)
+        ssd.build_metadata()
+        return ssd
 
     # ------------------------------------------------------------------
     def parallel_groups(self, gates: List['Gate']) -> List[Tuple[Tuple[int, ...], List['Gate']]]:

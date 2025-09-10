@@ -358,7 +358,9 @@ class Circuit:
         if self._num_qubits == 0:
             return SSD([])
         part = SSDPartition(subsystems=(tuple(range(self._num_qubits)),))
-        return SSD([part])
+        ssd = SSD([part])
+        ssd.build_metadata()
+        return ssd
 
     def _estimate_costs(self) -> Dict[str, Cost]:
         """Estimate simulation costs for standard backends."""
