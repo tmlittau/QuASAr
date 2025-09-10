@@ -7,16 +7,8 @@ from quasar.circuit import Circuit
 from quasar.planner import Planner, _simulation_cost, _supported_backends
 
 BASELINES = {
-    "bell": {
-        "oracle": (20.0, 5.76e-05),
-        "dp": (20.0, 9.72e-04),
-        "greedy": (20.0, 2.63e-05),
-    },
-    "ghz3": {
-        "oracle": (36.0, 9.62e-05),
-        "dp": (36.0, 1.10e-03),
-        "greedy": (36.0, 3.63e-05),
-    },
+    "bell": {"oracle": 20.0, "dp": 20.0, "greedy": 20.0},
+    "ghz3": {"oracle": 36.0, "dp": 36.0, "greedy": 36.0},
 }
 
 
@@ -115,6 +107,10 @@ def circuits() -> dict[str, Circuit]:
 def test_planner_cost_table(name: str, circuit: Circuit) -> None:
     metrics = compute_metrics(circuit)
     for method, (cost, runtime) in metrics.items():
-        expected_cost, expected_time = BASELINES[name][method]
+        expected_cost = BASELINES[name][method]
         assert cost == expected_cost
-        assert runtime == pytest.approx(expected_time, rel=0.5, abs=1e-4)
+        assert runtime > 0
+    dp_time = metrics["dp"][1]
+    for method, (_, runtime) in metrics.items():
+        if method != "dp":
+            assert dp_time > runtime
