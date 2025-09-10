@@ -48,14 +48,14 @@ class CircuitAnalyzer:
     def gate_distribution(self) -> Dict[str, int]:
         """Return the frequency of each gate type in the circuit."""
 
-        return dict(Counter(g.gate for g in self.circuit.gates))
+        return dict(Counter(g.gate for g in self.circuit.topological()))
 
     # ------------------------------------------------------------------
     def _entanglement_graph(self) -> Dict[int, Set[int]]:
         """Build an undirected graph from multi-qubit gates."""
 
         graph: Dict[int, Set[int]] = defaultdict(set)
-        for gate in self.circuit.gates:
+        for gate in self.circuit.topological():
             qubits = gate.qubits
             if len(qubits) < 2:
                 continue
@@ -99,7 +99,7 @@ class CircuitAnalyzer:
         isolated = [q for q in range(self.circuit.num_qubits) if q not in graph]
         component_sizes.extend([1] * len(isolated))
 
-        multi_qubit_gate_count = sum(1 for g in self.circuit.gates if len(g.qubits) > 1)
+        multi_qubit_gate_count = sum(1 for g in self.circuit.topological() if len(g.qubits) > 1)
 
         if component_sizes:
             max_size = max(component_sizes)
@@ -145,7 +145,7 @@ class CircuitAnalyzer:
             "non_multiple_of_pi": 0,
         }
         angles: Counter[float] = Counter()
-        for gate in self.circuit.gates:
+        for gate in self.circuit.topological():
             if not gate.params:
                 continue
             angle = float(next(iter(gate.params.values())))
@@ -174,7 +174,7 @@ class CircuitAnalyzer:
             "SWAP",
         }
         counts = {"clifford": 0, "non_clifford": 0}
-        for g in self.circuit.gates:
+        for g in self.circuit.topological():
             name = g.gate.upper()
             is_clifford = False
             if name in clifford_gate_names:
@@ -215,24 +215,21 @@ class CircuitAnalyzer:
             gates depending on ``i``.
         """
 
-        n = len(self.circuit.gates)
-        preds: Dict[int, Set[int]] = {i: set() for i in range(n)}
-        succs: Dict[int, Set[int]] = {i: set() for i in range(n)}
-        last_seen: Dict[int, int] = {}
-        for idx, gate in enumerate(self.circuit.gates):
-            for q in gate.qubits:
-                if q in last_seen:
-                    dep = last_seen[q]
-                    preds[idx].add(dep)
-                    succs[dep].add(idx)
-                last_seen[q] = idx
+        order = self.circuit.gates
+        mapping = {id(g): i for i, g in enumerate(order)}
+        preds: Dict[int, Set[int]] = {
+            mapping[id(g)]: {mapping[id(p)] for p in g.predecessors} for g in order
+        }
+        succs: Dict[int, Set[int]] = {
+            mapping[id(g)]: {mapping[id(s)] for s in g.successors} for g in order
+        }
         return preds, succs
 
     def parallel_layers(self) -> List[List[int]]:
         """Return groups of gates that can execute in parallel."""
 
         preds, succs = self._dependency_graph()
-        indegree = {i: len(p) for i, p in preds.items()}
+        indegree = {i: len(preds[i]) for i in preds}
         ready = sorted(i for i, d in indegree.items() if d == 0)
         layers: List[List[int]] = []
         while ready:

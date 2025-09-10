@@ -388,15 +388,26 @@ def _circuit_depth(gates: Iterable["Gate"]) -> int:
     without requiring a full :class:`Circuit` instance.
     """
 
-    qubit_levels: Dict[int, int] = {}
+    gate_list = list(gates)
+    if not gate_list:
+        return 0
+    gate_set = {id(g): g for g in gate_list}
+    indegree: Dict[int, int] = {
+        id(g): sum(1 for p in g.predecessors if id(p) in gate_set) for g in gate_list
+    }
+    ready = [g for g in gate_list if indegree[id(g)] == 0]
     depth = 0
-    for gate in gates:
-        start = max((qubit_levels.get(q, 0) for q in gate.qubits), default=0)
-        level = start + 1
-        for q in gate.qubits:
-            qubit_levels[q] = level
-        if level > depth:
-            depth = level
+    while ready:
+        depth += 1
+        next_ready: List[Gate] = []
+        for gate in ready:
+            for succ in gate.successors:
+                key = id(succ)
+                if key in indegree:
+                    indegree[key] -= 1
+                    if indegree[key] == 0:
+                        next_ready.append(succ)
+        ready = next_ready
     return depth
 
 

@@ -12,7 +12,7 @@ from qiskit.circuit import QuantumCircuit
 from qiskit_qasm3_import import api as qasm3_api
 
 from .ssd import SSD, SSDPartition
-from .cost import Cost
+from .cost import Cost, CostEstimator, Backend
 
 
 def _is_multiple_of_pi(angle: float) -> bool:
@@ -22,13 +22,31 @@ def _is_multiple_of_pi(angle: float) -> bool:
     return math.isclose(angle / math.pi, round(angle / math.pi), abs_tol=1e-9)
 
 
-@dataclass
+@dataclass(eq=False)
 class Gate:
-    """Simple gate description used when constructing circuits."""
+    """Simple gate description used when constructing circuits.
+
+    The structure now also carries explicit predecessor/successor links and
+    per‑gate metadata used by the planner and scheduler.
+    """
 
     gate: str
     qubits: List[int]
     params: Dict[str, Any] = field(default_factory=dict)
+    predecessors: List["Gate"] = field(default_factory=list)
+    successors: List["Gate"] = field(default_factory=list)
+    entangling: bool = False
+    compatible_methods: List[str] = field(default_factory=list)
+    resource_estimates: Dict[str, "Cost"] = field(default_factory=dict)
+
+    def __eq__(self, other: object) -> bool:  # pragma: no cover - trivial
+        if not isinstance(other, Gate):
+            return NotImplemented
+        return (
+            self.gate == other.gate
+            and self.qubits == other.qubits
+            and self.params == other.params
+        )
 
 
 class Circuit:
@@ -70,6 +88,8 @@ class Circuit:
         if self.use_classical_simplification:
             self.simplify_classical_controls()
         else:
+            self._build_dag()
+            self._annotate_gates()
             self._num_gates = len(self.gates)
             self._depth = self._compute_depth()
             self.ssd = self._create_ssd()
@@ -90,6 +110,82 @@ class Circuit:
     # ------------------------------------------------------------------
     # Classical state tracking and simplification
     # ------------------------------------------------------------------
+
+    def _build_dag(self) -> None:
+        """Populate predecessor and successor lists for all gates."""
+
+        for gate in self.gates:
+            gate.predecessors = []
+            gate.successors = []
+        last_seen: Dict[int, Gate] = {}
+        for gate in self.gates:
+            preds_dict: Dict[int, Gate] = {}
+            for q in gate.qubits:
+                if q in last_seen:
+                    preds_dict[id(last_seen[q])] = last_seen[q]
+                last_seen[q] = gate
+            preds = list(preds_dict.values())
+            gate.predecessors.extend(preds)
+            for p in preds:
+                p.successors.append(gate)
+
+    def _annotate_gates(self) -> None:
+        """Attach per-gate metadata such as entanglement and costs."""
+
+        from .planner import _supported_backends
+
+        estimator = CostEstimator()
+        for gate in self.gates:
+            gate.entangling = len(gate.qubits) > 1
+            backends = _supported_backends([gate], circuit=self, estimator=estimator)
+            gate.compatible_methods = [b.name.lower() for b in backends]
+            resources: Dict[str, Cost] = {}
+            num_qubits = (max(gate.qubits) + 1) if gate.qubits else 0
+            name = gate.gate.upper()
+            num_meas = 1 if name in {"MEASURE", "RESET"} else 0
+            num_1q = 1 if len(gate.qubits) == 1 and not num_meas else 0
+            num_2q = 1 if len(gate.qubits) > 1 else 0
+            for backend in backends:
+                if backend == Backend.STATEVECTOR:
+                    resources[backend.name.lower()] = estimator.statevector(
+                        num_qubits, num_1q, num_2q, num_meas
+                    )
+                elif backend == Backend.TABLEAU:
+                    resources[backend.name.lower()] = estimator.tableau(num_qubits, 1)
+                elif backend == Backend.MPS:
+                    resources[backend.name.lower()] = estimator.mps(
+                        num_qubits, num_1q + num_meas, num_2q, chi=4, svd=True
+                    )
+                elif backend == Backend.DECISION_DIAGRAM:
+                    resources[backend.name.lower()] = estimator.decision_diagram(
+                        num_gates=1, frontier=num_qubits
+                    )
+            gate.resource_estimates = resources
+
+    def topological(self) -> List[Gate]:
+        """Return gates in topological order (based on dependencies)."""
+
+        indegree: Dict[int, int] = {id(g): len(g.predecessors) for g in self.gates}
+        ready = [g for g in self.gates if indegree[id(g)] == 0]
+        order: List[Gate] = []
+        while ready:
+            g = ready.pop(0)
+            order.append(g)
+            for s in g.successors:
+                key = id(s)
+                indegree[key] -= 1
+                if indegree[key] == 0:
+                    ready.append(s)
+        return order
+
+    # Backward compatibility helper
+    def to_linear(self) -> List[Gate]:
+        """Return gates in topological order.
+
+        This acts as a migration helper for code assuming a linear gate list.
+        """
+
+        return self.topological()
     def update_classical_state(self, gate: Gate) -> None:
         """Update ``classical_state`` given ``gate``.
 
@@ -225,6 +321,8 @@ class Circuit:
             new_gates.append(gate)
 
         self.gates = new_gates
+        self._build_dag()
+        self._annotate_gates()
         self._num_gates = len(new_gates)
         self._depth = self._compute_depth()
         self.ssd = self._create_ssd()
@@ -341,16 +439,20 @@ class Circuit:
         return max_q - min_q + 1
 
     def _compute_depth(self) -> int:
-        """Compute the circuit depth in a single pass over gates."""
-        qubit_levels: Dict[int, int] = {}
+        """Compute the circuit depth using the dependency DAG."""
+        indegree: Dict[int, int] = {id(g): len(g.predecessors) for g in self.gates}
+        ready = [g for g in self.gates if indegree[id(g)] == 0]
         depth = 0
-        for gate in self.gates:
-            start = max((qubit_levels.get(q, 0) for q in gate.qubits), default=0)
-            level = start + 1
-            for q in gate.qubits:
-                qubit_levels[q] = level
-            if level > depth:
-                depth = level
+        while ready:
+            depth += 1
+            next_ready: List[Gate] = []
+            for gate in ready:
+                for succ in gate.successors:
+                    key = id(succ)
+                    indegree[key] -= 1
+                    if indegree[key] == 0:
+                        next_ready.append(succ)
+            ready = next_ready
         return depth
 
     def _create_ssd(self) -> SSD:
