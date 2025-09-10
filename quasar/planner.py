@@ -411,11 +411,12 @@ def _simulation_cost(
     if backend == Backend.TABLEAU:
         return estimator.tableau(num_qubits, num_gates)
     if backend == Backend.MPS:
+        chi = getattr(estimator, "chi_max", None) or 4
         return estimator.mps(
             num_qubits,
             num_1q_gates + num_meas,
             num_2q_gates,
-            chi=4,
+            chi=chi,
             svd=True,
         )
     if backend == Backend.DECISION_DIAGRAM:
@@ -957,6 +958,9 @@ class Planner:
         use_cache: bool = True,
         max_memory: float | None = None,
         backend: Backend | None = None,
+        target_accuracy: float | None = None,
+        max_time: float | None = None,
+        optimization_level: int | None = None,
     ) -> PlanResult:
         """Compute the optimal contiguous partition plan using optional
         coarse and refinement passes.
@@ -967,6 +971,24 @@ class Planner:
         ``backend`` is supplied the entire circuit is executed on that
         backend, provided it can simulate the gates (only the Tableau backend
         is restricted to Clifford circuits).
+
+        Parameters
+        ----------
+        circuit:
+            Circuit to plan.
+        use_cache:
+            Enable cache lookup for repeated gate sequences.
+        max_memory:
+            Optional memory ceiling in bytes.
+        backend:
+            Optional backend hint forcing execution on a single simulator.
+        target_accuracy:
+            Desired lower bound on simulation fidelity.
+        max_time:
+            Maximum allowed execution time in seconds according to the cost
+            model.
+        optimization_level:
+            Heuristic tuning knob influencing cost comparisons.
         """
 
         gates = circuit.simplify_classical_controls()
@@ -996,11 +1018,17 @@ class Planner:
         num_2q = num_gates - num_1q - num_meas
 
         if self.estimator is not None:
-            fidelity = config.DEFAULT.mps_target_fidelity
+            fidelity = (
+                target_accuracy
+                if target_accuracy is not None
+                else config.DEFAULT.mps_target_fidelity
+            )
             chi_cap = self.estimator.chi_for_constraints(
                 num_qubits, gates, fidelity, threshold
             )
             self.estimator.chi_max = chi_cap if chi_cap > 0 else None
+
+        perf_prio = "time" if optimization_level and optimization_level > 1 else self.perf_prio
 
         if backend is not None:
             # Allow explicitly requested backends as long as they can simulate the
@@ -1014,6 +1042,8 @@ class Planner:
             )
             if threshold is not None and cost.memory > threshold:
                 raise ValueError("Requested backend exceeds memory threshold")
+            if max_time is not None and cost.time > max_time:
+                raise ValueError("Requested backend exceeds time threshold")
             part = Partitioner()
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
@@ -1051,7 +1081,10 @@ class Planner:
             t is not None
             for t in (self.quick_max_qubits, self.quick_max_gates, self.quick_max_depth)
         ):
-            if threshold is None or single_cost.memory <= threshold:
+            if (
+                (threshold is None or single_cost.memory <= threshold)
+                and (max_time is None or single_cost.time <= max_time)
+            ):
                 part = Partitioner()
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
@@ -1090,9 +1123,9 @@ class Planner:
             else Cost(float("inf"), float("inf"))
         )
         overhead = Cost(time=len(gates) * 1e-6, memory=0.0)
-        if _better(single_cost, _add_cost(pre_cost, overhead), self.perf_prio) and (
+        if _better(single_cost, _add_cost(pre_cost, overhead), perf_prio) and (
             threshold is None or single_cost.memory <= threshold
-        ):
+        ) and (max_time is None or single_cost.time <= max_time):
             part = Partitioner()
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
@@ -1131,9 +1164,9 @@ class Planner:
             else Cost(float("inf"), float("inf"))
         )
 
-        if _better(single_cost, dp_cost, self.perf_prio) and (
+        if _better(single_cost, dp_cost, perf_prio) and (
             threshold is None or single_cost.memory <= threshold
-        ):
+        ) and (max_time is None or single_cost.time <= max_time):
             part = Partitioner()
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
@@ -1157,6 +1190,8 @@ class Planner:
 
         # If no batching was requested we are done.
         if self.batch_size == 1:
+            if max_time is not None and dp_cost.time > max_time:
+                raise ValueError("Estimated plan runtime exceeds max_time")
             steps = list(coarse.steps)
             conversions = self._conversions_for_steps(gates, steps)
             circuit.ssd.conversions = list(conversions)
@@ -1169,6 +1204,7 @@ class Planner:
         # Refine each coarse segment individually.
         refined_steps: List[PlanStep] = []
         prev_backend: Optional[Backend] = None
+        total_cost = Cost(time=0.0, memory=0.0)
         for step in coarse.steps:
             segment = gates[step.start : step.end]
             sub = self._dp(
@@ -1192,6 +1228,25 @@ class Planner:
                     )
                 )
             prev_backend = step.backend
+            for sub_step in sub.steps:
+                seg = gates[sub_step.start + step.start : sub_step.end + step.start]
+                n = len({q for g in seg for q in g.qubits})
+                m = len(seg)
+                meas = sum(
+                    1 for g in seg if g.gate.upper() in {"MEASURE", "RESET"}
+                )
+                one = sum(
+                    1
+                    for g in seg
+                    if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+                )
+                two = m - one - meas
+                total_cost = _add_cost(
+                    total_cost,
+                    _simulation_cost(
+                        self.estimator, sub_step.backend, n, one, two, meas
+                    ),
+                )
 
         final_backend = refined_steps[-1].backend if refined_steps else None
         conversions = self._conversions_for_steps(gates, refined_steps)
@@ -1205,6 +1260,10 @@ class Planner:
         )
         if use_cache:
             self.cache_insert(gates, result)
+        if max_time is not None:
+            total = total_cost if refined_steps else dp_cost
+            if total.time > max_time:
+                raise ValueError("Estimated plan runtime exceeds max_time")
         return result
 
 

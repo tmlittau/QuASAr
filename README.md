@@ -54,6 +54,12 @@ simulators and default to the specialised TABLEAU backend, though a
 general-purpose backend like ``Backend.STATEVECTOR`` can be requested
 explicitly.
 
+The simulation API also accepts optional ``target_accuracy``, ``max_time`` and
+``optimization_level`` parameters.  ``target_accuracy`` specifies the minimum
+fidelity the planner should maintain, ``max_time`` bounds the estimated runtime
+and causes planning to abort when exceeded, while ``optimization_level``
+controls how aggressively the planner and scheduler pursue runtime optimisations.
+
 ```python
 from quasar import Backend, Circuit, SimulationEngine
 
