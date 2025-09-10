@@ -121,8 +121,9 @@ Coefficients can be customised in two ways:
    ```
 
 Existing estimators also expose
-``est.update_coefficients({"sv_gate_1q": 0.9})`` for fine-grained
-adjustments at runtime.
+``est.update_coefficients({"sv_gate_1q": 0.9}, decay=0.2)`` for fine-grained
+adjustments at runtime.  The ``decay`` parameter applies an exponential moving
+average and defaults to the value of ``QUASAR_COEFF_EMA_DECAY``.
 
 ## References
 

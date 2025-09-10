@@ -71,6 +71,7 @@ class Scheduler:
     )
     backend_selection_log: str | None = config.DEFAULT.backend_selection_log
     verbose_selection: bool = config.DEFAULT.verbose_selection
+    coeff_ema_decay: float = config.DEFAULT.coeff_ema_decay
     # Fractional tolerance before triggering a replan due to cost mismatch
     replan_tolerance: float = 0.05
     ssd_cache: SSDCache = field(default_factory=SSDCache)
@@ -673,7 +674,7 @@ class Scheduler:
                             / est_cost.memory
                         )
                     if updates:
-                        est.update_coefficients(updates)
+                        est.update_coefficients(updates, decay=self.coeff_ema_decay)
                 if monitor:
                     monitor(step, observed, est_cost)
                 tracemalloc.reset_peak()
@@ -824,7 +825,7 @@ class Scheduler:
                             mem_ratio = max(0.1, min(mem_ratio, 10.0))
                             updates[mem_key] = est.coeff[mem_key] * mem_ratio
                         if updates:
-                            est.update_coefficients(updates)
+                            est.update_coefficients(updates, decay=self.coeff_ema_decay)
 
                     if monitor:
                         monitor(step, observed, est_cost)
@@ -1152,7 +1153,7 @@ class Scheduler:
                             est.coeff[mem_key] * observed.memory / est_cost.memory
                         )
                     if updates:
-                        est.update_coefficients(updates)
+                        est.update_coefficients(updates, decay=self.coeff_ema_decay)
 
                 if monitor:
                     monitor(step, observed, est_cost)
