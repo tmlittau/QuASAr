@@ -1,5 +1,5 @@
 from quasar import Circuit, Scheduler
-from quasar.planner import PlanStep, Planner
+from quasar.planner import PlanStep, Planner, PlanResult
 from quasar_convert import ConversionEngine
 from quasar.cost import Backend, Cost, CostEstimator
 from quasar import SSD
@@ -436,6 +436,51 @@ def test_scheduler_auto_reoptimises_on_cost_mismatch():
     plan = scheduler.prepare_run(circuit)
     scheduler.run(circuit, plan)
     assert planner.calls == 1
+
+
+class TableauTrackingEngine(ConversionEngine):
+    def __init__(self):
+        super().__init__()
+        self.tableau_calls = 0
+
+    def try_build_tableau(self, state):  # type: ignore[override]
+        self.tableau_calls += 1
+        return super().try_build_tableau(state)
+
+
+def test_scheduler_builds_tableau_from_statevector():
+    circuit = Circuit(
+        [
+            {"gate": "H", "qubits": [0]},
+            {"gate": "H", "qubits": [1]},
+            {"gate": "CX", "qubits": [0, 1]},
+        ]
+    )
+    engine = TableauTrackingEngine()
+    scheduler = Scheduler(
+        planner=Planner(),
+        conversion_engine=engine,
+        backends={
+            Backend.STATEVECTOR: StatevectorBackend(),
+            Backend.TABLEAU: StimBackend(),
+        },
+    )
+    steps = [
+        PlanStep(0, 2, Backend.STATEVECTOR, parallel=((0,), (1,))),
+        PlanStep(2, 3, Backend.TABLEAU),
+    ]
+    state = [0.5 + 0j, 0.5 + 0j, 0.5 + 0j, 0.5 + 0j]
+    plan = PlanResult(
+        table=[],
+        final_backend=Backend.TABLEAU,
+        gates=circuit.gates,
+        explicit_steps=steps,
+        explicit_conversions=[],
+        step_costs=[Cost(0.0, 0.0), Cost(0.0, 0.0)],
+        replay_ssd={1: state},
+    )
+    scheduler.run(circuit, plan)
+    assert engine.tableau_calls == 1
 
 
 def test_monitor_can_force_replan():

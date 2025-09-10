@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
+from quasar_convert import ConversionEngine
 from .partitioner import CLIFFORD_GATES, Partitioner
 from .ssd import ConversionLayer, SSD
 from . import config
@@ -460,6 +461,7 @@ class Planner:
         conversion_cost_multiplier: float = 1.0,
         perf_prio: str = "memory",
         selector: MethodSelector | None = None,
+        conversion_engine: ConversionEngine | None = None,
     ):
         """Create a new planner instance.
 
@@ -496,6 +498,9 @@ class Planner:
             Performance priority used when comparing candidate costs.  Set to
             ``"time"`` to favour runtime over memory or ``"memory"`` to
             prioritise lower memory consumption.  Defaults to ``"memory"``.
+        conversion_engine:
+            Optional conversion engine supplying refined cost estimates for
+            backend switches.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -513,6 +518,7 @@ class Planner:
         )
         self.conversion_cost_multiplier = conversion_cost_multiplier
         self.perf_prio = perf_prio
+        self.conversion_engine = conversion_engine
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -711,10 +717,20 @@ class Planner:
                                     rank=rank,
                                     frontier=frontier,
                                 )
+                                est_time = conv_est.cost.time
+                                est_mem = conv_est.cost.memory
+                                if self.conversion_engine is not None:
+                                    try:
+                                        ce_time, ce_mem = self.conversion_engine.estimate_cost(
+                                            len(boundary), backend
+                                        )
+                                        est_time = max(est_time, ce_time)
+                                        est_mem = max(est_mem, ce_mem)
+                                    except Exception:
+                                        pass
                                 conv_cost = Cost(
-                                    time=conv_est.cost.time
-                                    * self.conversion_cost_multiplier,
-                                    memory=conv_est.cost.memory,
+                                    time=est_time * self.conversion_cost_multiplier,
+                                    memory=est_mem,
                                 )
                                 if (
                                     max_memory is not None
