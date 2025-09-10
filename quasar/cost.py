@@ -179,6 +179,11 @@ class CostEstimator:
             "ingest_dd_mem": 0.0,
             # Fixed overhead applied to every backend switch -----------------
             "conversion_base": 5.0,
+            # Parallel execution overhead ---------------------------------
+            # Fixed penalties applied when running multiple independent
+            # groups concurrently.
+            "parallel_time_overhead": 0.0,
+            "parallel_memory_overhead": 0.0,
         }
         if coeff:
             self.coeff.update(coeff)
@@ -299,6 +304,23 @@ class CostEstimator:
             if chi_mem < chi:
                 return 0
         return chi if chi >= 1 else 0
+
+    # ------------------------------------------------------------------
+    # Parallel execution helpers
+    # ------------------------------------------------------------------
+    def parallel_time_overhead(self, groups: int) -> float:
+        """Return runtime overhead for executing ``groups`` in parallel."""
+
+        if groups <= 1:
+            return 0.0
+        return self.coeff.get("parallel_time_overhead", 0.0) * (groups - 1)
+
+    def parallel_memory_overhead(self, groups: int) -> float:
+        """Return additional memory required for ``groups`` run in parallel."""
+
+        if groups <= 1:
+            return 0.0
+        return self.coeff.get("parallel_memory_overhead", 0.0) * (groups - 1)
 
     def statevector(
         self,
