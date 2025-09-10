@@ -198,9 +198,26 @@ class CostEstimator:
         self.chi_max = chi_max
 
     # ------------------------------------------------------------------
-    def update_coefficients(self, updates: Dict[str, float]) -> None:
-        """Update calibration coefficients in-place."""
-        self.coeff.update(updates)
+    def update_coefficients(
+        self, updates: Dict[str, float], *, decay: float = 0.0
+    ) -> None:
+        """Update calibration coefficients using an exponential moving average.
+
+        Parameters
+        ----------
+        updates:
+            Mapping from coefficient names to newly observed values.
+        decay:
+            Exponential decay factor in ``[0.0, 1.0]`` controlling how strongly
+            previous estimates influence the updated value.  A ``decay`` of
+            ``0.0`` replaces the coefficient outright while values close to
+            ``1.0`` favour the existing estimate.
+        """
+
+        decay = min(max(decay, 0.0), 1.0)
+        for key, value in updates.items():
+            old = self.coeff.get(key, value)
+            self.coeff[key] = old * decay + value * (1.0 - decay)
 
     def to_file(self, path: str | Path) -> None:
         """Persist coefficients to a JSON file."""

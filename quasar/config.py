@@ -119,6 +119,7 @@ class Config:
     )
     backend_selection_log: str | None = os.getenv("QUASAR_BACKEND_SELECTION_LOG")
     verbose_selection: bool = _bool_from_env("QUASAR_VERBOSE_SELECTION", False)
+    coeff_ema_decay: float = _float_from_env("QUASAR_COEFF_EMA_DECAY", 0.5)
 
 
 # Global configuration instance used when modules import ``quasar.config``.

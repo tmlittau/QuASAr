@@ -14,3 +14,11 @@ def test_cost_estimator_loads_latest_calibration():
     finally:
         if path.exists():
             path.unlink()
+
+
+def test_update_coefficients_uses_ema():
+    est = CostEstimator(coeff={"sv_gate_1q": 1.0})
+    est.update_coefficients({"sv_gate_1q": 3.0}, decay=0.5)
+    assert est.coeff["sv_gate_1q"] == 2.0
+    est.update_coefficients({"sv_gate_1q": 3.0}, decay=0.5)
+    assert est.coeff["sv_gate_1q"] == 2.5
