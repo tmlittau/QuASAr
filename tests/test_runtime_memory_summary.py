@@ -1,7 +1,9 @@
 """Validate runtime and peak memory measurements.
 
-The test executes small circuits with QuASAr and baseline simulators
-and compares runtime and peak memory usage against reference values.
+The test executes small circuits with QuASAr and baseline simulators and
+asserts that the statevector backend uses significantly more runtime and
+memory than the others. This avoids brittle absolute baselines that vary
+across hardware.
 """
 
 from __future__ import annotations
@@ -17,20 +19,6 @@ from quasar.circuit import Circuit
 from quasar.simulation_engine import SimulationEngine
 from quasar.backends import AerStatevectorBackend, StimBackend
 from quasar.analyzer import CircuitAnalyzer
-
-
-BASELINES: Dict[str, Dict[str, Tuple[float, float]]] = {
-    "ghz3": {
-        "quasar": (5.2176999815856107e-05, 2536.0),
-        "statevector": (0.007553487999757635, 84063.0),
-        "stim": (7.521899897255935e-05, 1208.0),
-    },
-    "clifford_ec": {
-        "quasar": (7.368299884547014e-05, 2792.0),
-        "statevector": (0.002430655000352999, 17418.0),
-        "stim": (7.140500019886531e-05, 1104.0),
-    },
-}
 
 
 def measure_runtime_memory(circuit: Circuit) -> Dict[str, Tuple[float, float]]:
@@ -78,7 +66,13 @@ def circuits() -> Dict[str, Circuit]:
 @pytest.mark.parametrize("name,circuit", circuits().items())
 def test_runtime_memory_summary(name: str, circuit: Circuit) -> None:
     metrics = measure_runtime_memory(circuit)
+    sv_runtime, sv_memory = metrics["statevector"]
+    assert sv_runtime > 0 and sv_memory > 0
     for backend, (runtime, memory) in metrics.items():
-        expected_runtime, expected_memory = BASELINES[name][backend]
-        assert runtime == pytest.approx(expected_runtime, rel=1.0, abs=1e-3)
-        assert memory == pytest.approx(expected_memory, rel=0.5, abs=1024)
+        assert runtime > 0 and memory > 0
+        if backend == "statevector":
+            continue
+        # The dense statevector backend should be noticeably heavier than
+        # stabilizer or hybrid approaches.
+        assert sv_runtime > runtime * 2
+        assert sv_memory > memory * 2
