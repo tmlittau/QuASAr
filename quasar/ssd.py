@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Hashable, Callable
 
 from .cost import Backend, Cost
 
@@ -29,6 +29,21 @@ class SSDPartition:
     entangled_with: Tuple[int, ...] = ()
     compatible_methods: Tuple[Backend, ...] = ()
     resources: Dict[str, float] = field(default_factory=dict)
+    boundary_qubits: Tuple[int, ...] = ()
+    rank: int | None = None
+    frontier: int | None = None
+    fingerprint: Hashable | None = None
+
+    def __post_init__(self) -> None:  # pragma: no cover - trivial
+        if self.fingerprint is None:
+            self.fingerprint = (
+                self.subsystems,
+                self.history,
+                self.backend.value,
+                self.boundary_qubits,
+                self.rank,
+                self.frontier,
+            )
 
     @property
     def multiplicity(self) -> int:
@@ -47,6 +62,14 @@ class SSD:
 
     partitions: List[SSDPartition]
     conversions: List["ConversionLayer"] = field(default_factory=list)
+    boundary_qubits: Tuple[int, ...] = ()
+    rank: int | None = None
+    frontier: int | None = None
+    fingerprint: Hashable | None = None
+
+    def __post_init__(self) -> None:  # pragma: no cover - trivial
+        if self.fingerprint is None:
+            self.fingerprint = tuple(p.fingerprint for p in self.partitions)
 
     def total_qubits(self) -> int:
         return sum(len(p.qubits) for p in self.partitions)
@@ -153,5 +176,39 @@ class ConversionLayer:
     cost: Cost
 
 
-__all__ = ["SSDPartition", "SSD", "ConversionLayer"]
+@dataclass
+class SSDCache:
+    """Cache for conversion and bridge results keyed by SSD fingerprints."""
+
+    bridge_tensors: Dict[tuple, object] = field(default_factory=dict)
+    conversions: Dict[tuple, object] = field(default_factory=dict)
+    hits: int = 0
+
+    def _fingerprint(self, ssd: object) -> Hashable:
+        fp = getattr(ssd, "fingerprint", None)
+        if fp is None:
+            b = tuple(getattr(ssd, "boundary_qubits", []) or [])
+            r = getattr(ssd, "rank", None)
+            f = getattr(ssd, "frontier", None)
+            fp = (b, r, f)
+        return fp
+
+    def bridge_tensor(self, left: object, right: object, builder: Callable[[], object]) -> object:
+        key = (self._fingerprint(left), self._fingerprint(right))
+        if key in self.bridge_tensors:
+            self.hits += 1
+            return self.bridge_tensors[key]
+        self.bridge_tensors[key] = builder()
+        return self.bridge_tensors[key]
+
+    def convert(self, ssd: object, target: str, converter: Callable[[], object]) -> object:
+        key = (self._fingerprint(ssd), target)
+        if key in self.conversions:
+            self.hits += 1
+            return self.conversions[key]
+        self.conversions[key] = converter()
+        return self.conversions[key]
+
+
+__all__ = ["SSDPartition", "SSD", "ConversionLayer", "SSDCache"]
 
