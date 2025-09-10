@@ -14,9 +14,10 @@ several high level metrics:
 
 from dataclasses import dataclass
 from collections import Counter, defaultdict, deque
+import math
 from typing import Dict, Optional, Set, List, Tuple
 
-from .circuit import Circuit
+from .circuit import Circuit, _is_multiple_of_pi
 from .cost import Backend, Cost, CostEstimator
 
 
@@ -29,6 +30,10 @@ class AnalysisResult:
     resources: Dict[Backend, Cost]
     parallel_layers: List[List[int]]
     critical_path_length: int
+    rotation_angles: Dict[str, int]
+    graph_metrics: Dict[str, float]
+    clifford_counts: Dict[str, int]
+    gate_depths: Dict[str, int]
 
 
 class CircuitAnalyzer:
@@ -109,6 +114,94 @@ class CircuitAnalyzer:
             "max_connected_size": float(max_size),
             "avg_connected_size": float(avg_size),
         }
+
+    # ------------------------------------------------------------------
+    def graph_metrics(self) -> Dict[str, float]:
+        """Return graph-theoretic metrics for the interaction graph."""
+
+        graph = self._entanglement_graph()
+        clustering: Dict[int, float] = {}
+        for node, neighbors in graph.items():
+            if len(neighbors) < 2:
+                clustering[node] = 0.0
+                continue
+            links = 0
+            neigh = list(neighbors)
+            for i in range(len(neigh)):
+                for j in range(i + 1, len(neigh)):
+                    if neigh[j] in graph.get(neigh[i], set()):
+                        links += 1
+            possible = len(neigh) * (len(neigh) - 1) / 2
+            clustering[node] = links / possible if possible else 0.0
+        avg_clustering = sum(clustering.values()) / len(clustering) if clustering else 0.0
+        return {"avg_clustering_coefficient": float(avg_clustering)}
+
+    # ------------------------------------------------------------------
+    def rotation_angle_stats(self) -> Dict[str, int]:
+        """Collect statistics about rotation gate angles."""
+
+        stats: Dict[str, int] = {
+            "multiple_of_pi": 0,
+            "non_multiple_of_pi": 0,
+        }
+        angles: Counter[float] = Counter()
+        for gate in self.circuit.gates:
+            if not gate.params:
+                continue
+            angle = float(next(iter(gate.params.values())))
+            angles[angle] += 1
+            if _is_multiple_of_pi(angle):
+                stats["multiple_of_pi"] += 1
+            else:
+                stats["non_multiple_of_pi"] += 1
+        stats.update({f"angle_{a}": c for a, c in angles.items()})
+        return stats
+
+    # ------------------------------------------------------------------
+    def clifford_counts(self) -> Dict[str, int]:
+        """Count Clifford versus non-Clifford gates."""
+
+        clifford_gate_names = {
+            "H",
+            "X",
+            "Y",
+            "Z",
+            "S",
+            "SDG",
+            "CX",
+            "CY",
+            "CZ",
+            "SWAP",
+        }
+        counts = {"clifford": 0, "non_clifford": 0}
+        for g in self.circuit.gates:
+            name = g.gate.upper()
+            is_clifford = False
+            if name in clifford_gate_names:
+                is_clifford = True
+            elif name in {"RX", "RY", "RZ", "P"} and g.params:
+                angle = float(next(iter(g.params.values())))
+                is_clifford = math.isclose(
+                    angle / (math.pi / 2), round(angle / (math.pi / 2)), abs_tol=1e-9
+                )
+            if is_clifford:
+                counts["clifford"] += 1
+            else:
+                counts["non_clifford"] += 1
+        return counts
+
+    # ------------------------------------------------------------------
+    def gate_depths(self, layers: Optional[List[List[int]]] = None) -> Dict[str, int]:
+        """Return per-gate-type depth based on parallel layers."""
+
+        if layers is None:
+            layers = self.parallel_layers()
+        depth: Dict[str, int] = defaultdict(int)
+        for idx, layer in enumerate(layers, start=1):
+            for gate_idx in layer:
+                name = self.circuit.gates[gate_idx].gate
+                depth[name] = max(depth[name], idx)
+        return dict(depth)
 
     # ------------------------------------------------------------------
     def _dependency_graph(self) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
@@ -202,4 +295,8 @@ class CircuitAnalyzer:
             resources=self.resource_estimates(),
             parallel_layers=layers,
             critical_path_length=len(layers),
+            rotation_angles=self.rotation_angle_stats(),
+            graph_metrics=self.graph_metrics(),
+            clifford_counts=self.clifford_counts(),
+            gate_depths=self.gate_depths(layers),
         )

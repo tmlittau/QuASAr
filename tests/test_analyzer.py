@@ -1,3 +1,4 @@
+import math
 import pytest
 
 from quasar import Circuit, CircuitAnalyzer, Backend, Cost
@@ -59,3 +60,38 @@ def test_temporal_metrics():
     analysis = CircuitAnalyzer(circ).analyze()
     assert analysis.parallel_layers == [[0, 1], [2]]
     assert analysis.critical_path_length == 2
+
+
+def test_rotation_and_clifford_metrics():
+    gates = [
+        {"gate": "H", "qubits": [0]},
+        {"gate": "T", "qubits": [1]},
+        {"gate": "RZ", "qubits": [0], "params": {"theta": math.pi}},
+        {"gate": "RZ", "qubits": [1], "params": {"theta": math.pi / 4}},
+        {"gate": "CX", "qubits": [0, 1]},
+    ]
+    circ = Circuit.from_dict(gates, use_classical_simplification=False)
+    analysis = CircuitAnalyzer(circ).analyze()
+    rot = analysis.rotation_angles
+    assert rot["multiple_of_pi"] == 1
+    assert rot["non_multiple_of_pi"] == 1
+    assert rot["angle_3.141592653589793"] == 1
+    cl = analysis.clifford_counts
+    assert cl == {"clifford": 3, "non_clifford": 2}
+    depths = analysis.gate_depths
+    assert depths["H"] == 1
+    assert depths["T"] == 1
+    assert depths["RZ"] == 2
+    assert depths["CX"] == 3
+
+
+def test_graph_clustering_metric():
+    gates = [
+        {"gate": "CX", "qubits": [0, 1]},
+        {"gate": "CX", "qubits": [1, 2]},
+        {"gate": "CX", "qubits": [0, 2]},
+    ]
+    circ = Circuit.from_dict(gates, use_classical_simplification=False)
+    analysis = CircuitAnalyzer(circ)
+    metrics = analysis.graph_metrics()
+    assert metrics["avg_clustering_coefficient"] == 1.0
