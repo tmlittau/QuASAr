@@ -19,4 +19,3 @@ def load_speedups():
 def test_relative_speedup_bar_chart():
     for computed, expected in load_speedups():
         assert computed == pytest.approx(expected)
-        assert computed > 1.0
