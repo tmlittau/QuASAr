@@ -1,0 +1,150 @@
+[
+  {
+    "circuit": "GHZ_6",
+    "alpha": 0.5,
+    "steps": [
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU"
+    ]
+  },
+  {
+    "circuit": "GHZ_6",
+    "alpha": 1,
+    "steps": [
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU"
+    ]
+  },
+  {
+    "circuit": "GHZ_6",
+    "alpha": 2,
+    "steps": [
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU"
+    ]
+  },
+  {
+    "circuit": "GHZ_6",
+    "alpha": 5,
+    "steps": [
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU",
+      "TABLEAU"
+    ]
+  },
+  {
+    "circuit": "Grover_3",
+    "alpha": 0.5,
+    "steps": [
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR"
+    ]
+  },
+  {
+    "circuit": "Grover_3",
+    "alpha": 1,
+    "steps": [
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR"
+    ]
+  },
+  {
+    "circuit": "Grover_3",
+    "alpha": 2,
+    "steps": [
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR"
+    ]
+  },
+  {
+    "circuit": "Grover_3",
+    "alpha": 5,
+    "steps": [
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR",
+      "STATEVECTOR"
+    ]
+  }
+]

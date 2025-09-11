@@ -1,0 +1,4 @@
+{
+  "alphas": [0.5, 1, 2, 5],
+  "circuits": ["GHZ_6", "Grover_3"]
+}
