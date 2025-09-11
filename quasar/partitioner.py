@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple, TYPE_CHECKING, Set
 
 from .ssd import SSD, SSDPartition, ConversionLayer
 from .cost import Backend, CostEstimator, Cost
-from .method_selector import MethodSelector
+from .method_selector import MethodSelector, NoFeasibleBackendError
 
 if TYPE_CHECKING:  # pragma: no cover
     from .circuit import Circuit, Gate
@@ -57,6 +57,12 @@ class Partitioner:
             graph-based heuristic that balances load and minimises conversion
             boundaries.  The default ``False`` uses the original sequential
             heuristic.
+
+        Raises
+        ------
+        NoFeasibleBackendError
+            If no simulation backend satisfies the resource constraints for a
+            fragment.
         """
 
         if not circuit.gates:

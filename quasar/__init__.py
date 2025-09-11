@@ -4,7 +4,7 @@ from .circuit import Gate, Circuit
 from .cost import Backend, Cost, ConversionEstimate, CostEstimator
 from .partitioner import Partitioner
 from .planner import Planner, PlanResult, PlanStep, DPEntry
-from .method_selector import MethodSelector
+from .method_selector import MethodSelector, NoFeasibleBackendError
 from .scheduler import Scheduler
 from .simulation_engine import SimulationEngine, SimulationResult
 from .ssd import SSD, SSDPartition, ConversionLayer
@@ -35,6 +35,7 @@ __all__ = [
     "CostEstimator",
     "Partitioner",
     "MethodSelector",
+    "NoFeasibleBackendError",
     "Planner",
     "PlanResult",
     "PlanStep",

@@ -19,7 +19,7 @@ from .partitioner import CLIFFORD_GATES, Partitioner
 from .ssd import ConversionLayer, SSD
 from . import config
 from .analyzer import AnalysisResult
-from .method_selector import MethodSelector
+from .method_selector import MethodSelector, NoFeasibleBackendError
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -1005,7 +1005,13 @@ class Planner:
         target_accuracy: float | None = None,
         max_time: float | None = None,
     ) -> Tuple[Backend, Cost]:
-        """Return best single-backend estimate for the full gate list."""
+        """Return best single-backend estimate for the full gate list.
+
+        Raises
+        ------
+        NoFeasibleBackendError
+            If no backend satisfies the provided resource constraints.
+        """
 
         qubits = {q for g in gates for q in g.qubits}
         num_qubits = len(qubits)
@@ -1063,6 +1069,12 @@ class Planner:
             selection.
         optimization_level:
             Heuristic tuning knob influencing cost comparisons.
+
+        Raises
+        ------
+        NoFeasibleBackendError
+            If no backend satisfies the resource constraints implied by the
+            provided limits.
         """
 
         gates = circuit.simplify_classical_controls()
