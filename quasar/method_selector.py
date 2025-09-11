@@ -27,6 +27,10 @@ CLIFFORD_GATES = {
 }
 
 
+class NoFeasibleBackendError(RuntimeError):
+    """Raised when no backend satisfies the provided constraints."""
+
+
 class MethodSelector:
     """Select simulation backends for circuit fragments.
 
@@ -69,6 +73,11 @@ class MethodSelector:
             Upper bound on allowed runtime in seconds.
         target_accuracy:
             Desired lower bound on simulation fidelity.
+
+        Raises
+        ------
+        NoFeasibleBackendError
+            If no backend satisfies the resource constraints.
         """
 
         names = [g.gate.upper() for g in gates]
@@ -171,7 +180,11 @@ class MethodSelector:
             candidates[Backend.STATEVECTOR] = sv_cost
 
         if not candidates:
-            candidates[Backend.STATEVECTOR] = sv_cost
+            raise NoFeasibleBackendError(
+                "No simulation backend satisfies the given constraints"
+            )
 
-        backend = min(candidates, key=lambda b: (candidates[b].memory, candidates[b].time))
+        backend = min(
+            candidates, key=lambda b: (candidates[b].memory, candidates[b].time)
+        )
         return backend, candidates[backend]
