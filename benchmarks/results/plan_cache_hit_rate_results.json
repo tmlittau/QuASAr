@@ -1,0 +1,27 @@
+[
+  {
+    "run": 1,
+    "cache_hits": 0,
+    "hit_rate": 0.0
+  },
+  {
+    "run": 2,
+    "cache_hits": 1,
+    "hit_rate": 0.5
+  },
+  {
+    "run": 3,
+    "cache_hits": 2,
+    "hit_rate": 0.6666666666666666
+  },
+  {
+    "run": 4,
+    "cache_hits": 3,
+    "hit_rate": 0.75
+  },
+  {
+    "run": 5,
+    "cache_hits": 4,
+    "hit_rate": 0.8
+  }
+]
