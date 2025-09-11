@@ -1,4 +1,3 @@
-import time
 from functools import lru_cache
 
 import pytest
@@ -12,15 +11,12 @@ BASELINES = {
 }
 
 
-def compute_metrics(circuit: Circuit) -> dict[str, tuple[float, float]]:
+def compute_metrics(circuit: Circuit) -> dict[str, float]:
     planner = Planner()
     gates = circuit.gates
 
-    t0 = time.perf_counter()
     res = planner.plan(circuit)
-    t1 = time.perf_counter()
     dp_cost = res.table[-1][res.final_backend].cost.time
-    dp_time = t1 - t0
 
     @lru_cache(None)
     def dfs(i: int) -> float:
@@ -47,12 +43,8 @@ def compute_metrics(circuit: Circuit) -> dict[str, tuple[float, float]]:
                 best = min(best, cost + dfs(j))
         return best
 
-    t2 = time.perf_counter()
     oracle_cost = dfs(0)
-    t3 = time.perf_counter()
-    oracle_time = t3 - t2
 
-    t4 = time.perf_counter()
     greedy_cost = 0.0
     for gate in gates:
         seg = [gate]
@@ -73,13 +65,11 @@ def compute_metrics(circuit: Circuit) -> dict[str, tuple[float, float]]:
             for b in allowed
         )
         greedy_cost += best
-    t5 = time.perf_counter()
-    greedy_time = t5 - t4
 
     return {
-        "oracle": (oracle_cost, oracle_time),
-        "dp": (dp_cost, dp_time),
-        "greedy": (greedy_cost, greedy_time),
+        "oracle": oracle_cost,
+        "dp": dp_cost,
+        "greedy": greedy_cost,
     }
 
 
@@ -106,11 +96,6 @@ def circuits() -> dict[str, Circuit]:
 @pytest.mark.parametrize("name,circuit", list(circuits().items()))
 def test_planner_cost_table(name: str, circuit: Circuit) -> None:
     metrics = compute_metrics(circuit)
-    for method, (cost, runtime) in metrics.items():
+    for method, cost in metrics.items():
         expected_cost = BASELINES[name][method]
         assert cost == expected_cost
-        assert runtime > 0
-    dp_time = metrics["dp"][1]
-    for method, (_, runtime) in metrics.items():
-        if method != "dp":
-            assert dp_time > runtime

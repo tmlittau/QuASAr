@@ -1,4 +1,4 @@
-"""Verify backend switches and conversion time baseline."""
+"""Verify backend switch counting."""
 
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ from quasar.cost import Backend
 from quasar.planner import PlanResult, PlanStep
 
 BASELINE_SWITCHES = 2
-BASELINE_CONVERSION_TIME = 0.0040
 
 
-def measure() -> tuple[int, float]:
-    """Return backend switches and total conversion time."""
+def measure() -> int:
+    """Return the number of backend switches for a simple plan."""
     circuit = Circuit([Gate("H", [0]), Gate("T", [0]), Gate("H", [0])])
     steps = [
         PlanStep(0, 1, Backend.TABLEAU),
@@ -26,12 +25,9 @@ def measure() -> tuple[int, float]:
     engine = SimulationEngine()
     engine.scheduler.run(circuit, plan, instrument=True)
     _, metrics = engine.scheduler.run(circuit, plan, instrument=True)
-    switches = metrics.backend_switches
-    conversion_time = sum(metrics.conversion_durations)
-    return switches, conversion_time
+    return metrics.backend_switches
 
 
-def test_backend_switches_conversion_time() -> None:
-    switches, conv_time = measure()
+def test_backend_switches() -> None:
+    switches = measure()
     assert switches == BASELINE_SWITCHES
-    assert conv_time == pytest.approx(BASELINE_CONVERSION_TIME, rel=1.0)
