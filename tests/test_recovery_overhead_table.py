@@ -7,20 +7,20 @@ from quasar.circuit import Circuit, Gate
 from benchmarks.circuits import ghz_circuit, qft_circuit
 
 BASELINES = {
-    "minor": (1.5e-05, 1.16),
-    "major": (2.1e-05, 4.47),
+    "minor": (2.0e-05, 1.4),
+    "major": (2.6e-05, 9.0),
 }
 
 
 def compute_metrics() -> dict[str, tuple[float, float]]:
     planner = Planner()
-    baseline = ghz_circuit(3)
+    baseline = ghz_circuit(5)
     start = time.perf_counter()
     planner.plan(baseline)
     baseline_time = time.perf_counter() - start
 
     minor = Circuit(list(baseline.gates) + [Gate("H", [0])], use_classical_simplification=False)
-    major = qft_circuit(3)
+    major = qft_circuit(5)
     perturbations = {"minor": minor, "major": major}
 
     metrics: dict[str, tuple[float, float]] = {}
