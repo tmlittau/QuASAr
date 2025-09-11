@@ -87,29 +87,32 @@ class Partitioner:
         current_backend: Backend | None = None
         current_cost: Cost | None = None
 
-        sparsity = getattr(circuit, "sparsity", None)
-        phase_rot = getattr(circuit, "phase_rotation_diversity", None)
-        amp_rot = getattr(circuit, "amplitude_rotation_diversity", None)
+        from .circuit import Circuit
         from .sparsity import sparsity_estimate
         from .symmetry import (
             phase_rotation_diversity as rot_phase,
             amplitude_rotation_diversity as rot_amp,
         )
-        if sparsity is None:
-            sparsity = sparsity_estimate(circuit)
-        if phase_rot is None:
-            phase_rot = rot_phase(circuit)
-        if amp_rot is None:
-            amp_rot = rot_amp(circuit)
+
+        def _metrics(gate_seq: List['Gate']) -> Tuple[float, int, int]:
+            """Return sparsity and rotation metrics for ``gate_seq``."""
+            frag = Circuit(gate_seq, use_classical_simplification=False)
+            return (
+                sparsity_estimate(frag),
+                rot_phase(frag),
+                rot_amp(frag),
+            )
+
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]
             trial_qubits = current_qubits | set(gate.qubits)
+            s_est, pr_div, ar_div = _metrics(trial_gates)
             backend_trial, cost_trial = self.selector.select(
                 trial_gates,
                 len(trial_qubits),
-                sparsity=sparsity,
-                phase_rotation_diversity=phase_rot,
-                amplitude_rotation_diversity=amp_rot,
+                sparsity=s_est,
+                phase_rotation_diversity=pr_div,
+                amplitude_rotation_diversity=ar_div,
                 max_memory=self.max_memory,
                 max_time=self.max_time,
                 target_accuracy=self.target_accuracy,
@@ -143,12 +146,13 @@ class Partitioner:
                         p_qubits = {
                             q for g in prefix for q in g.qubits
                         }
+                        ps, pr, ar = _metrics(prefix)
                         p_backend, p_cost = self.selector.select(
                             prefix,
                             len(p_qubits),
-                            sparsity=sparsity,
-                            phase_rotation_diversity=phase_rot,
-                            amplitude_rotation_diversity=amp_rot,
+                            sparsity=ps,
+                            phase_rotation_diversity=pr,
+                            amplitude_rotation_diversity=ar,
                             max_memory=self.max_memory,
                             max_time=self.max_time,
                             target_accuracy=self.target_accuracy,
@@ -163,12 +167,13 @@ class Partitioner:
                     s_qubits = {
                         q for g in s_gates for q in g.qubits
                     }
+                    ss, sr, ar = _metrics(s_gates)
                     s_backend, s_cost = self.selector.select(
                         s_gates,
                         len(s_qubits),
-                        sparsity=sparsity,
-                        phase_rotation_diversity=phase_rot,
-                        amplitude_rotation_diversity=amp_rot,
+                        sparsity=ss,
+                        phase_rotation_diversity=sr,
+                        amplitude_rotation_diversity=ar,
                         max_memory=self.max_memory,
                         max_time=self.max_time,
                         target_accuracy=self.target_accuracy,
