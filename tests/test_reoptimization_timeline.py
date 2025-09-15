@@ -1,6 +1,7 @@
 
 from quasar.planner import Planner
-from benchmarks.circuits import ghz_circuit, qft_circuit
+from quasar.circuit import Circuit
+from benchmarks.circuits import ghz_circuit, _qft_spec
 
 
 def test_reoptimization_timeline() -> None:
@@ -10,7 +11,7 @@ def test_reoptimization_timeline() -> None:
     baseline = ghz_circuit(4)
     base_plan = planner.plan(baseline)
 
-    perturbed = qft_circuit(4)
+    perturbed = Circuit(_qft_spec(4), use_classical_simplification=False)
     pert_plan = planner.plan(perturbed)
 
     # Planner should detect change in circuit and adjust backend.

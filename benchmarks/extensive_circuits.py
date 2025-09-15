@@ -39,13 +39,13 @@ def dual_ghz_qft_circuit(width: int) -> Circuit:
     if width <= 0:
         return Circuit([])
 
-    ghz_a = ghz_circuit(width, use_classical_simplification=False)
-    ghz_b = ghz_circuit(width, use_classical_simplification=False)
+    ghz_a = ghz_circuit(width)
+    ghz_b = ghz_circuit(width)
     gates = list(ghz_a.gates)
     gates.extend(_shift_gates(ghz_b.gates, width))
-    qft = qft_circuit(2 * width, use_classical_simplification=False)
+    qft = qft_circuit(2 * width)
     gates.extend(qft.gates)
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 def adder_ghz_qaoa_circuit(
@@ -80,14 +80,14 @@ def adder_ghz_qaoa_circuit(
 
     adder = adder_circuit(bit_width, kind=adder_kind)
     adder_qubits = 2 * bit_width + 2
-    ghz = ghz_circuit(bit_width, use_classical_simplification=False)
+    ghz = ghz_circuit(bit_width)
 
     gates = list(adder.gates)
     gates.extend(_shift_gates(ghz.gates, adder_qubits))
     total_qubits = adder_qubits + bit_width
     qaoa = qaoa_circuit(total_qubits, repetitions=qaoa_layers)
     gates.extend(qaoa.gates)
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 __all__ = ["dual_ghz_qft_circuit", "adder_ghz_qaoa_circuit"]

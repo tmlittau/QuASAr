@@ -75,7 +75,7 @@ def ripple_carry_modular_circuit(
     if modulus is None:
         gates = list(adder_gates)
         gates.append(Gate("T", [0]))
-        return Circuit(gates, use_classical_simplification=False)
+        return Circuit(gates)
 
     n = bit_width
     gates: List[Gate] = []
@@ -114,7 +114,7 @@ def ripple_carry_modular_circuit(
         if bit == "1":
             gates.append(Gate("X", [prod[idx]]))
 
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") -> Circuit:
@@ -179,7 +179,7 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
                     gates.append(Gate("CZ", [anc, q2]))
                     gates.append(Gate("H", [anc]))
 
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 def grover_with_oracle_circuit(
@@ -239,7 +239,7 @@ def grover_with_oracle_circuit(
         for q in range(n_qubits):
             gates.append(Gate("H", [q]))
 
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 def deep_qaoa_circuit(graph: nx.Graph, p_layers: int) -> Circuit:

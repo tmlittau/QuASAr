@@ -82,8 +82,7 @@ pure Clifford circuit and selects the ``STIM`` backend:
 from benchmarks.circuits import qft_circuit
 from quasar import Backend, SimulationEngine
 
-circ = qft_circuit(5, use_classical_simplification=True)
-circ.simplify_classical_controls()  # must run before planning
+circ = qft_circuit(5)
 plan = SimulationEngine().planner.plan(circ)
 assert plan.final_backend == Backend.STIM
 ```
