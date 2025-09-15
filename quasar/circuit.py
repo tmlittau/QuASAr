@@ -13,6 +13,7 @@ from qiskit_qasm3_import import api as qasm3_api
 
 from .ssd import SSD, SSDPartition
 from .cost import Cost, CostEstimator, Backend
+from .decompositions import decompose_ccx
 
 
 def _is_multiple_of_pi(angle: float) -> bool:
@@ -79,6 +80,7 @@ class Circuit:
     ):
         self.use_classical_simplification = use_classical_simplification
         self.gates: List[Gate] = [g if isinstance(g, Gate) else Gate(**g) for g in gates]
+        self._expand_decompositions()
         self._num_qubits = self._infer_qubit_count()
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         # Track classical state: 0/1 for classical qubits, ``None`` for quantum.
@@ -107,6 +109,19 @@ class Circuit:
             self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
             # Backward compatibility
             self.rotation_diversity = self.phase_rotation_diversity
+
+    def _expand_decompositions(self) -> None:
+        """Replace higher-level gates by their basic equivalents."""
+
+        expanded: List[Gate] = []
+        for gate in self.gates:
+            name = gate.gate.upper()
+            if name == "CCX":
+                c1, c2, t = gate.qubits
+                expanded.extend(decompose_ccx(c1, c2, t))
+            else:
+                expanded.append(gate)
+        self.gates = expanded
 
     # ------------------------------------------------------------------
     # Classical state tracking and simplification
