@@ -13,7 +13,7 @@ from qiskit_qasm3_import import api as qasm3_api
 
 from .ssd import SSD, SSDPartition
 from .cost import Cost, CostEstimator, Backend
-from .decompositions import decompose_ccx
+from .decompositions import decompose_ccx, decompose_ccz
 
 
 def _is_multiple_of_pi(angle: float) -> bool:
@@ -119,6 +119,9 @@ class Circuit:
             if name == "CCX":
                 c1, c2, t = gate.qubits
                 expanded.extend(decompose_ccx(c1, c2, t))
+            elif name == "CCZ":
+                c1, c2, t = gate.qubits
+                expanded.extend(decompose_ccz(c1, c2, t))
             else:
                 expanded.append(gate)
         self.gates = expanded
