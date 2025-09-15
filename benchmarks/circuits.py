@@ -5,6 +5,7 @@ import math
 from typing import List, Tuple
 
 import numpy as np
+from qiskit import QuantumCircuit
 
 from quasar.circuit import Circuit, Gate
 
@@ -440,20 +441,29 @@ def graph_state_circuit(num_qubits: int, degree: int, seed: int | None = None) -
     return Circuit(gates)
 
 
-def hhl_circuit(num_qubits: int) -> Circuit:
-    """Create a simple HHL circuit. Requires ``num_qubits >= 3``."""
+def hhl_circuit(A: np.ndarray, b: np.ndarray) -> Circuit:
+    """Prepare the normalized solution state of ``Ax = b``.
 
-    if num_qubits < 3:
-        raise ValueError("HHL requires at least 3 qubits")
-    gates: List[Gate] = []
-    gates.append(Gate("H", [0]))
-    gates.append(Gate("CX", [0, 1]))
-    gates.append(Gate("H", [0]))
-    gates.append(Gate("CX", [1, 2]))
-    gates.append(Gate("RY", [2], {"theta": math.pi / 4}))
-    gates.append(Gate("CX", [1, 2]))
-    gates.append(Gate("H", [0]))
-    return Circuit(gates)
+    This implementation classically computes the solution vector and returns a
+    circuit that initialises the quantum state ``|x\rangle`` corresponding to
+    the normalized result.
+    """
+
+    A = np.asarray(A, dtype=complex)
+    b = np.asarray(b, dtype=complex)
+    if A.shape[0] != A.shape[1]:
+        raise ValueError("A must be a square matrix")
+    if not np.allclose(A, A.conj().T):
+        raise ValueError("A must be Hermitian")
+    n = int(math.log2(A.shape[0]))
+    if 2**n != A.shape[0] or len(b) != 2**n:
+        raise ValueError("Dimension of A and length of b must be 2**n")
+
+    x = np.linalg.solve(A, b)
+    x = x / np.linalg.norm(x)
+    qc = QuantumCircuit(n)
+    qc.initialize(x, range(n))
+    return Circuit.from_qiskit(qc)
 
 
 def hrs_circuit(num_qubits: int) -> Circuit:
