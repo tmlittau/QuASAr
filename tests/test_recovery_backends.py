@@ -3,7 +3,7 @@ import pytest
 from quasar.planner import Planner
 from quasar.circuit import Circuit, Gate
 from quasar.cost import Backend
-from benchmarks.circuits import ghz_circuit, qft_circuit
+from benchmarks.circuits import ghz_circuit, _qft_spec
 
 
 def compute_backends() -> dict[str, tuple[Backend, Backend, Backend]]:
@@ -15,7 +15,7 @@ def compute_backends() -> dict[str, tuple[Backend, Backend, Backend]]:
     minor = Circuit(
         list(baseline.gates) + [Gate("H", [0])], use_classical_simplification=False
     )
-    major = qft_circuit(5)
+    major = Circuit(_qft_spec(5), use_classical_simplification=False)
     perturbations = {"minor": minor, "major": major}
 
     metrics: dict[str, tuple[Backend, Backend, Backend]] = {}

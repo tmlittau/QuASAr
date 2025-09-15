@@ -64,20 +64,15 @@ def run_suite(
     engine = SimulationEngine()
     results = []
     for n in qubits:
-        try:
-            circuit = circuit_fn(
-                n, use_classical_simplification=use_classical_simplification
-            )
-        except TypeError:
-            circuit = circuit_fn(n)
-            if use_classical_simplification:
-                enable = getattr(circuit, "enable_classical_simplification", None)
-                if callable(enable):
-                    enable()
-                else:
-                    circuit.use_classical_simplification = True
+        circuit = circuit_fn(n)
+        if use_classical_simplification:
+            enable = getattr(circuit, "enable_classical_simplification", None)
+            if callable(enable):
+                enable()
             else:
-                circuit.use_classical_simplification = False
+                circuit.use_classical_simplification = True
+        else:
+            circuit.use_classical_simplification = False
         if is_clifford(circuit):
             continue
         runner = BenchmarkRunner()

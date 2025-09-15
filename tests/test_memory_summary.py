@@ -52,7 +52,7 @@ def measure_memory(circuit: Circuit) -> Dict[str, float]:
 
 def circuits() -> Dict[str, Circuit]:
     return {
-        "ghz3": ghz_circuit(3, use_classical_simplification=False),
+        "ghz3": ghz_circuit(3),
         "clifford_ec": clifford_ec_circuit(),
     }
 

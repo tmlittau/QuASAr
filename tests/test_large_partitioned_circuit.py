@@ -1,13 +1,13 @@
 from quasar import Circuit, Gate, Backend, Partitioner
-from benchmarks.circuits import ghz_circuit, qft_circuit
+from benchmarks.circuits import ghz_circuit, _qft_spec
 
 
 def large_partitioned_circuit(n: int) -> Circuit:
     half = n // 2
-    ghz = ghz_circuit(half, use_classical_simplification=False)
-    qft = qft_circuit(half, use_classical_simplification=False)
+    ghz = ghz_circuit(half)
+    qft_gates = _qft_spec(half)
     gates = list(ghz.gates)
-    gates += [Gate(g.gate, [q + half for q in g.qubits], g.params) for g in qft.gates]
+    gates += [Gate(g.gate, [q + half for q in g.qubits], g.params) for g in qft_gates]
     gates += [
         Gate("CX", [0, half]),
         Gate("CX", [half - 1, n - 1]),

@@ -31,17 +31,15 @@ def is_clifford(circuit: Circuit) -> bool:
     return all(g.gate in CLIFFORD_GATES for g in circuit.gates)
 
 
-def ghz_circuit(
-    n_qubits: int, *, use_classical_simplification: bool = False
-) -> Circuit:
+def ghz_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` GHZ state preparation circuit."""
     gates: List[Gate] = []
     if n_qubits <= 0:
-        return Circuit(gates, use_classical_simplification=use_classical_simplification)
+        return Circuit(gates)
     gates.append(Gate("H", [0]))
     for i in range(1, n_qubits):
         gates.append(Gate("CX", [i - 1, i]))
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(gates)
 
 
 def _qft_spec(n: int) -> List[Gate]:
@@ -69,30 +67,16 @@ def _iqft_spec(n: int) -> List[Gate]:
     return gates
 
 
-def qft_circuit(
-    n_qubits: int, *, use_classical_simplification: bool = False
-) -> Circuit:
+def qft_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` quantum Fourier transform circuit."""
-    return Circuit(
-        _qft_spec(n_qubits),
-        use_classical_simplification=use_classical_simplification,
-    )
+    return Circuit(_qft_spec(n_qubits))
 
 
-def qft_on_ghz_circuit(
-    n_qubits: int, *, use_classical_simplification: bool = False
-) -> Circuit:
+def qft_on_ghz_circuit(n_qubits: int) -> Circuit:
     """Apply the QFT to a GHZ state."""
-    ghz = ghz_circuit(
-        n_qubits, use_classical_simplification=use_classical_simplification
-    )
-    qft = qft_circuit(
-        n_qubits, use_classical_simplification=use_classical_simplification
-    )
-    return Circuit(
-        list(ghz.gates) + list(qft.gates),
-        use_classical_simplification=use_classical_simplification,
-    )
+    ghz = ghz_circuit(n_qubits)
+    qft = qft_circuit(n_qubits)
+    return Circuit(list(ghz.gates) + list(qft.gates))
 
 
 def _w_state_spec(n: int) -> List[Gate]:
@@ -115,12 +99,10 @@ def _w_state_spec(n: int) -> List[Gate]:
     return gates
 
 
-def w_state_circuit(
-    n_qubits: int, *, use_classical_simplification: bool = False
-) -> Circuit:
+def w_state_circuit(n_qubits: int) -> Circuit:
     """Create an ``n_qubits`` W state preparation circuit."""
     gates = _w_state_spec(n_qubits)
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(gates)
 
 
 def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
@@ -169,12 +151,7 @@ def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
     return Circuit(gates)
 
 
-def bernstein_vazirani_circuit(
-    n_qubits: int,
-    secret: int = 0,
-    *,
-    use_classical_simplification: bool = False,
-) -> Circuit:
+def bernstein_vazirani_circuit(n_qubits: int, secret: int = 0) -> Circuit:
     """Create a Bernstein-Vazirani circuit for a given secret string.
 
     Args:
@@ -187,7 +164,7 @@ def bernstein_vazirani_circuit(
 
     gates: List[Gate] = []
     if n_qubits <= 0:
-        return Circuit(gates, use_classical_simplification=use_classical_simplification)
+        return Circuit(gates)
 
     anc = n_qubits
 
@@ -208,7 +185,7 @@ def bernstein_vazirani_circuit(
     for q in range(n_qubits):
         gates.append(Gate("H", [q]))
 
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(gates)
 
 
 def amplitude_estimation_circuit(num_qubits: int, probability: float) -> Circuit:
@@ -424,7 +401,7 @@ def adder_circuit(num_qubits: int, kind: str = "cdkm") -> Circuit:
         gates = _vbe_adder_gates(num_qubits)
     else:
         raise ValueError("Unknown adder kind")
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 def deutsch_jozsa_circuit(num_qubits: int, balanced: bool = True) -> Circuit:
@@ -578,12 +555,7 @@ def quantum_walk_circuit(num_qubits: int, depth: int) -> Circuit:
     return Circuit(gates)
 
 
-def random_circuit(
-    num_qubits: int,
-    seed: int | None = None,
-    *,
-    use_classical_simplification: bool = False,
-) -> Circuit:
+def random_circuit(num_qubits: int, seed: int | None = None) -> Circuit:
     """Generate a random circuit of depth ``2*num_qubits``."""
 
     rng = np.random.default_rng(seed)
@@ -613,7 +585,7 @@ def random_circuit(
                     gates.append(Gate("RZZ", [int(a), int(b)], {"theta": angle}))
                 else:
                     gates.append(Gate(gate, [int(a), int(b)]))
-    return Circuit(gates, use_classical_simplification=use_classical_simplification)
+    return Circuit(gates)
 
 
 def shor_circuit(circuit_size: int) -> Circuit:
@@ -734,7 +706,7 @@ def vqe_chain_circuit(num_qubits: int = 6, depth: int = 2) -> Circuit:
     """Parameterized VQE ansatz with linear entanglement chain."""
 
     gates = _two_local_gates(num_qubits, depth, "linear", ["RY", "RZ"])
-    return Circuit(gates, use_classical_simplification=False)
+    return Circuit(gates)
 
 
 def random_hybrid_circuit(num_qubits: int = 6, depth: int = 10, seed: int | None = None) -> Circuit:

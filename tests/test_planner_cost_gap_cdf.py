@@ -6,18 +6,20 @@ from quasar.circuit import Circuit
 from quasar.planner import Planner, _simulation_cost, _supported_backends
 from benchmarks.circuits import (
     ghz_circuit,
-    qft_circuit,
-    qft_on_ghz_circuit,
+    _qft_spec,
     w_state_circuit,
     grover_circuit,
 )
 
 
 def circuits() -> dict[str, Circuit]:
+    ghz = ghz_circuit(4)
+    qft = Circuit(_qft_spec(4), use_classical_simplification=False)
+    qft_on_ghz = Circuit(list(ghz.gates) + _qft_spec(4), use_classical_simplification=False)
     return {
-        "ghz4": ghz_circuit(4),
-        "qft4": qft_circuit(4),
-        "qft_on_ghz4": qft_on_ghz_circuit(4),
+        "ghz4": ghz,
+        "qft4": qft,
+        "qft_on_ghz4": qft_on_ghz,
         "w4": w_state_circuit(4),
         "grover4": grover_circuit(4, 1),
     }
