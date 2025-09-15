@@ -2,7 +2,8 @@
 
 This module provides helpers for expanding multi-controlled gates into
 sequences of supported elementary operations. Currently the Toffoli
-(``CCX``) and controlled-controlled-Z (``CCZ``) gates are implemented.
+(``CCX``), controlled-controlled-Z (``CCZ``) and controlled-SWAP (``CSWAP``)
+gates are implemented.
 """
 
 from __future__ import annotations
@@ -119,4 +120,27 @@ def decompose_ccz(control1: int, control2: int, target: int) -> List["Gate"]:
     return [Gate("H", [target]), *ccx_sequence, Gate("H", [target])]
 
 
-__all__ = ["decompose_ccx", "decompose_mcx", "decompose_ccz"]
+def decompose_cswap(control: int, qubit_a: int, qubit_b: int) -> List["Gate"]:
+    """Return a decomposition of a controlled-SWAP (``CSWAP``) gate.
+
+    The Fredkin gate can be realised using three Toffoli operations sharing
+    the same control qubit.  Each ``CCX`` is further decomposed into
+    single- and two-qubit gates, yielding a sequence that contains no
+    multi-qubit primitives beyond ``CX``.
+
+    Parameters
+    ----------
+    control:
+        Index of the control qubit.
+    qubit_a, qubit_b:
+        Indices of the qubits to be swapped when the control is set.
+    """
+
+    return (
+        decompose_ccx(control, qubit_b, qubit_a)
+        + decompose_ccx(control, qubit_a, qubit_b)
+        + decompose_ccx(control, qubit_b, qubit_a)
+    )
+
+
+__all__ = ["decompose_ccx", "decompose_mcx", "decompose_ccz", "decompose_cswap"]

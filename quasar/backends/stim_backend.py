@@ -91,20 +91,11 @@ class StimBackend(Backend):
         if self.simulator is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = self._ALIASES.get(name.upper(), name.lower())
-        if lname in {"ccx", "ccz", "mcx"}:
+        if lname in {"ccx", "ccz", "mcx", "cswap"}:
             raise NotImplementedError(
-                "CCX, CCZ and MCX gates must be decomposed before execution"
+                "CCX, CCZ, MCX and CSWAP gates must be decomposed before execution"
             )
         if lname == "i" or lname == "id":
-            self.history.append(name.upper())
-            return
-        if lname == "cswap":
-            c, a, b = qubits
-            self.simulator.cx(c, b)
-            self.simulator.cx(a, b)
-            self.simulator.cx(c, a)
-            self.simulator.cx(a, b)
-            self.simulator.cx(c, b)
             self.history.append(name.upper())
             return
         func = getattr(self.simulator, lname, None)

@@ -23,7 +23,6 @@ CLIFFORD_GATES = {
     "CY",
     "CZ",
     "SWAP",
-    "CSWAP",
 }
 
 
