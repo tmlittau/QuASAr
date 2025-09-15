@@ -298,20 +298,6 @@ def _iqft_gates(n: int, offset: int) -> List[Gate]:
     return gates
 
 
-def _qft_gates(n: int, offset: int) -> List[Gate]:
-    """QFT on ``n`` qubits starting at ``offset``."""
-
-    gates: List[Gate] = []
-    for j in range(n):
-        qubit = offset + j
-        gates.append(Gate("H", [qubit]))
-        for k in range(j + 1, n):
-            ctrl = offset + k
-            angle = math.pi / (2 ** (k - j))
-            gates.append(Gate("CRZ", [ctrl, qubit], {"theta": angle}))
-    return gates
-
-
 def _draper_adder_gates(n: int) -> List[Gate]:
     """Gate sequence for the Draper QFT adder (fixed-point variant)."""
 
@@ -322,7 +308,10 @@ def _draper_adder_gates(n: int) -> List[Gate]:
     a_start = 0
     b_start = n
 
-    gates.extend(_qft_gates(n, b_start))
+    # Apply the QFT to the second register using the existing specification
+    for gate in _qft_spec(n):
+        shifted = Gate(gate.gate, [q + b_start for q in gate.qubits], gate.params)
+        gates.append(shifted)
 
     for j in range(n):
         for k in range(n - j):
@@ -331,7 +320,10 @@ def _draper_adder_gates(n: int) -> List[Gate]:
             angle = math.pi / (2 ** k)
             gates.append(Gate("CRZ", [ctrl, tgt], {"theta": angle}))
 
-    gates.extend(_iqft_gates(n, b_start))
+    # Undo the QFT on the second register
+    for gate in _iqft_spec(n):
+        shifted = Gate(gate.gate, [q + b_start for q in gate.qubits], gate.params)
+        gates.append(shifted)
     return gates
 
 
