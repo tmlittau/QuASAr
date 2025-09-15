@@ -108,6 +108,8 @@ class DecisionDiagramBackend(Backend):
             raise TypeError("Backend state is not a VectorDD")
 
         lname = name.upper()
+        if lname == "CCX":
+            raise NotImplementedError("CCX gates must be decomposed before execution")
         if lname == "CP" and params and "k" in params:
             theta = 2 * np.pi / (2 ** float(params["k"]))
             param_list = [theta]

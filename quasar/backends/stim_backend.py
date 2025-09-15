@@ -91,6 +91,8 @@ class StimBackend(Backend):
         if self.simulator is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = self._ALIASES.get(name.upper(), name.lower())
+        if lname == "ccx":
+            raise NotImplementedError("CCX gates must be decomposed before execution")
         if lname == "i" or lname == "id":
             self.history.append(name.upper())
             return
