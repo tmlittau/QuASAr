@@ -111,9 +111,9 @@ class StatevectorBackend(Backend):
         if self.circuit is None:
             raise RuntimeError("Backend not initialised; call 'load' first")
         lname = name.upper()
-        if lname in {"CCX", "CCZ"}:
+        if lname in {"CCX", "CCZ", "MCX"}:
             raise NotImplementedError(
-                "CCX and CCZ gates must be decomposed before execution"
+                "CCX, CCZ and MCX gates must be decomposed before execution"
             )
         self.history.append(lname)
         if lname == "RX":

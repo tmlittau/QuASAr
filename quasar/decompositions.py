@@ -47,6 +47,49 @@ def decompose_ccx(control1: int, control2: int, target: int) -> List["Gate"]:
     ]
 
 
+def decompose_mcx(controls: List[int], target: int) -> List["Gate"]:
+    """Return a decomposition of an n-controlled X gate.
+
+    The decomposition reduces an arbitrary multi-controlled X operation into a
+    sequence of Toffoli gates which are further expanded into single- and
+    two-qubit gates.  ``n``−2 ancillary qubits are introduced and uncomputed at
+    the end of the sequence.  Ancillas are allocated using increasing qubit
+    indices beyond the controls and target.
+
+    Parameters
+    ----------
+    controls:
+        List of control qubit indices.  The last qubit in the list is not the
+        target but an additional control.
+    target:
+        Index of the target qubit.
+    """
+
+    from .circuit import Gate
+
+    num_controls = len(controls)
+    if num_controls == 0:
+        return [Gate("X", [target])]
+    if num_controls == 1:
+        return [Gate("CX", [controls[0], target])]
+    if num_controls == 2:
+        return decompose_ccx(controls[0], controls[1], target)
+
+    max_index = max(controls + [target])
+    ancillas = [max_index + 1 + i for i in range(num_controls - 2)]
+    gates: List[Gate] = []
+
+    c1, c2 = controls[0], controls[1]
+    gates.extend(decompose_ccx(c1, c2, ancillas[0]))
+    for i in range(2, num_controls - 1):
+        gates.extend(decompose_ccx(ancillas[i - 2], controls[i], ancillas[i - 1]))
+    gates.extend(decompose_ccx(ancillas[-1], controls[-1], target))
+    for i in reversed(range(2, num_controls - 1)):
+        gates.extend(decompose_ccx(ancillas[i - 2], controls[i], ancillas[i - 1]))
+    gates.extend(decompose_ccx(c1, c2, ancillas[0]))
+    return gates
+
+
 def decompose_ccz(control1: int, control2: int, target: int) -> List["Gate"]:
     r"""Return a decomposition of a controlled-controlled-Z (``CCZ``) gate.
 
@@ -76,4 +119,4 @@ def decompose_ccz(control1: int, control2: int, target: int) -> List["Gate"]:
     return [Gate("H", [target]), *ccx_sequence, Gate("H", [target])]
 
 
-__all__ = ["decompose_ccx", "decompose_ccz"]
+__all__ = ["decompose_ccx", "decompose_mcx", "decompose_ccz"]
