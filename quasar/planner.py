@@ -11,7 +11,7 @@ an optimal execution plan.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Iterable, Set, Tuple, Hashable
+from typing import Any, Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
 from quasar_convert import ConversionEngine
@@ -92,6 +92,7 @@ class PlanDiagnostics:
     refined_cost: Cost | None = None
     strategy: str | None = None
     conversion_estimates: List[ConversionEstimate] = field(default_factory=list)
+    backend_selection: Dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def record_conversion(
         self,
@@ -705,6 +706,74 @@ class Planner:
 
         return sorted(backends, key=lambda b: (b != Backend.TABLEAU, rank(b)))
 
+    def _print_selection_diagnostics(
+        self, selection: dict[str, Any], *, stage: str | None = None
+    ) -> None:
+        """Emit backend selection diagnostics when verbose logging is enabled."""
+
+        if not config.DEFAULT.verbose_selection:
+            return
+        metrics = selection.get("metrics", {})
+        prefix = "[backend-selection]"
+        stage_part = f" stage={stage}" if stage else ""
+        metric_fields = [
+            ("num_qubits", "qubits", lambda v: str(int(v))),
+            ("num_gates", "gates", lambda v: str(int(v))),
+            ("sparsity", "sparsity", lambda v: f"{float(v):.6f}"),
+            ("phase_rotation_diversity", "phase_div", lambda v: str(int(v))),
+            ("amplitude_rotation_diversity", "amp_div", lambda v: str(int(v))),
+            ("nnz", "nnz", lambda v: str(int(v))),
+            ("local", "local", lambda v: "yes" if v else "no"),
+        ]
+        metric_parts: List[str] = []
+        for key, label, fmt in metric_fields:
+            if key in metrics and metrics[key] is not None:
+                metric_parts.append(f"{label}={fmt(metrics[key])}")
+        if "decision_diagram_metric" in metrics:
+            metric_parts.append(
+                f"dd_metric={float(metrics['decision_diagram_metric']):.6f}"
+            )
+        if "dd_metric_threshold" in metrics:
+            metric_parts.append(
+                f"dd_thr={float(metrics['dd_metric_threshold']):.6f}"
+            )
+        if metric_parts:
+            print(f"{prefix}{stage_part} metrics: {', '.join(metric_parts)}")
+        else:
+            print(f"{prefix}{stage_part}")
+
+        backends = selection.get("backends", {})
+        order = [
+            Backend.TABLEAU,
+            Backend.DECISION_DIAGRAM,
+            Backend.MPS,
+            Backend.STATEVECTOR,
+        ]
+        for backend in order:
+            entry = backends.get(backend)
+            if entry is None:
+                continue
+            status = "feasible" if entry.get("feasible") else "rejected"
+            if entry.get("selected"):
+                status += " (selected)"
+            details: List[str] = []
+            cost = entry.get("cost")
+            if isinstance(cost, Cost):
+                details.append(f"time={cost.time:.6f}s")
+                details.append(f"memory={cost.memory:.3e}B")
+            if backend == Backend.MPS and "chi" in entry:
+                details.append(f"chi={entry['chi']}")
+                if entry.get("chi_limit") is not None:
+                    details.append(f"chi_cap={entry['chi_limit']}")
+            if backend == Backend.DECISION_DIAGRAM and "metric" in entry:
+                details.append(f"metric={float(entry['metric']):.6f}")
+            detail_str = f" {' '.join(details)}" if details else ""
+            reasons = entry.get("reasons") or []
+            reason_str = ""
+            if reasons:
+                reason_str = " [" + "; ".join(str(r) for r in reasons) + "]"
+            print(f"{prefix}   {backend.name}: {status}{detail_str}{reason_str}")
+
     # ------------------------------------------------------------------
     def _dp(
         self,
@@ -1088,6 +1157,7 @@ class Planner:
         allow_tableau: bool = True,
         target_accuracy: float | None = None,
         max_time: float | None = None,
+        selection_diagnostics: dict[str, Any] | None = None,
     ) -> Tuple[Backend, Cost]:
         """Return best single-backend estimate for the full gate list.
 
@@ -1109,6 +1179,7 @@ class Planner:
             max_memory=max_memory,
             max_time=max_time,
             target_accuracy=target_accuracy,
+            diagnostics=selection_diagnostics,
         )
         return backend, cost
 
@@ -1225,6 +1296,9 @@ class Planner:
                     raise ValueError(f"Backend {backend} unsupported for given circuit")
             # Invoke the selector for parity with automatic planning so that
             # benchmarking treats both paths equally.
+            selection_trace: dict[str, Any] | None = None
+            if diagnostics is not None or config.DEFAULT.verbose_selection:
+                selection_trace = {}
             self.selector.select(
                 gates,
                 num_qubits,
@@ -1235,7 +1309,12 @@ class Planner:
                 max_memory=threshold,
                 max_time=max_time,
                 target_accuracy=target_accuracy,
+                diagnostics=selection_trace,
             )
+            if selection_trace is not None:
+                if diagnostics is not None:
+                    diagnostics.backend_selection["forced"] = selection_trace
+                self._print_selection_diagnostics(selection_trace, stage="forced")
             cost = _simulation_cost(
                 self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
             )
@@ -1266,6 +1345,9 @@ class Planner:
                 self.cache_insert(gates, result, backend)
             return finalize(result)
         # Pre-compute the cost of executing the full circuit on a single backend
+        single_selection: dict[str, Any] | None = None
+        if diagnostics is not None or config.DEFAULT.verbose_selection:
+            single_selection = {}
         single_backend_choice, single_cost = self._single_backend(
             gates,
             threshold,
@@ -1275,7 +1357,12 @@ class Planner:
             allow_tableau=allow_tableau,
             target_accuracy=target_accuracy,
             max_time=max_time,
+            selection_diagnostics=single_selection,
         )
+        if single_selection is not None:
+            if diagnostics is not None:
+                diagnostics.backend_selection["single"] = single_selection
+            self._print_selection_diagnostics(single_selection, stage="single")
 
         part = Partitioner()
         groups = part.parallel_groups(gates) if num_qubits > 1 else []
