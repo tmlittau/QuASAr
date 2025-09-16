@@ -100,6 +100,25 @@ New circuit generators are added to
 CLI can discover it automatically.  The existing functions, such as
 [`ghz_circuit`](circuits.py), illustrate the expected structure.
 
+## Parallel subsystem templates
+
+[`parallel_circuits.py`](parallel_circuits.py) contains helpers for
+benchmarks that emphasise independent subsystems.  The
+``many_ghz_subsystems(num_groups, group_size)`` generator creates
+``num_groups`` disjoint GHZ chains with ``group_size`` qubits each.  No
+gates cross subsystem boundaries, allowing the planner and scheduler to
+identify parallel partitions immediately:
+
+```python
+from benchmarks.parallel_circuits import many_ghz_subsystems
+
+circuit = many_ghz_subsystems(num_groups=8, group_size=6)
+```
+
+This circuit family is useful when measuring the benefits of QuASAr's
+parallel execution heuristics or validating partitioning behaviour on
+larger disjoint systems.
+
 ## Running specific backends
 
 Benchmarks can force a particular simulator by selecting a QuASAr backend
