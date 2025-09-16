@@ -90,9 +90,9 @@ assert plan.final_backend == Backend.STIM
 ## Telemetry
 
 Backend decisions made on the quick path can be recorded for later analysis.
-Set ``QUASAR_VERBOSE_SELECTION=1`` to emit the evaluated metrics and candidate
-ranking to standard output; the planner prints similar information for each
-segment it analyses.  For persistent logs set the environment variable
+Set ``QUASAR_VERBOSE_SELECTION=1`` to emit the evaluated metrics together with
+per-backend cost estimates and rejection reasons; the planner prints the same
+diagnostics for each segment it analyses.  For persistent logs set the environment variable
 ``QUASAR_BACKEND_SELECTION_LOG`` or override
 ``config.DEFAULT.backend_selection_log`` with a filesystem path.  Each quick
 selection appends a CSV row with
@@ -106,3 +106,9 @@ Use the helper script to aggregate results across benchmark runs:
 ```bash
 python tools/analyze_backend_selection.py logs/*.csv
 ```
+
+When ``Planner.plan`` is invoked with ``explain=True`` the returned
+``PlanDiagnostics`` object exposes a ``backend_selection`` mapping with the
+same diagnostic payload.  Each entry captures the heuristics, estimated costs
+and the reasons why candidates were accepted or rejected, making it easier to
+trace planning decisions without relying solely on console output.
