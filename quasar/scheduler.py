@@ -9,7 +9,7 @@ import time
 import tracemalloc
 import numpy as np
 
-from .planner import Planner, PlanStep, PlanResult, _add_cost
+from .planner import Planner, PlanStep, PlanResult, PlanDiagnostics, _add_cost
 from .analyzer import AnalysisResult
 from .partitioner import CLIFFORD_GATES
 from .cost import Backend, Cost
@@ -306,6 +306,7 @@ class Scheduler:
         target_accuracy: float | None = None,
         max_time: float | None = None,
         optimization_level: int | None = None,
+        explain: bool = False,
     ) -> PlanResult:
         """Prepare an execution plan for ``circuit``.
 
@@ -328,8 +329,8 @@ class Scheduler:
             Upper bound on estimated runtime in seconds.
         optimization_level:
             Heuristic tuning knob influencing planner behaviour.
-        reference_state:
-            Optional statevector used to compute fidelity of the final state.
+        explain:
+            Enable planner diagnostics on the returned :class:`PlanResult`.
         """
 
         gates = circuit.simplify_classical_controls()
@@ -354,6 +355,12 @@ class Scheduler:
                 plan.step_costs = [self._estimate_cost(backend_choice, gates)]
             else:
                 plan.step_costs = [Cost(time=0.0, memory=0.0)]
+            if explain:
+                plan.diagnostics = PlanDiagnostics(
+                    single_backend=backend_choice,
+                    single_cost=plan.step_costs[0],
+                    strategy="quick",
+                )
             circuit.ssd.conversions = []
             qubits = tuple(range(circuit.num_qubits))
             history = tuple(g.gate for g in gates)
@@ -383,8 +390,10 @@ class Scheduler:
             self.planner.conversion_engine = self.conversion_engine
 
         if plan is None:
-            plan = self.planner.cache_lookup(gates, backend)
-            if plan is None:
+            cached_plan: PlanResult | None = None
+            if not explain:
+                cached_plan = self.planner.cache_lookup(gates, backend)
+            if cached_plan is None:
                 plan = self.planner.plan(
                     circuit,
                     analysis=analysis,
@@ -392,7 +401,10 @@ class Scheduler:
                     target_accuracy=target_accuracy,
                     max_time=max_time,
                     optimization_level=optimization_level,
+                    explain=explain,
                 )
+            else:
+                plan = cached_plan
 
         conversions = list(getattr(plan, "conversions", []))
         circuit.ssd.conversions = conversions

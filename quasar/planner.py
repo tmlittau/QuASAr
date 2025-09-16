@@ -65,6 +65,65 @@ class DPEntry:
 
 
 @dataclass
+class ConversionEstimate:
+    """Diagnostic record of a conversion estimate between backends."""
+
+    stage: str
+    start: int
+    end: int
+    source: Optional[Backend]
+    target: Backend
+    boundary: Tuple[int, ...]
+    cost: Cost
+    primitive: str | None = None
+    feasible: bool = True
+    reason: str | None = None
+
+
+@dataclass
+class PlanDiagnostics:
+    """Diagnostics collected while planning a circuit."""
+
+    single_backend: Backend | None = None
+    single_cost: Cost | None = None
+    pre_cost: Cost | None = None
+    pre_overhead: Cost | None = None
+    dp_cost: Cost | None = None
+    refined_cost: Cost | None = None
+    strategy: str | None = None
+    conversion_estimates: List[ConversionEstimate] = field(default_factory=list)
+
+    def record_conversion(
+        self,
+        *,
+        stage: str,
+        start: int,
+        end: int,
+        source: Backend | None,
+        target: Backend,
+        boundary: Iterable[int],
+        cost: Cost,
+        primitive: str | None = None,
+        feasible: bool = True,
+        reason: str | None = None,
+    ) -> None:
+        self.conversion_estimates.append(
+            ConversionEstimate(
+                stage=stage,
+                start=start,
+                end=end,
+                source=source,
+                target=target,
+                boundary=tuple(sorted(boundary)),
+                cost=cost,
+                primitive=primitive,
+                feasible=feasible,
+                reason=reason,
+            )
+        )
+
+
+@dataclass
 class PlanResult:
     """Return value of :meth:`Planner.plan`."""
 
@@ -76,6 +135,7 @@ class PlanResult:
     step_costs: Optional[List[Cost]] = None
     replay_ssd: Dict[int, "SSD"] = field(default_factory=dict)
     analysis: AnalysisResult | None = None
+    diagnostics: PlanDiagnostics | None = None
 
     # The ``steps`` property recovers the final plan lazily using the
     # backpointers contained in ``table``.  If ``explicit_steps`` is provided
@@ -663,6 +723,8 @@ class Planner:
         horizon: int | None = None,
         epsilon: float | None = None,
         upper_bound: Cost | None = None,
+        stage: str | None = None,
+        diagnostics: PlanDiagnostics | None = None,
     ) -> PlanResult:
         """Internal DP routine supporting batching and pruning.
 
@@ -838,6 +900,7 @@ class Planner:
                                 )
                                 est_time = conv_est.cost.time
                                 est_mem = conv_est.cost.memory
+                                primitive = getattr(conv_est, "primitive", None)
                                 if self.conversion_engine is not None:
                                     try:
                                         ce_time, ce_mem = self.conversion_engine.estimate_cost(
@@ -851,11 +914,32 @@ class Planner:
                                     time=est_time * self.conversion_cost_multiplier,
                                     memory=est_mem,
                                 )
-                                if (
-                                    max_memory is not None
-                                    and conv_cost.memory > max_memory
-                                ):
+                                if max_memory is not None and conv_cost.memory > max_memory:
+                                    if diagnostics is not None and stage is not None:
+                                        diagnostics.record_conversion(
+                                            stage=stage,
+                                            start=j,
+                                            end=i,
+                                            source=prev_backend,
+                                            target=backend,
+                                            boundary=boundary,
+                                            cost=conv_cost,
+                                            primitive=primitive,
+                                            feasible=False,
+                                            reason="memory",
+                                        )
                                     continue
+                                if diagnostics is not None and stage is not None:
+                                    diagnostics.record_conversion(
+                                        stage=stage,
+                                        start=j,
+                                        end=i,
+                                        source=prev_backend,
+                                        target=backend,
+                                        boundary=boundary,
+                                        cost=conv_cost,
+                                        primitive=primitive,
+                                    )
                         total_cost = _add_cost(
                             _add_cost(prev_entry.cost, conv_cost), sim_cost
                         )
@@ -1039,6 +1123,7 @@ class Planner:
         target_accuracy: float | None = None,
         max_time: float | None = None,
         optimization_level: int | None = None,
+        explain: bool = False,
     ) -> PlanResult:
         """Compute the optimal contiguous partition plan using optional
         coarse and refinement passes.
@@ -1069,6 +1154,10 @@ class Planner:
             selection.
         optimization_level:
             Heuristic tuning knob influencing cost comparisons.
+        explain:
+            When ``True`` collect diagnostic information about cost comparisons
+            and conversion estimates.  The diagnostics are attached to the
+            returned :class:`PlanResult` via ``plan.diagnostics``.
 
         Raises
         ------
@@ -1078,6 +1167,7 @@ class Planner:
         """
 
         gates = circuit.simplify_classical_controls()
+        diagnostics = PlanDiagnostics() if explain else None
         names = [g.gate.upper() for g in gates]
         clifford_circuit = bool(names) and all(
             name in CLIFFORD_GATES for name in names
@@ -1093,13 +1183,14 @@ class Planner:
                     raise ValueError("Assigned backend incompatible with partition")
             return res
 
-        if use_cache:
+        cached: PlanResult | None = None
+        if use_cache and not explain:
             cached = self.cache_lookup(gates, backend)
-            if cached is not None:
-                circuit.ssd.conversions = list(cached.conversions)
-                if analysis is not None:
-                    cached.analysis = analysis
-                return finalize(cached)
+        if cached is not None:
+            circuit.ssd.conversions = list(cached.conversions)
+            if analysis is not None:
+                cached.analysis = analysis
+            return finalize(cached)
 
         num_qubits = circuit.num_qubits
         num_gates = circuit.num_gates
@@ -1166,6 +1257,11 @@ class Planner:
                 explicit_conversions=conversions,
                 analysis=analysis,
             )
+            if diagnostics is not None:
+                diagnostics.single_backend = backend
+                diagnostics.single_cost = cost
+                diagnostics.strategy = "forced"
+                result.diagnostics = diagnostics
             if use_cache:
                 self.cache_insert(gates, result, backend)
             return finalize(result)
@@ -1189,6 +1285,9 @@ class Planner:
             )
             if _better(par_cost, single_cost, perf_prio, parallel=True):
                 single_cost = par_cost
+        if diagnostics is not None:
+            diagnostics.single_backend = single_backend_choice
+            diagnostics.single_cost = single_cost
 
         quick = True
         if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
@@ -1223,6 +1322,9 @@ class Planner:
                     analysis=analysis,
                 )
                 circuit.ssd.conversions = []
+                if diagnostics is not None:
+                    diagnostics.strategy = "quick"
+                    result.diagnostics = diagnostics
                 if use_cache:
                     self.cache_insert(gates, result, single_backend_choice)
                 return finalize(result)
@@ -1238,6 +1340,8 @@ class Planner:
             phase_rotation_diversity=circuit.phase_rotation_diversity,
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
             horizon=self.horizon,
+            stage="pre",
+            diagnostics=diagnostics,
         )
         pre_cost = (
             pre.table[-1][pre.final_backend].cost
@@ -1245,6 +1349,9 @@ class Planner:
             else Cost(float("inf"), float("inf"))
         )
         overhead = Cost(time=len(gates) * 1e-6, memory=0.0)
+        if diagnostics is not None:
+            diagnostics.pre_cost = pre_cost
+            diagnostics.pre_overhead = overhead
         if _better(single_cost, _add_cost(pre_cost, overhead), perf_prio) and (
             threshold is None or single_cost.memory <= threshold
         ) and (max_time is None or single_cost.time <= max_time):
@@ -1266,6 +1373,9 @@ class Planner:
                 analysis=analysis,
             )
             circuit.ssd.conversions = []
+            if diagnostics is not None:
+                diagnostics.strategy = "single"
+                result.diagnostics = diagnostics
             if use_cache:
                 self.cache_insert(gates, result, single_backend_choice)
             return finalize(result)
@@ -1280,6 +1390,8 @@ class Planner:
             phase_rotation_diversity=circuit.phase_rotation_diversity,
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
             horizon=self.horizon,
+            stage="coarse",
+            diagnostics=diagnostics,
         )
 
         dp_cost = (
@@ -1287,6 +1399,8 @@ class Planner:
             if coarse.table and coarse.final_backend in coarse.table[-1]
             else Cost(float("inf"), float("inf"))
         )
+        if diagnostics is not None:
+            diagnostics.dp_cost = dp_cost
 
         if _better(single_cost, dp_cost, perf_prio) and (
             threshold is None or single_cost.memory <= threshold
@@ -1309,6 +1423,9 @@ class Planner:
                 analysis=analysis,
             )
             circuit.ssd.conversions = []
+            if diagnostics is not None:
+                diagnostics.strategy = "single"
+                result.diagnostics = diagnostics
             if use_cache:
                 self.cache_insert(gates, result, single_backend_choice)
             return finalize(result)
@@ -1322,6 +1439,9 @@ class Planner:
             circuit.ssd.conversions = list(conversions)
             coarse.explicit_steps = steps
             coarse.explicit_conversions = conversions
+            if diagnostics is not None:
+                diagnostics.strategy = "dp"
+                coarse.diagnostics = diagnostics
             if use_cache:
                 self.cache_insert(gates, coarse)
             if analysis is not None:
@@ -1346,6 +1466,8 @@ class Planner:
                 phase_rotation_diversity=circuit.phase_rotation_diversity,
                 amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
                 horizon=self.horizon,
+                stage="refine",
+                diagnostics=diagnostics,
             )
             for sub_step in sub.steps:
                 refined_steps.append(
@@ -1383,6 +1505,9 @@ class Planner:
         final_backend = refined_steps[-1].backend if refined_steps else None
         conversions = self._conversions_for_steps(gates, refined_steps)
         circuit.ssd.conversions = list(conversions)
+        if diagnostics is not None:
+            diagnostics.refined_cost = total_cost if refined_steps else dp_cost
+            diagnostics.strategy = "refined"
         result = PlanResult(
             table=[],
             final_backend=final_backend,
@@ -1391,6 +1516,8 @@ class Planner:
             explicit_conversions=conversions,
             analysis=analysis,
         )
+        if diagnostics is not None:
+            result.diagnostics = diagnostics
         if use_cache:
             self.cache_insert(gates, result)
         if max_time is not None:
@@ -1400,4 +1527,11 @@ class Planner:
         return finalize(result)
 
 
-__all__ = ["Planner", "PlanResult", "PlanStep", "DPEntry"]
+__all__ = [
+    "Planner",
+    "PlanResult",
+    "PlanStep",
+    "DPEntry",
+    "ConversionEstimate",
+    "PlanDiagnostics",
+]
