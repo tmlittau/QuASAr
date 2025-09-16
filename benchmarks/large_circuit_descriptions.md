@@ -1,21 +1,35 @@
 # Large Circuit Benchmarks
 
 This document outlines composite circuits designed to stress QuASAr's
-partitioning engine. Each circuit combines independent subroutines followed by
-operations that entangle previously separate qubit groups.
+partitioning engine. Each circuit blends independent subroutines that eventually
+interact so the scheduler must juggle different simulation backends.
 
-## Dual GHZ with Global QFT
+## Surface-Code QAOA Hybrid
 
-Two disjoint registers of equal width are prepared in GHZ states. A global
-quantum Fourier transform then ties both registers together. The initial
-separable structure allows QuASAr to identify independent fragments before the
-QFT introduces all-to-all connectivity across the combined register.
+`surface_code_qaoa_circuit(bit_width, distance, rounds)` interleaves low-degree
+ring-graph QAOA layers with stabiliser cycles drawn from a distance-`distance`
+surface code. QAOA segments favour MPS-style simulation on the problem qubits,
+while the inserted Clifford stabiliser rounds operate on additional ancilla
+registers well suited to tableau backends. The alternating structure forces
+QuASAr to transition between representations as it steps through the layered
+schedule.
 
-## Adder–GHZ–QAOA Hybrid
+## GHZ–Grover Fusion Circuit
 
-A ripple-carry adder acts on two ``n``-bit operands while an ``n``-qubit GHZ
-state is generated on a separate register. Once the arithmetic and GHZ
-preparations finish, all qubits undergo several rounds of QAOA on a ring
-graph. The mix of classical reversible logic, entangled state preparation and
-variational layers highlights QuASAr's ability to switch between simulation
-methods.
+`ghz_grover_fusion_circuit(ghz_qubits, grover_qubits, iterations)` prepares a
+GHZ state and a Grover search routine on disjoint registers. Both prefixes are
+independent, enabling the planner to schedule them concurrently on specialised
+backends: stabiliser simulation for the GHZ branch and statevector simulation
+for the Grover oracle. A single cross-register entangling gate at the end fuses
+the partitions, demonstrating how QuASAr coordinates the union of incompatible
+substructures.
+
+## QAOA with Toffoli Gadget
+
+`qaoa_toffoli_gadget_circuit(width, rounds_before, rounds_after)` surrounds a
+central Toffoli gate with layers of ring-graph QAOA. The shallow QAOA segments
+admit efficient tensor-network simulation, but the non-Clifford three-qubit
+gadget temporarily breaks the low-degree pattern and prompts a backend switch.
+This circuit spotlights QuASAr's ability to introduce conversion layers around
+isolated nonlocal operations while resuming the original representation
+afterwards.
