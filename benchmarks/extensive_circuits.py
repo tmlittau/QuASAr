@@ -144,8 +144,64 @@ def ghz_grover_fusion_circuit(
     return Circuit(gates)
 
 
+def qaoa_toffoli_gadget_circuit(
+    width: int, rounds_before: int = 1, rounds_after: int = 1
+) -> Circuit:
+    """Insert a central Toffoli gadget between QAOA layers to induce switching.
+
+    The routine first applies ``rounds_before`` layers of the ring-graph QAOA
+    ansatz on ``width`` qubits using :func:`qaoa_circuit`.  A single ``CCX`` gate
+    then couples the three middle qubits, forcing QuASAr to migrate away from an
+    MPS backend, before ``rounds_after`` additional QAOA layers resume the
+    low-degree ``RZZ``/``RX`` pattern that remains MPS-suitable.
+
+    Parameters
+    ----------
+    width:
+        Number of qubits in the ring.  Must be at least three so that the
+        central ``CCX`` operates on distinct qubits.
+    rounds_before:
+        Number of QAOA layers to apply before inserting the Toffoli gadget.
+    rounds_after:
+        Number of QAOA layers appended after the Toffoli gadget.
+
+    Returns
+    -------
+    Circuit
+        Full circuit combining QAOA evolution with the central Toffoli gadget.
+    """
+
+    if width <= 0:
+        return Circuit([])
+    if width < 3:
+        raise ValueError("width must be at least three to place a CCX gadget")
+    if rounds_before < 0 or rounds_after < 0:
+        raise ValueError("QAOA round counts must be non-negative")
+
+    gates: List[Gate] = []
+
+    # Prefix QAOA layers, including the initial Hadamards even if zero rounds
+    # are requested so that the gadget always follows a uniform superposition.
+    prefix = qaoa_circuit(width, repetitions=rounds_before)
+    gates.extend(prefix.gates)
+
+    middle = width // 2
+    ccx_qubits = [middle - 1, middle, middle + 1]
+    gates.append(Gate("CCX", ccx_qubits))
+
+    if rounds_after > 0:
+        suffix = list(qaoa_circuit(width, repetitions=rounds_after).gates)
+        # Remove the initial Hadamard layer from the appended QAOA circuit to
+        # avoid duplicating it around the Toffoli gadget.
+        suffix = suffix[width:]
+        gates.extend(suffix)
+
+    return Circuit(gates)
+
+
 __all__ = [
     "surface_code_qaoa_circuit",
     "adder_ghz_qaoa_circuit",
     "ghz_grover_fusion_circuit",
+    "qaoa_toffoli_gadget_circuit",
 ]
