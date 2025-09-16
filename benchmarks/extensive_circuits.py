@@ -11,7 +11,7 @@ substantial entanglement across distant qubit groups.
 from typing import List
 
 from quasar.circuit import Circuit, Gate
-from .circuits import ghz_circuit, qaoa_circuit, adder_circuit, grover_circuit
+from .circuits import ghz_circuit, qaoa_circuit, grover_circuit
 from .large_scale_circuits import surface_corrected_qaoa
 
 
@@ -54,49 +54,6 @@ def surface_code_qaoa_circuit(
     """
 
     return surface_corrected_qaoa(bit_width, distance, rounds)
-
-
-def adder_ghz_qaoa_circuit(
-    bit_width: int, qaoa_layers: int = 1, adder_kind: str = "vbe"
-) -> Circuit:
-    """Combine a ripple-carry adder, GHZ state and global QAOA layers.
-
-    The circuit constructs a ``bit_width``-bit ripple-carry adder acting on two
-    registers.  An independent GHZ state of the same size is prepared on a
-    disjoint set of qubits.  All qubits then undergo ``qaoa_layers`` rounds of a
-    ring-graph QAOA circuit.  The total qubit count is ``3 * bit_width + 2``.
-
-    Parameters
-    ----------
-    bit_width:
-        Number of bits in the adder operands and in the GHZ register.
-    qaoa_layers:
-        Number of QAOA problem/mixing layer pairs to apply across the full
-        system.
-    adder_kind:
-        Variant of the ripple-carry adder.  Passed directly to
-        :func:`adder_circuit`.
-
-    Returns
-    -------
-    Circuit
-        Complete circuit combining arithmetic, entangling and QAOA layers.
-    """
-
-    if bit_width <= 0 or qaoa_layers <= 0:
-        return Circuit([])
-
-    adder = adder_circuit(bit_width, kind=adder_kind)
-    adder_qubits = 2 * bit_width + 2
-    ghz = ghz_circuit(bit_width)
-
-    gates = list(adder.gates)
-    gates.extend(_shift_gates(ghz.gates, adder_qubits))
-    total_qubits = adder_qubits + bit_width
-    qaoa = qaoa_circuit(total_qubits, repetitions=qaoa_layers)
-    gates.extend(qaoa.gates)
-    return Circuit(gates)
-
 
 def ghz_grover_fusion_circuit(
     ghz_qubits: int, grover_qubits: int, iterations: int = 1
@@ -201,7 +158,6 @@ def qaoa_toffoli_gadget_circuit(
 
 __all__ = [
     "surface_code_qaoa_circuit",
-    "adder_ghz_qaoa_circuit",
     "ghz_grover_fusion_circuit",
     "qaoa_toffoli_gadget_circuit",
 ]
