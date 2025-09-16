@@ -150,6 +150,9 @@ class CostEstimator:
             # storage than the raw node size suggests, hence a small scaling
             # factor keeps estimates realistic.
             "dd_mem": 0.05,
+            # Fixed runtime and memory overhead applied to every DD estimate.
+            "dd_base_time": 0.0,
+            "dd_base_mem": 0.0,
             # Each QMDD node stores four edges and one terminal index ~32 bytes.
             "dd_node_bytes": 32.0,
             # Approximate unique table overhead of 20% for edge caches.
@@ -541,11 +544,13 @@ class CostEstimator:
         gate_factor = math.log2(num_gates + 1)
         node_count = active_nodes * gate_factor
 
-        time = self.coeff["dd_gate"] * num_gates * node_count
+        base_time = self.coeff.get("dd_base_time", 0.0)
+        time = base_time + self.coeff["dd_gate"] * num_gates * node_count
 
         node_table = node_count * self.coeff.get("dd_node_bytes", 1.0)
         cache = node_table * self.coeff.get("dd_cache_overhead", 0.0)
-        memory = self.coeff.get("dd_mem", 1.0) * (node_table + cache)
+        base_mem = self.coeff.get("dd_base_mem", 0.0)
+        memory = base_mem + self.coeff.get("dd_mem", 1.0) * (node_table + cache)
 
         depth = math.log2(frontier) if frontier > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
