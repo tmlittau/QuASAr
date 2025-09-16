@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, TYPE_CHECKING, Set
+from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Set
 
-from .ssd import SSD, SSDPartition, ConversionLayer
+from .ssd import SSD, SSDPartition, ConversionLayer, PartitionTraceEntry
 from .cost import Backend, CostEstimator, Cost
 from .method_selector import MethodSelector, NoFeasibleBackendError
 
@@ -44,7 +44,14 @@ class Partitioner:
         self.max_time = max_time
         self.target_accuracy = target_accuracy
 
-    def partition(self, circuit: 'Circuit', *, graph_cut: bool = False) -> SSD:
+    def partition(
+        self,
+        circuit: 'Circuit',
+        *,
+        graph_cut: bool = False,
+        debug: bool = False,
+        trace: Callable[[PartitionTraceEntry], None] | None = None,
+    ) -> SSD:
         """Partition ``circuit`` into simulation segments.
 
         Parameters
@@ -56,6 +63,15 @@ class Partitioner:
             graph-based heuristic that balances load and minimises conversion
             boundaries.  The default ``False`` uses the original sequential
             heuristic.
+        debug:
+            When ``True`` return an :class:`~quasar.ssd.SSD` populated with a
+            ``trace`` describing every evaluated backend switch.
+        trace:
+            Optional callback invoked with a
+            :class:`~quasar.ssd.PartitionTraceEntry` for every potential
+            partition cut.  The returned :class:`~quasar.ssd.SSD` exposes the
+            collected entries via :attr:`~quasar.ssd.SSD.trace` when either
+            :paramref:`debug` is ``True`` or :paramref:`trace` is provided.
 
         Raises
         ------
@@ -64,8 +80,10 @@ class Partitioner:
             fragment.
         """
 
+        trace_log: List[PartitionTraceEntry] | None = [] if (debug or trace is not None) else None
+
         if not circuit.gates:
-            return SSD([])
+            return SSD([], trace=trace_log if trace_log is not None else [])
 
         gates = circuit.gates
 
@@ -102,6 +120,67 @@ class Partitioner:
                 rot_amp(frag),
             )
 
+        def _conversion_diagnostics(
+            source: Backend | None,
+            target: Backend,
+            boundary: Set[int],
+        ) -> Tuple[Tuple[int, ...], int, int | None, int | None, str | None, Cost | None]:
+            boundary_tuple = tuple(sorted(boundary))
+            size = len(boundary_tuple)
+            if size == 0 or source is None or source == target:
+                rank = 1 if size == 0 else 2 ** size
+                frontier = size
+                return boundary_tuple, size, rank, frontier, None, None
+            rank = 2 ** size
+            frontier = size
+            conv_est = self.estimator.conversion(
+                source,
+                target,
+                num_qubits=size,
+                rank=rank,
+                frontier=frontier,
+            )
+            return boundary_tuple, size, rank, frontier, conv_est.primitive, conv_est.cost
+
+        def _emit_trace(
+            *,
+            gate_index: int,
+            gate_name: str,
+            source: Backend | None,
+            target: Backend,
+            boundary: Set[int],
+            applied: bool,
+            reason: str,
+        ) -> None:
+            if trace_log is None and trace is None:
+                return
+            (
+                boundary_tuple,
+                boundary_size,
+                rank,
+                frontier,
+                primitive,
+                conv_cost,
+            ) = _conversion_diagnostics(source, target, boundary)
+            entry = PartitionTraceEntry(
+                gate_index=gate_index,
+                gate_name=gate_name,
+                from_backend=source,
+                to_backend=target,
+                boundary=boundary_tuple,
+                boundary_size=boundary_size,
+                rank=rank,
+                frontier=frontier,
+                primitive=primitive,
+                cost=conv_cost,
+                applied=applied,
+                reason=reason,
+            )
+            if trace is not None:
+                trace(entry)
+            if trace_log is not None:
+                trace_log.append(entry)
+
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]
             trial_qubits = current_qubits | set(gate.qubits)
@@ -121,6 +200,17 @@ class Partitioner:
             # for the remainder of the fragment to avoid flip-flopping to less
             # expressive backends based on early gates.
             if current_backend == Backend.STATEVECTOR:
+                if backend_trial != current_backend:
+                    boundary = current_qubits & future_qubits[idx]
+                    _emit_trace(
+                        gate_index=idx,
+                        gate_name=gate.gate,
+                        source=current_backend,
+                        target=backend_trial,
+                        boundary=boundary,
+                        applied=False,
+                        reason="statevector_lock",
+                    )
                 current_gates = trial_gates
                 current_qubits = trial_qubits
                 current_cost = cost_trial
@@ -177,28 +267,39 @@ class Partitioner:
                         max_time=self.max_time,
                         target_accuracy=self.target_accuracy,
                     )
-                    if boundary:
-                        boundary = sorted(boundary)
-                        rank = 2 ** len(boundary)
-                        frontier = len(boundary)
-                        conv_est = self.estimator.conversion(
-                            p_backend,
-                            s_backend,
-                            num_qubits=len(boundary),
-                            rank=rank,
-                            frontier=frontier,
-                        )
+                    (
+                        boundary_tuple,
+                        boundary_size,
+                        rank,
+                        frontier,
+                        primitive,
+                        conv_cost,
+                    ) = _conversion_diagnostics(p_backend, s_backend, boundary)
+                    if (
+                        boundary_size
+                        and primitive is not None
+                        and conv_cost is not None
+                    ):
                         conversions.append(
                             ConversionLayer(
-                                boundary=tuple(boundary),
+                                boundary=boundary_tuple,
                                 source=p_backend,
                                 target=s_backend,
                                 rank=rank,
                                 frontier=frontier,
-                                primitive=conv_est.primitive,
-                                cost=conv_est.cost,
+                                primitive=primitive,
+                                cost=conv_cost,
                             )
                         )
+                    _emit_trace(
+                        gate_index=idx,
+                        gate_name=gate.gate,
+                        source=p_backend,
+                        target=s_backend,
+                        boundary=boundary,
+                        applied=True,
+                        reason="graph_cut",
+                    )
 
                     current_gates = s_gates
                     current_qubits = s_qubits
@@ -210,6 +311,16 @@ class Partitioner:
                 # the backend without creating a conversion cut. This avoids
                 # spurious partitions for early single-qubit preamble.
                 if not any(len(g.qubits) > 1 for g in current_gates):
+                    boundary = current_qubits & future_qubits[idx]
+                    _emit_trace(
+                        gate_index=idx,
+                        gate_name=gate.gate,
+                        source=current_backend,
+                        target=backend_trial,
+                        boundary=boundary,
+                        applied=True,
+                        reason="single_qubit_preamble",
+                    )
                     current_gates = trial_gates
                     current_qubits = trial_qubits
                     current_backend = backend_trial
@@ -223,28 +334,40 @@ class Partitioner:
                     )
                 )
 
-                boundary = sorted(current_qubits & future_qubits[idx])
-                if boundary:
-                    rank = 2 ** len(boundary)
-                    frontier = len(boundary)
-                    conv_est = self.estimator.conversion(
-                        current_backend,
-                        backend_trial,
-                        num_qubits=len(boundary),
-                        rank=rank,
-                        frontier=frontier,
-                    )
+                boundary = current_qubits & future_qubits[idx]
+                (
+                    boundary_tuple,
+                    boundary_size,
+                    rank,
+                    frontier,
+                    primitive,
+                    conv_cost,
+                ) = _conversion_diagnostics(current_backend, backend_trial, boundary)
+                if (
+                    boundary_size
+                    and primitive is not None
+                    and conv_cost is not None
+                ):
                     conversions.append(
                         ConversionLayer(
-                            boundary=tuple(boundary),
+                            boundary=boundary_tuple,
                             source=current_backend,
                             target=backend_trial,
                             rank=rank,
                             frontier=frontier,
-                            primitive=conv_est.primitive,
-                            cost=conv_est.cost,
+                            primitive=primitive,
+                            cost=conv_cost,
                         )
                     )
+                _emit_trace(
+                    gate_index=idx,
+                    gate_name=gate.gate,
+                    source=current_backend,
+                    target=backend_trial,
+                    boundary=boundary,
+                    applied=True,
+                    reason="backend_switch",
+                )
 
                 current_gates = [gate]
                 current_qubits = set(gate.qubits)
@@ -278,9 +401,17 @@ class Partitioner:
                 current_cost = cost_trial
 
         if current_gates:
-            partitions.extend(self._build_partitions(current_gates, current_backend, current_cost))
+            partitions.extend(
+                self._build_partitions(current_gates, current_backend, current_cost)
+            )
 
-        ssd = SSD(partitions=partitions, conversions=conversions)
+        trace_data: List[PartitionTraceEntry]
+        if trace_log is not None:
+            trace_data = trace_log
+        else:
+            trace_data = []
+
+        ssd = SSD(partitions=partitions, conversions=conversions, trace=trace_data)
         ssd.build_metadata()
         return ssd
 

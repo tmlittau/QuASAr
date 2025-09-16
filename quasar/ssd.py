@@ -7,6 +7,42 @@ from .cost import Backend, Cost
 
 
 @dataclass
+class PartitionTraceEntry:
+    """Diagnostics describing partition boundary decisions.
+
+    Attributes
+    ----------
+    gate_index, gate_name:
+        Identify the gate that triggered the decision.
+    from_backend, to_backend:
+        Backends involved in the potential switch.
+    boundary, boundary_size:
+        Sorted qubit indices along the cut and their count.
+    rank, frontier:
+        Estimated Schmidt rank and decision diagram frontier across the cut.
+    primitive, cost:
+        Conversion primitive and estimated cost when a conversion is required.
+    applied:
+        ``True`` when the backend change was accepted.
+    reason:
+        Short textual explanation for the decision.
+    """
+
+    gate_index: int
+    gate_name: str
+    from_backend: Backend | None
+    to_backend: Backend
+    boundary: Tuple[int, ...] = ()
+    boundary_size: int = 0
+    rank: int | None = None
+    frontier: int | None = None
+    primitive: str | None = None
+    cost: Cost | None = None
+    applied: bool = False
+    reason: str = ""
+
+
+@dataclass
 class SSDPartition:
     """Represents a set of identical subsystems along with metadata.
 
@@ -66,6 +102,9 @@ class SSD:
     rank: int | None = None
     frontier: int | None = None
     fingerprint: Hashable | None = None
+    trace: List[PartitionTraceEntry] = field(
+        default_factory=list, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:  # pragma: no cover - trivial
         if self.fingerprint is None:
