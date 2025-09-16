@@ -11,7 +11,8 @@ substantial entanglement across distant qubit groups.
 from typing import List
 
 from quasar.circuit import Circuit, Gate
-from .circuits import ghz_circuit, qft_circuit, qaoa_circuit, adder_circuit
+from .circuits import ghz_circuit, qaoa_circuit, adder_circuit
+from .large_scale_circuits import surface_corrected_qaoa
 
 
 def _shift_gates(gates: List[Gate], offset: int) -> List[Gate]:
@@ -20,32 +21,39 @@ def _shift_gates(gates: List[Gate], offset: int) -> List[Gate]:
     return [Gate(g.gate, [q + offset for q in g.qubits], dict(g.params)) for g in gates]
 
 
-def dual_ghz_qft_circuit(width: int) -> Circuit:
-    """Prepare two GHZ states and entangle them with a global QFT.
+def surface_code_qaoa_circuit(
+    bit_width: int, distance: int = 3, rounds: int = 1
+) -> Circuit:
+    """QAOA ring interleaved with surface-code cycles for hybrid partitioning.
+
+    The returned circuit is constructed by
+    :func:`benchmarks.large_scale_circuits.surface_corrected_qaoa` and mixes two
+    distinct subroutines that QuASAr partitions onto different simulators.  Each
+    QAOA layer contains low-degree ``RZZ``/``RX`` rotations on a cyclic register,
+    encouraging an MPS backend, while the inserted surface-code cycles consist
+    solely of Clifford operations on additional ancilla qubits, ideal for the
+    tableau simulator.  Analysing the circuit therefore produces alternating
+    partitions whose state descriptor repeatedly transitions from the MPS
+    representation into the stabiliser tableau and back again.
 
     Parameters
     ----------
-    width:
-        Number of qubits in each GHZ register.  The circuit operates on
-        ``2 * width`` qubits in total.
+    bit_width:
+        Number of problem qubits arranged on a cycle graph.
+    distance:
+        Code distance of the surface-code cycles.  The lattice must contain at
+        least ``bit_width`` data qubits.
+    rounds:
+        Number of QAOA layers, each followed by one surface-code round.
 
     Returns
     -------
     Circuit
-        Combined circuit generating two disjoint GHZ states followed by a
-        quantum Fourier transform over all qubits.
+        Combined circuit interleaving QAOA dynamics with stabiliser correction
+        layers.
     """
 
-    if width <= 0:
-        return Circuit([])
-
-    ghz_a = ghz_circuit(width)
-    ghz_b = ghz_circuit(width)
-    gates = list(ghz_a.gates)
-    gates.extend(_shift_gates(ghz_b.gates, width))
-    qft = qft_circuit(2 * width)
-    gates.extend(qft.gates)
-    return Circuit(gates)
+    return surface_corrected_qaoa(bit_width, distance, rounds)
 
 
 def adder_ghz_qaoa_circuit(
@@ -90,4 +98,4 @@ def adder_ghz_qaoa_circuit(
     return Circuit(gates)
 
 
-__all__ = ["dual_ghz_qft_circuit", "adder_ghz_qaoa_circuit"]
+__all__ = ["surface_code_qaoa_circuit", "adder_ghz_qaoa_circuit"]
