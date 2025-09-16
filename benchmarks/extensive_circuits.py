@@ -11,7 +11,7 @@ substantial entanglement across distant qubit groups.
 from typing import List
 
 from quasar.circuit import Circuit, Gate
-from .circuits import ghz_circuit, qaoa_circuit, adder_circuit
+from .circuits import ghz_circuit, qaoa_circuit, adder_circuit, grover_circuit
 from .large_scale_circuits import surface_corrected_qaoa
 
 
@@ -98,4 +98,54 @@ def adder_ghz_qaoa_circuit(
     return Circuit(gates)
 
 
-__all__ = ["surface_code_qaoa_circuit", "adder_ghz_qaoa_circuit"]
+def ghz_grover_fusion_circuit(
+    ghz_qubits: int, grover_qubits: int, iterations: int = 1
+) -> Circuit:
+    """Prepare independent GHZ and Grover prefixes before a fusion entangler.
+
+    The first register is initialised in a GHZ state, consisting entirely of
+    Clifford operations that QuASAr assigns to the tableau backend.  In
+    parallel, a Grover search routine runs on a second register shifted by
+    ``ghz_qubits`` positions; its non-Clifford multi-controlled oracles remain
+    on the statevector backend.  Because the prefixes touch disjoint qubit
+    sets, the scheduler can execute them concurrently and only synchronises
+    when the final cross-register ``CX`` fuses the two partitions into a single
+    state descriptor.
+
+    Parameters
+    ----------
+    ghz_qubits:
+        Number of qubits in the GHZ register.
+    grover_qubits:
+        Number of qubits processed by the Grover search.
+    iterations:
+        Grover iterations applied to the second register.
+
+    Returns
+    -------
+    Circuit
+        Combined circuit that prepares both registers and entangles them once
+        their prefixes finish executing on separate backends.
+    """
+
+    gates: List[Gate] = []
+
+    if ghz_qubits > 0:
+        ghz = ghz_circuit(ghz_qubits)
+        gates.extend(ghz.gates)
+
+    if grover_qubits > 0 and iterations > 0:
+        grover = grover_circuit(grover_qubits, n_iterations=iterations)
+        gates.extend(_shift_gates(grover.gates, ghz_qubits))
+
+    if ghz_qubits > 0 and grover_qubits > 0 and iterations > 0:
+        gates.append(Gate("CX", [ghz_qubits - 1, ghz_qubits]))
+
+    return Circuit(gates)
+
+
+__all__ = [
+    "surface_code_qaoa_circuit",
+    "adder_ghz_qaoa_circuit",
+    "ghz_grover_fusion_circuit",
+]
