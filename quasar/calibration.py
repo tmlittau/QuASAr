@@ -133,6 +133,29 @@ def benchmark_mps_baseline(num_qubits: int = 3) -> Dict[str, float]:
     return {"mps_base_time": elapsed, "mps_base_mem": float(peak)}
 
 
+def benchmark_dd_baseline(num_qubits: int = 3) -> Dict[str, float]:
+    """Measure fixed overhead for decision diagram simulation."""
+
+    from .backends.mqt_dd import DecisionDiagramBackend
+    import tracemalloc
+
+    backend = DecisionDiagramBackend()
+    backend.load(num_qubits)
+    backend.prepare_benchmark()
+    backend.apply_gate("H", [0])
+    for qubit in range(1, num_qubits):
+        backend.apply_gate("CX", [0, qubit])
+
+    tracemalloc.start()
+    start = perf_counter()
+    backend.run_benchmark()
+    elapsed = perf_counter() - start
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    return {"dd_base_time": elapsed, "dd_base_mem": float(peak)}
+
+
 def benchmark_dd(num_gates: int = 50, frontier: int = 32) -> Dict[str, float]:
     ops = num_gates * frontier
     elapsed = _bench_loop(ops)
@@ -180,6 +203,7 @@ def run_calibration() -> Dict[str, float]:
     coeff.update(benchmark_mps())
     coeff.update(benchmark_mps_baseline())
     coeff.update(benchmark_dd())
+    coeff.update(benchmark_dd_baseline())
     coeff.update(benchmark_b2b())
     coeff.update(benchmark_lw())
     coeff.update(benchmark_st())
