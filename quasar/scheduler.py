@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Execution scheduler for QuASAr."""
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List
+from dataclasses import dataclass, field, fields
+from typing import Callable, Dict, List, Sequence
 from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
@@ -23,11 +23,139 @@ from .backends import (
     StimBackend,
     DecisionDiagramBackend,
 )
+from .backends.mps import tensor_product as mps_tensor_product
 from .backends.stim_backend import direct_sum
 from quasar_convert import ConversionEngine, SSD as CESD
 
 # Type alias for cost monitoring hook
 CostHook = Callable[[PlanStep, Cost, Cost], bool]
+
+
+def _clone_backend_instance(template: object) -> object:
+    """Return a fresh backend instance mirroring ``template`` initial fields."""
+
+    cls = template.__class__
+    try:
+        field_defs = fields(cls)
+    except TypeError:  # pragma: no cover - non-dataclass fallback
+        return cls()
+    init_kwargs = {
+        f.name: getattr(template, f.name)
+        for f in field_defs
+        if f.init and hasattr(template, f.name)
+    }
+    return cls(**init_kwargs)
+
+
+def _tensor_statevectors(
+    left_state: np.ndarray,
+    left_qubits: Sequence[int],
+    right_state: np.ndarray,
+    right_qubits: Sequence[int],
+    merged_qubits: Sequence[int],
+) -> np.ndarray:
+    """Return the tensor product of two local statevectors.
+
+    The resulting vector follows the little-endian ordering dictated by
+    ``merged_qubits``.
+    """
+
+    num_qubits = len(merged_qubits)
+    result = np.zeros(1 << num_qubits, dtype=complex)
+    left_positions = [merged_qubits.index(q) for q in left_qubits]
+    right_positions = [merged_qubits.index(q) for q in right_qubits]
+
+    left_state = np.asarray(left_state, dtype=complex)
+    right_state = np.asarray(right_state, dtype=complex)
+
+    for basis in range(1 << num_qubits):
+        bits = [(basis >> i) & 1 for i in range(num_qubits)]
+        left_index = 0
+        for offset, pos in enumerate(left_positions):
+            left_index |= bits[pos] << offset
+        right_index = 0
+        for offset, pos in enumerate(right_positions):
+            right_index |= bits[pos] << offset
+        amplitude_left = left_state[left_index] if left_positions else 1.0
+        amplitude_right = right_state[right_index] if right_positions else 1.0
+        result[basis] = amplitude_left * amplitude_right
+
+    return result
+
+
+def merge_subsystems(
+    left: object,
+    right: object,
+    gate: Gate,
+    *,
+    left_qubits: Sequence[int],
+    right_qubits: Sequence[int],
+) -> tuple[object, tuple[int, ...]]:
+    """Merge two backend instances into a single combined subsystem."""
+
+    _ = gate  # gate information may influence ordering in future enhancements
+    backend_kind = getattr(left, "backend", None)
+    if backend_kind != getattr(right, "backend", None):
+        raise TypeError("Cannot merge simulators from different backends")
+    merged_qubits: tuple[int, ...] = tuple(left_qubits) + tuple(
+        q for q in right_qubits if q not in left_qubits
+    )
+    merged = _clone_backend_instance(left)
+    if backend_kind == Backend.STATEVECTOR:
+        merged.load(len(merged_qubits))
+        left_state = np.asarray(left.statevector(), dtype=complex)
+        right_state = np.asarray(right.statevector(), dtype=complex)
+        combined = _tensor_statevectors(
+            left_state, left_qubits, right_state, right_qubits, merged_qubits
+        )
+        merged.ingest(combined, num_qubits=len(merged_qubits))
+    elif backend_kind == Backend.MPS:
+        merged.load(len(merged_qubits))
+        left_ssd = left.extract_ssd()
+        right_ssd = right.extract_ssd()
+        left_state = left_ssd.partitions[0].state if left_ssd.partitions else None
+        right_state = right_ssd.partitions[0].state if right_ssd.partitions else None
+        combined = mps_tensor_product(left_state, right_state)
+        merged.ingest(combined, num_qubits=len(merged_qubits))
+    elif backend_kind == Backend.TABLEAU:
+        merged.load(len(merged_qubits))
+        left_ssd = left.extract_ssd()
+        right_ssd = right.extract_ssd()
+        left_tab = left_ssd.partitions[0].state if left_ssd.partitions else None
+        right_tab = right_ssd.partitions[0].state if right_ssd.partitions else None
+        if left_tab is None or right_tab is None:
+            combined = _tensor_statevectors(
+                np.asarray(left.statevector(), dtype=complex),
+                left_qubits,
+                np.asarray(right.statevector(), dtype=complex),
+                right_qubits,
+                merged_qubits,
+            )
+            merged.ingest(combined, num_qubits=len(merged_qubits))
+        else:
+            combined_tab = direct_sum(left_tab, right_tab)
+            merged.ingest(combined_tab, num_qubits=len(merged_qubits))
+    elif backend_kind == Backend.DECISION_DIAGRAM:
+        merged.load(len(merged_qubits))
+        package = merged.package
+        if package is None:
+            raise RuntimeError("Decision diagram backend failed to initialise package")
+        left_vec = package.from_vector(np.asarray(left.statevector(), dtype=complex))
+        right_vec = package.from_vector(np.asarray(right.statevector(), dtype=complex))
+        combined_vec = package.vector_kronecker(
+            left_vec, right_vec, len(right_qubits)
+        )
+        package.inc_ref_vec(combined_vec)
+        if merged.state is not None:
+            package.dec_ref_vec(merged.state)
+        merged.state = combined_vec
+    else:  # pragma: no cover - unsupported backend
+        raise NotImplementedError(f"Unsupported backend for merge: {backend_kind}")
+
+    merged.history = list(getattr(left, "history", [])) + list(
+        getattr(right, "history", [])
+    )
+    return merged, merged_qubits
 
 
 @dataclass
@@ -513,32 +641,45 @@ class Scheduler:
             plan.explicit_conversions = []
         if not hasattr(plan, "replay_ssd"):
             plan.replay_ssd = {}
-        sims: Dict[tuple, object] = {}
+        sims: Dict[tuple[frozenset[int], Backend], tuple[object, tuple[int, ...]]] = {}
         for idx, step in enumerate(plan.steps):
             segment = gates[step.start : step.end]
             target = step.backend
-            qubits = frozenset(q for g in segment for q in g.qubits)
+            qubit_set = {q for g in segment for q in g.qubits}
+            key = (frozenset(qubit_set), target)
+            sim_obj: object | None = None
+            sim_qubits: tuple[int, ...] | None = None
             if len(segment) == 1 and len(segment[0].qubits) == 2:
                 gate = segment[0]
                 left_info = next(
-                    ((k, s) for k, s in sims.items() if gate.qubits[0] in k[0]),
+                    (
+                        (k, s)
+                        for k, s in sims.items()
+                        if gate.qubits[0] in k[0]
+                    ),
                     None,
                 )
                 right_info = next(
-                    ((k, s) for k, s in sims.items() if gate.qubits[1] in k[0]),
+                    (
+                        (k, s)
+                        for k, s in sims.items()
+                        if gate.qubits[1] in k[0]
+                    ),
                     None,
                 )
-                if left_info and right_info and left_info[1] != right_info[1]:
-                    if self.conversion_engine is None:
-                        self.conversion_engine = ConversionEngine()
-                    l_ssd = CESD(boundary_qubits=[gate.qubits[0]], top_s=2)
-                    r_ssd = CESD(boundary_qubits=[gate.qubits[1]], top_s=2)
-                    l_ssd.fingerprint = (tuple(l_ssd.boundary_qubits or []), l_ssd.top_s)
-                    r_ssd.fingerprint = (tuple(r_ssd.boundary_qubits or []), r_ssd.top_s)
-                    self.ssd_cache.bridge_tensor(
-                        l_ssd,
-                        r_ssd,
-                        lambda: self.conversion_engine.build_bridge_tensor(l_ssd, r_ssd),
+                if (
+                    left_info
+                    and right_info
+                    and left_info[1][0] is not right_info[1][0]
+                ):
+                    left_sim, left_qubits = left_info[1]
+                    right_sim, right_qubits = right_info[1]
+                    merged_sim, merged_qubits = merge_subsystems(
+                        left_sim,
+                        right_sim,
+                        gate,
+                        left_qubits=left_qubits,
+                        right_qubits=right_qubits,
                     )
                     layer = ConversionLayer(
                         boundary=tuple(gate.qubits),
@@ -551,21 +692,38 @@ class Scheduler:
                     )
                     plan.explicit_conversions.append(layer)
                     circuit.ssd.conversions.append(layer)
-                    sim_obj = type(self.backends[target])()
-                    sim_obj.load(circuit.num_qubits)
-                    for g in gates[: step.start]:
-                        sim_obj.apply_gate(g.gate, g.qubits, g.params)
+                    for victim in (left_info[0], right_info[0]):
+                        sims.pop(victim, None)
+                    key = (frozenset(merged_qubits), target)
+                    sim_obj = merged_sim
+                    sim_qubits = merged_qubits
+                    qubit_set = set(merged_qubits)
+                    sims[key] = (sim_obj, sim_qubits)
                     try:
-                        plan.replay_ssd[idx] = sim_obj.statevector()
+                        plan.replay_ssd[idx] = np.array(
+                            merged_sim.statevector(), copy=True
+                        )
                     except Exception:
-                        plan.replay_ssd[idx] = sim_obj.extract_ssd()
-                    sims.clear()
-                    sims[(frozenset(range(circuit.num_qubits)), target)] = object()
+                        plan.replay_ssd[idx] = merged_sim.extract_ssd()
+            if sim_obj is None or sim_qubits is None:
+                if key not in sims:
+                    sim_qubits = tuple(sorted(qubit_set))
+                    template = self.backends[target]
+                    sim_obj = _clone_backend_instance(template)
+                    sim_obj.load(len(sim_qubits))
+                    sims[key] = (sim_obj, sim_qubits)
+                else:
+                    sim_obj, sim_qubits = sims[key]
+            for existing_key in list(sims.keys()):
+                if existing_key == key:
                     continue
-            for k in list(sims.keys()):
-                if k[0] & qubits and k[1] != target:
-                    sims.pop(k)
-            sims[(qubits, target)] = object()
+                if existing_key[0] & set(sim_qubits) and existing_key[1] != target:
+                    sims.pop(existing_key)
+            mapping = {q: idx for idx, q in enumerate(sim_qubits)}
+            for gate in segment:
+                local_qubits = [mapping[q] for q in gate.qubits]
+                sim_obj.apply_gate(gate.gate, local_qubits, gate.params)
+            sims[key] = (sim_obj, sim_qubits)
 
         if max_time is not None and total_cost.time > max_time:
             raise ValueError("Estimated runtime exceeds max_time")
