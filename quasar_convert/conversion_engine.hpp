@@ -168,6 +168,10 @@ class ConversionEngine {
     // first materialising the corresponding statevector and then ingesting it
     // into the DD package.
     dd::vEdge tableau_to_dd(const StimTableau& tableau) const;
+    // Attempt to infer a stabilizer tableau directly from a decision diagram
+    // representation without materialising a dense statevector.  Returns
+    // ``std::nullopt`` when the state does not match any recognised pattern.
+    std::optional<StimTableau> dd_to_tableau(const dd::vEdge& edge) const;
 #endif
 
 #ifdef QUASAR_USE_STIM
@@ -189,10 +193,14 @@ class ConversionEngine {
         const std::vector<std::complex<double>>& state) const;
 #endif
 
+    std::size_t dense_statevector_queries() const { return dense_statevector_calls; }
+
   private:
 #ifdef QUASAR_USE_MQT
     std::unique_ptr<dd::Package<>> dd_pkg;
 #endif
+
+    mutable std::size_t dense_statevector_calls = 0;
 
     std::vector<std::vector<std::complex<double>>>
     statevector_to_mps(const std::vector<std::complex<double>>& state,

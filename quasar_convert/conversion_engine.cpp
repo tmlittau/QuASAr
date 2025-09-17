@@ -8,6 +8,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #ifdef QUASAR_USE_MQT
 #include <dd/Edge.hpp>
 #include <dd/Node.hpp>
@@ -407,6 +408,7 @@ ConversionEngine::dd_to_statevector(const dd::vEdge& edge) const {
     // ``edge``.  ``getVector`` returns a flat vector ordered with qubit 0 as the
     // least significant bit.  Normalise the result to guard against numerical
     // imprecision in the underlying DD representation.
+    ++dense_statevector_calls;
     auto vec = dd_pkg->getVector(edge);
     double norm = 0.0;
     for (const auto& amp : vec) {
@@ -423,8 +425,148 @@ ConversionEngine::dd_to_statevector(const dd::vEdge& edge) const {
 
 std::vector<std::vector<std::complex<double>>>
 ConversionEngine::dd_to_mps(const dd::vEdge& edge, std::size_t chi) const {
-    auto state = dd_to_statevector(edge);
-    return statevector_to_mps(state, chi);
+    if (edge.w.exactlyZero()) {
+        return {};
+    }
+
+    std::size_t n = 0;
+    if (!dd::vNode::isTerminal(edge.p)) {
+        n = static_cast<std::size_t>(edge.p->v) + 1U;
+    }
+    if (n == 0) {
+        return {};
+    }
+
+    const auto sparse = edge.getSparseVector();
+    if (sparse.empty()) {
+        return {};
+    }
+
+    std::unordered_map<std::size_t, std::vector<std::complex<double>>> columns;
+    columns.reserve(sparse.size());
+    double norm = 0.0;
+    for (const auto& [idx, amp] : sparse) {
+        std::complex<double> val(static_cast<double>(amp.real()),
+                                 static_cast<double>(amp.imag()));
+        norm += std::norm(val);
+        columns.emplace(idx, std::vector<std::complex<double>>{val});
+    }
+    if (norm == 0.0) {
+        return {};
+    }
+    const double inv_norm = 1.0 / std::sqrt(norm);
+    for (auto& [_, vec] : columns) {
+        vec[0] *= inv_norm;
+    }
+
+    std::vector<std::vector<std::complex<double>>> tensors;
+    tensors.reserve(n);
+
+    std::size_t left_dim = 1;
+
+    for (std::size_t qubit = 0; qubit < n; ++qubit) {
+        const std::size_t rows = left_dim * 2;
+
+        std::unordered_map<std::size_t, std::vector<std::complex<double>>> grouped;
+        grouped.reserve(columns.size());
+
+        for (const auto& [suffix, vec] : columns) {
+            const std::size_t bit = suffix & 1ULL;
+            const std::size_t next_suffix = suffix >> 1ULL;
+            auto& column = grouped[next_suffix];
+            if (column.empty()) {
+                column.assign(rows, {0.0, 0.0});
+            }
+            for (std::size_t i = 0; i < left_dim; ++i) {
+                column[i * 2 + bit] += vec[i];
+            }
+        }
+
+        std::vector<std::pair<std::size_t, std::vector<std::complex<double>>>> ordered;
+        ordered.reserve(grouped.size());
+        for (auto& entry : grouped) {
+            if (entry.second.size() < rows) {
+                entry.second.resize(rows, {0.0, 0.0});
+            }
+            ordered.emplace_back(entry.first, std::move(entry.second));
+        }
+        std::sort(ordered.begin(), ordered.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        const std::size_t cols = std::max<std::size_t>(1, ordered.size());
+        std::size_t rank = std::min(rows, cols);
+        if (chi != 0) {
+            rank = std::min(rank, chi);
+        }
+        if (rank == 0) {
+            rank = 1;
+        }
+
+        std::vector<std::complex<double>> Q(rows * rank, {0.0, 0.0});
+        std::vector<std::complex<double>> R(rank * cols, {0.0, 0.0});
+
+        for (std::size_t k = 0; k < rank; ++k) {
+            auto& column = ordered[k].second;
+            for (std::size_t r = 0; r < rows; ++r) {
+                Q[r * rank + k] = column[r];
+            }
+            for (std::size_t j = 0; j < k; ++j) {
+                std::complex<double> dot{0.0, 0.0};
+                for (std::size_t r = 0; r < rows; ++r) {
+                    dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                }
+                for (std::size_t r = 0; r < rows; ++r) {
+                    Q[r * rank + k] -= dot * Q[r * rank + j];
+                }
+                R[j * cols + k] = dot;
+            }
+            double norm_col = 0.0;
+            for (std::size_t r = 0; r < rows; ++r) {
+                norm_col += std::norm(Q[r * rank + k]);
+            }
+            norm_col = std::sqrt(norm_col);
+            if (norm_col > 0.0) {
+                for (std::size_t r = 0; r < rows; ++r) {
+                    Q[r * rank + k] /= norm_col;
+                }
+            }
+            R[k * cols + k] = norm_col;
+            for (std::size_t c = k + 1; c < cols; ++c) {
+                std::complex<double> dot{0.0, 0.0};
+                auto& vec = ordered[c].second;
+                for (std::size_t r = 0; r < rows; ++r) {
+                    dot += std::conj(Q[r * rank + k]) * vec[r];
+                }
+                R[k * cols + c] = dot;
+                for (std::size_t r = 0; r < rows; ++r) {
+                    vec[r] -= dot * Q[r * rank + k];
+                }
+            }
+        }
+
+        std::vector<std::complex<double>> tensor(rows * rank, {0.0, 0.0});
+        for (std::size_t r = 0; r < rows; ++r) {
+            for (std::size_t k = 0; k < rank; ++k) {
+                tensor[r * rank + k] = Q[r * rank + k];
+            }
+        }
+        tensors.push_back(std::move(tensor));
+
+        std::unordered_map<std::size_t, std::vector<std::complex<double>>> next_columns;
+        next_columns.reserve(cols);
+        for (std::size_t c = 0; c < cols; ++c) {
+            std::vector<std::complex<double>> col(rank, {0.0, 0.0});
+            for (std::size_t k = 0; k < rank; ++k) {
+                col[k] = R[k * cols + c];
+            }
+            next_columns.emplace(ordered[c].first, std::move(col));
+        }
+
+        columns = std::move(next_columns);
+        left_dim = rank;
+    }
+
+    return tensors;
 }
 #endif
 
@@ -440,6 +582,130 @@ dd::vEdge ConversionEngine::tableau_to_dd(const StimTableau& tableau) const {
                             static_cast<dd::fp>(amp.imag()));
     }
     return dd::makeStateFromVector(dd_vec, *dd_pkg);
+}
+#endif
+
+#if defined(QUASAR_USE_MQT) && defined(QUASAR_USE_STIM)
+std::optional<StimTableau>
+ConversionEngine::dd_to_tableau(const dd::vEdge& edge) const {
+    if (edge.w.exactlyZero()) {
+        return std::nullopt;
+    }
+
+    std::size_t n = 0;
+    if (!dd::vNode::isTerminal(edge.p)) {
+        n = static_cast<std::size_t>(edge.p->v) + 1U;
+    }
+
+    const auto sparse = edge.getSparseVector();
+    if (sparse.empty()) {
+        return StimTableau(n);
+    }
+
+    std::unordered_map<std::size_t, std::complex<double>> amplitudes;
+    amplitudes.reserve(sparse.size());
+    double norm = 0.0;
+    for (const auto& [idx, amp] : sparse) {
+        std::complex<double> val(static_cast<double>(amp.real()),
+                                 static_cast<double>(amp.imag()));
+        norm += std::norm(val);
+        amplitudes.emplace(idx, val);
+    }
+    if (norm == 0.0) {
+        return std::nullopt;
+    }
+    const double inv_norm = 1.0 / std::sqrt(norm);
+    for (auto& [_, val] : amplitudes) {
+        val *= inv_norm;
+    }
+
+    const double tol = 1e-9;
+    auto get_amp = [&amplitudes](std::size_t idx) {
+        auto it = amplitudes.find(idx);
+        if (it == amplitudes.end()) {
+            return std::complex<double>{0.0, 0.0};
+        }
+        return it->second;
+    };
+
+    if (amplitudes.size() == 1) {
+        if (std::abs(std::abs(amplitudes.begin()->second) - 1.0) <= tol) {
+            return StimTableau(n);
+        }
+    }
+
+    const std::size_t dim = 1ULL << n;
+    auto phase_ok = [](std::complex<double> z) {
+        static const std::complex<double> phases[] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (const auto& p : phases) {
+            if (std::abs(z - p) < 1e-9) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (amplitudes.size() == dim) {
+        const double target_mag = 1.0 / std::sqrt(static_cast<double>(dim));
+        std::complex<double> ref = get_amp(0);
+        if (std::abs(ref) > tol) {
+            std::complex<double> ref_phase = ref / target_mag;
+            bool uniform = true;
+            for (const auto& [_, amp] : amplitudes) {
+                if (std::abs(std::abs(amp) - target_mag) > tol) {
+                    uniform = false;
+                    break;
+                }
+                std::complex<double> rel = amp / (target_mag * ref_phase);
+                if (!phase_ok(rel)) {
+                    uniform = false;
+                    break;
+                }
+            }
+            if (uniform) {
+                return StimTableau(n);
+            }
+        }
+
+        bool factorable = std::abs(get_amp(0)) > tol;
+        std::vector<std::complex<double>> qubit_phase(n, {1.0, 0.0});
+        if (factorable) {
+            const std::complex<double> base = get_amp(0);
+            for (std::size_t bit = 0; bit < n && factorable; ++bit) {
+                const auto amp1 = get_amp(1ULL << bit);
+                if (std::abs(std::abs(amp1) - target_mag) > tol ||
+                    std::abs(std::abs(base) - target_mag) > tol) {
+                    factorable = false;
+                    break;
+                }
+                auto rel = amp1 / base;
+                if (!phase_ok(rel)) {
+                    factorable = false;
+                    break;
+                }
+                qubit_phase[bit] = rel;
+            }
+            if (factorable) {
+                for (const auto& [idx, amp] : amplitudes) {
+                    std::complex<double> expected = base;
+                    for (std::size_t bit = 0; bit < n; ++bit) {
+                        if ((idx >> bit) & 1ULL) {
+                            expected *= qubit_phase[bit];
+                        }
+                    }
+                    if (std::abs(amp - expected) > tol) {
+                        factorable = false;
+                        break;
+                    }
+                }
+            }
+            if (factorable) {
+                return StimTableau(n);
+            }
+        }
+    }
+
+    return std::nullopt;
 }
 #endif
 
