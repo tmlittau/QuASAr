@@ -5,6 +5,65 @@ project, captures the thresholds and decision heuristics embedded in the
 planner, and outlines the data required for a theoretical calculator that can
 replicate QuASAr's partitioning choices.
 
+## Notebook workflow
+
+### Environment setup
+
+1. Install QuASAr in editable mode together with its testing extras so the
+   cost-model helpers and planner logic used inside the notebook are importable::
+
+       pip install -e .[test]
+
+2. Add a Jupyter frontend if it is not already available.  Any of
+   ``jupyter lab``, ``jupyter notebook`` or ``jupyter nbclassic`` works::
+
+       pip install jupyterlab
+
+3. Launch Jupyter from the project root and open
+   ``docs/partitioning_thresholds.ipynb``::
+
+       jupyter lab docs/partitioning_thresholds.ipynb
+
+   Running the notebook from the repository root ensures relative imports such as
+   ``from quasar.cost import CostEstimator`` resolve correctly without adjusting
+   ``sys.path`` inside the notebook cells.
+
+### Calibration inputs
+
+The notebook reads the same coefficient tables consumed by
+``quasar.cost.CostEstimator`` so that the plotted cross-overs match the planner's
+runtime predictions.  Calibration utilities live in ``quasar/calibration.py`` and
+produce JSON files under ``calibration/``.  Two entry points are available:
+
+* ``python -m quasar.calibration --output calibration/coeff_dev.json`` runs the
+  lightweight microbenchmarks and writes a fresh coefficient table.
+* ``python tools/benchmark_coefficients.py`` wraps the same workflow and stores
+  timestamped snapshots (``calibration/coeff_v*.json``).
+
+Placing a JSON file in ``calibration/`` lets ``latest_coefficients()`` load it
+automatically.  The notebook can also ingest a specific file by calling
+``load_coefficients(path)``.
+
+### Overriding coefficients for hardware assumptions
+
+To explore alternative hardware, start from an existing JSON table and edit the
+coefficients that capture backend throughput, baseline costs or memory pressure.
+The snippet below mirrors the logic used by the planner and keeps the notebook in
+sync with runtime decisions::
+
+    from quasar.calibration import load_coefficients, apply_calibration
+    from quasar.cost import CostEstimator
+
+    estimator = CostEstimator()
+    coeff = load_coefficients("calibration/coeff_dev.json")
+    coeff["sv_gate_2q"] *= 0.8   # pretend improved two-qubit fidelity
+    apply_calibration(estimator, coeff)
+
+The modified ``estimator`` exposes the adjusted parameters via
+``estimator.coeff`` so notebook cells can reuse them when evaluating analytic
+curves.  Saving the dictionary back to disk (``save_coefficients``) retains the
+custom assumptions for later experiments.
+
 ## Existing analytical assumptions
 
 ### Cost model formulas
@@ -172,7 +231,55 @@ for each candidate fragment and potential boundary:
    diagnostics so later planners or auditors can replay the analytical decision
    without rerunning the full estimator.
 
-Bridging the documented assumptions with the concrete heuristics above provides
-clear targets for the calculator implementation: expose the selector metrics,
-replace coarse rank defaults, and thread calibration metadata through the
-partition trace so theoretical analyses stay aligned with runtime behaviour.
+## Interpreting notebook output alongside planner traces
+
+The notebook visualises when the analytic cost curves in ``quasar/cost.py``
+predict a backend change.  To compare those predictions with planner execution,
+enable debugging on the runtime planner (``Planner(debug=True)`` or
+``SimulationEngine(debug=True)``) so ``quasar/partitioner.py`` emits the
+``PartitionTraceEntry`` sequence stored on :class:`~quasar.ssd.SSD.trace`.
+
+When inspecting a trace entry ``entry``, align notebook predictions as follows:
+
+* **Cut location:** The notebook's boundary size ``q`` corresponds to
+  ``entry.boundary_size`` and the specific qubits reported in
+  ``entry.boundary``.
+* **Entanglement assumptions:** The theoretical Schmidt rank estimate maps to
+  ``entry.rank`` while decision-diagram frontier predictions align with
+  ``entry.frontier``.  Populate these fields from the notebook when exploring
+  custom entanglement profiles.
+* **Conversion primitive:** Notebook choices between B2B, LW, staged or full
+  extraction should be compared with ``entry.primitive`` and its estimated
+  ``entry.cost``.
+* **Backend transitions:** The predicted source/target backends match
+  ``entry.from_backend`` and ``entry.to_backend``.  The ``entry.applied`` flag
+  shows whether the planner committed to the switch after evaluating runtime and
+  memory constraints.
+
+This mapping keeps the analytical notebook, ``CostEstimator`` heuristics and
+the recorded planner behaviour in sync, making it easier to reason about why a
+particular backend was selected at runtime.
+
+### Validating with real circuits
+
+After correlating notebook predictions with trace data, validate key scenarios on
+real circuits:
+
+1. Build a :class:`~quasar.circuit.Circuit` and run ``Planner.plan`` or
+   :class:`~quasar.simulation_engine.SimulationEngine` with ``debug=True`` to
+   capture the emitted trace.
+2. Compare observed ``PartitionTraceEntry`` boundaries against the notebook's
+   crossover points.  Differences often indicate that additional heuristics in
+   ``quasar/method_selector.py`` or hard resource limits capped by
+   ``CostEstimator`` influenced the decision.
+3. Feed measured runtime or memory back into the calibration workflow and update
+   the coefficient table.  Re-running the notebook with the new calibration
+   highlights whether the theoretical thresholds now mirror practice.
+
+Developers extending the theory tool should revisit ``quasar/cost.py`` and
+``quasar/partitioner.py`` whenever planner logic evolves so the documentation,
+notebook assumptions and runtime traces continue to align.  Bridging the
+documented assumptions with the concrete heuristics above provides clear targets
+for the calculator implementation: expose the selector metrics, replace coarse
+rank defaults, and thread calibration metadata through the partition trace so
+theoretical analyses stay aligned with runtime behaviour.
