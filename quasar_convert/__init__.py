@@ -80,6 +80,12 @@ try:  # pragma: no cover - exercised when the extension is available
             self._ensure_impl()
             return self._impl.extract_local_window(*args, **kwargs)
 
+        if hasattr(_CEngine, "extract_local_window_dd"):
+
+            def extract_local_window_dd(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.extract_local_window_dd(*args, **kwargs)
+
         def convert(self, *args, **kwargs):
             self._ensure_impl()
             return self._impl.convert(*args, **kwargs)

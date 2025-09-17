@@ -136,6 +136,13 @@ class ConversionEngine {
     // so we use it directly instead of the previous `Package<>::vEdge` alias.
     dd::vEdge convert_boundary_to_dd(const SSD& ssd) const;
 
+    // Extract the amplitudes of a local window directly from a decision
+    // diagram edge without materialising the full statevector.  The returned
+    // vector has dimension ``2**len(boundary)`` ordered with qubit 0 as the
+    // least significant bit.
+    std::vector<std::complex<double>> extract_local_window_dd(
+        const dd::vEdge& edge, const std::vector<uint32_t>& boundary) const;
+
     // Clone a decision diagram edge into the conversion engine's package by
     // round-tripping through the DD serialization format.  The caller can
     // reuse ``buffer`` to construct package-local copies elsewhere.
