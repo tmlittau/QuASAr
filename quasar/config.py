@@ -64,6 +64,13 @@ def _backends_from_env(name: str, default: List[Backend]) -> List[Backend]:
     return _order_from_env(name, default)
 
 
+def _default_parallel_backends() -> List[Backend]:
+    base: List[Backend] = [Backend.STATEVECTOR]
+    # Merge support for the MPS backend is covered by dedicated tests.
+    base.append(Backend.MPS)
+    return _backends_from_env("QUASAR_PARALLEL_BACKENDS", base)
+
+
 @dataclass
 class Config:
     """Runtime configuration defaults for QuASAr.
@@ -81,12 +88,7 @@ class Config:
             [Backend.MPS, Backend.DECISION_DIAGRAM, Backend.STATEVECTOR, Backend.TABLEAU],
         )
     )
-    parallel_backends: List[Backend] = field(
-        default_factory=lambda: _backends_from_env(
-            "QUASAR_PARALLEL_BACKENDS",
-            [Backend.STATEVECTOR, Backend.MPS],
-        )
-    )
+    parallel_backends: List[Backend] = field(default_factory=_default_parallel_backends)
     mps_target_fidelity: float = _float_from_env(
         "QUASAR_MPS_TARGET_FIDELITY", 1.0
     )

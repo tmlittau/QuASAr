@@ -16,6 +16,63 @@ from ..cost import Backend as BackendType
 from .base import Backend
 
 
+_ZERO_MPS = (
+    [(np.array([[1.0 + 0.0j]]), np.array([[0.0 + 0.0j]]))],
+    [],
+)
+
+
+def _copy_mps(state: object) -> Tuple[List[Tuple[np.ndarray, np.ndarray]], List[np.ndarray]]:
+    """Return a deep copy of a native Qiskit MPS representation."""
+
+    if (
+        not isinstance(state, tuple)
+        or len(state) != 2
+        or not isinstance(state[0], list)
+        or not isinstance(state[1], list)
+    ):
+        raise TypeError("Matrix product states must be a tuple of two lists")
+    gammas_raw, lambdas_raw = state
+    gammas: List[Tuple[np.ndarray, np.ndarray]] = []
+    for gamma in gammas_raw:
+        if not isinstance(gamma, tuple) or len(gamma) != 2:
+            raise TypeError("Each gamma tensor must be a tuple of two matrices")
+        gammas.append((np.array(gamma[0], copy=True), np.array(gamma[1], copy=True)))
+    lambdas = [np.array(lam, copy=True) for lam in lambdas_raw]
+    if len(gammas) != len(lambdas) + 1:
+        raise ValueError("Invalid MPS structure: expected len(gammas) = len(lambdas) + 1")
+    return gammas, lambdas
+
+
+def tensor_product(mps_a: object | None, mps_b: object | None) -> object:
+    """Return the tensor product of two Qiskit matrix product states."""
+
+    if mps_a is None:
+        return _copy_mps(mps_b) if mps_b is not None else _copy_mps(_ZERO_MPS)
+    if mps_b is None:
+        return _copy_mps(mps_a)
+    gam_a, lam_a = _copy_mps(mps_a)
+    gam_b, lam_b = _copy_mps(mps_b)
+    if not gam_a:
+        return (gam_b, lam_b)
+    if not gam_b:
+        return (gam_a, lam_a)
+    if gam_a[-1][0].shape[-1] != 1 or gam_a[-1][1].shape[-1] != 1:
+        raise ValueError("Left operand must have unit right bond dimension")
+    if gam_b[0][0].shape[0] != 1 or gam_b[0][1].shape[0] != 1:
+        raise ValueError("Right operand must have unit left bond dimension")
+    dtype = np.result_type(
+        np.complex128,
+        *[tensor.dtype for gamma in gam_a for tensor in gamma],
+        *[tensor.dtype for gamma in gam_b for tensor in gamma],
+        *[lam.dtype for lam in lam_a],
+        *[lam.dtype for lam in lam_b],
+    )
+    gammas = gam_a + gam_b
+    lambdas = lam_a + [np.ones(1, dtype=dtype)] + lam_b
+    return (gammas, lambdas)
+
+
 @dataclass
 class MPSBackend(Backend):
     """Backend wrapping the Aer simulator.
@@ -99,15 +156,51 @@ class MPSBackend(Backend):
             self._cached_statevector = None
             return
         # assume native MPS representation
-        if mapping is not None:
-            raise NotImplementedError("Mapping is not supported for MPS ingestion")
+        gammas, lambdas = _copy_mps(state)
+        if mapping is None:
+            if num_qubits is None:
+                num_qubits = len(gammas)
+            if num_qubits != len(gammas):
+                raise ValueError("num_qubits does not match MPS width")
+            self.num_qubits = num_qubits
+            self.circuit = QuantumCircuit(num_qubits)
+            set_matrix_product_state(self.circuit, (gammas, lambdas))
+            self.history.clear()
+            self._cached_state = (gammas, lambdas)
+            self._cached_statevector = None
+            return
+        local_qubits = len(gammas)
+        mapping = list(mapping)
+        if len(mapping) != local_qubits:
+            raise ValueError("Mapping length does not match MPS width")
+        if len(set(mapping)) != len(mapping):
+            raise ValueError("Mapping contains duplicate qubits")
         if num_qubits is None:
-            num_qubits = len(state)  # type: ignore[arg-type]
+            num_qubits = max(mapping) + 1
+        if num_qubits <= max(mapping):
+            raise ValueError("Mapping references qubits outside num_qubits")
+        combined: object = (gammas, lambdas)
+        for _ in range(num_qubits - local_qubits):
+            combined = tensor_product(combined, _ZERO_MPS)
+        circuit = QuantumCircuit(num_qubits)
+        set_matrix_product_state(circuit, combined)
+        available = sorted(set(range(num_qubits)) - set(mapping))
+        positions = mapping + available
+        assignment = [0] * num_qubits
+        for idx, pos in enumerate(positions):
+            assignment[pos] = idx
+        current = list(range(num_qubits))
+        for pos in range(num_qubits):
+            desired = assignment[pos]
+            if current[pos] == desired:
+                continue
+            other = current.index(desired)
+            circuit.swap(pos, other)
+            current[pos], current[other] = current[other], current[pos]
         self.num_qubits = num_qubits
-        self.circuit = QuantumCircuit(num_qubits)
-        set_matrix_product_state(self.circuit, state)
+        self.circuit = circuit
         self.history.clear()
-        self._cached_state = state
+        self._cached_state = None
         self._cached_statevector = None
 
     # ------------------------------------------------------------------
