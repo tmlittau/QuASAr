@@ -6,8 +6,11 @@
 #include <complex>
 #include <vector>
 #include <random>
+#include <sstream>
+#include <stdexcept>
 #ifdef QUASAR_USE_MQT
 #include <dd/StateGeneration.hpp>
+#include <dd/Export.hpp>
 #endif
 
 namespace quasar {
@@ -338,6 +341,23 @@ dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
     // in recent releases. Using std::size_t keeps the code compatible across
     // versions without introducing a direct dependency on an internal typedef.
     return dd_pkg->makeZeroState(ssd.boundary_qubits.size());
+}
+
+dd::vEdge ConversionEngine::clone_dd_edge(std::size_t n,
+                                          const dd::vEdge& edge,
+                                          std::string& buffer) const {
+    if (!dd_pkg) {
+        throw std::runtime_error("Decision diagram package not initialised");
+    }
+    if (dd_pkg->qubits() < n) {
+        dd_pkg->resize(n);
+    }
+
+    std::stringstream stream(std::ios::in | std::ios::out | std::ios::binary);
+    dd::serialize(edge, stream, true);
+    buffer = stream.str();
+    stream.seekg(0);
+    return dd_pkg->deserialize<dd::vNode>(stream, true);
 }
 
 std::vector<std::complex<double>>

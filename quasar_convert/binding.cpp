@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <string>
+#include <sstream>
+#include <stdexcept>
 
 #include "conversion_engine.hpp"
 
@@ -125,6 +127,42 @@ PYBIND11_MODULE(_conversion_engine, m) {
             std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(edge.p);
             return py::make_tuple(ssd.boundary_qubits.size(), ptr);
         })
+        .def("clone_dd_edge",
+             [](quasar::ConversionEngine& eng,
+                std::size_t n,
+                py::object edge_obj,
+                py::object package_obj) {
+                 dd::vEdge* edge_ptr = nullptr;
+                 try {
+                     edge_ptr = edge_obj.cast<dd::vEdge*>();
+                 } catch (const py::cast_error&) {
+                     throw std::runtime_error("Unable to access VectorDD edge pointer");
+                 }
+                 if (edge_ptr == nullptr) {
+                     throw std::runtime_error("Unable to access VectorDD edge pointer");
+                 }
+                 std::string buffer;
+                 (void)eng.clone_dd_edge(n, *edge_ptr, buffer);
+
+                 dd::Package<>* package_ptr = nullptr;
+                 try {
+                     package_ptr = package_obj.cast<dd::Package<>*>();
+                 } catch (const py::cast_error&) {
+                     throw std::runtime_error("Unable to access DDPackage pointer");
+                 }
+                 if (package_ptr == nullptr) {
+                     throw std::runtime_error("Unable to access DDPackage pointer");
+                 }
+                 if (package_ptr->qubits() < n) {
+                     package_ptr->resize(n);
+                 }
+                 std::stringstream stream(buffer, std::ios::in | std::ios::binary);
+                 auto clone = package_ptr->deserialize<dd::vNode>(stream, true);
+                 return py::make_tuple(n, py::cast(clone));
+             },
+             py::arg("num_qubits"),
+             py::arg("edge"),
+             py::arg("package"))
         .def("dd_to_statevector", [](quasar::ConversionEngine& eng, std::size_t n, std::uintptr_t ptr) {
             // Reconstruct the decision diagram edge from the opaque handle and
             // export its amplitudes as a statevector.

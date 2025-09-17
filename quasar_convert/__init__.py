@@ -418,6 +418,23 @@ except Exception:  # pragma: no cover - exercised when extension missing
         def convert_boundary_to_dd(self, ssd: SSD):
             return (len(ssd.boundary_qubits or []), 0)
 
+        def clone_dd_edge(self, num_qubits: int, edge: object, package: object):
+            """Fallback clone helper using dense vectors when the extension is missing."""
+
+            try:
+                from mqt.core import dd as mqt_dd  # type: ignore
+            except Exception:  # pragma: no cover - optional dependency
+                mqt_dd = None
+            if mqt_dd is not None and isinstance(edge, mqt_dd.VectorDD):
+                try:
+                    amps = edge.get_vector()
+                    if hasattr(package, "from_vector"):
+                        clone = package.from_vector(amps)
+                        return (num_qubits, clone)
+                except Exception:
+                    pass
+            return (num_qubits, edge)
+
         def learn_stabilizer(self, state: List[complex]):
             if not state:
                 return None

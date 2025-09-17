@@ -7,6 +7,7 @@
 #include <memory>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #ifdef QUASAR_USE_STIM
 #include <stim.h>
@@ -134,6 +135,11 @@ class ConversionEngine {
     // The decision diagram package exposes `vEdge` at the namespace level,
     // so we use it directly instead of the previous `Package<>::vEdge` alias.
     dd::vEdge convert_boundary_to_dd(const SSD& ssd) const;
+
+    // Clone a decision diagram edge into the conversion engine's package by
+    // round-tripping through the DD serialization format.  The caller can
+    // reuse ``buffer`` to construct package-local copies elsewhere.
+    dd::vEdge clone_dd_edge(std::size_t n, const dd::vEdge& edge, std::string& buffer) const;
 
     // Export the amplitudes represented by a decision diagram edge as a
     // normalised statevector.  The returned vector has dimension ``2^n`` where
