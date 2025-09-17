@@ -10,6 +10,11 @@ import tracemalloc
 import numpy as np
 import stim
 
+try:  # Optional decision diagram backend dependency
+    from mqt.core import dd as mqt_dd
+except ImportError:  # pragma: no cover - backend optional
+    mqt_dd = None
+
 from .planner import Planner, PlanStep, PlanResult, PlanDiagnostics, _add_cost
 from .analyzer import AnalysisResult
 from .partitioner import CLIFFORD_GATES
@@ -205,6 +210,38 @@ class Scheduler:
     # Fractional tolerance before triggering a replan due to cost mismatch
     replan_tolerance: float = 0.05
     ssd_cache: SSDCache = field(default_factory=SSDCache)
+
+    def _clone_decision_diagram_state(
+        self, ssd: SSD | None, target_backend: object | None
+    ) -> tuple[int, object] | None:
+        """Return a decision diagram clone tied to ``target_backend``'s package."""
+
+        if (
+            self.conversion_engine is None
+            or not hasattr(self.conversion_engine, "clone_dd_edge")
+            or mqt_dd is None
+            or ssd is None
+            or target_backend is None
+        ):
+            return None
+
+        package = getattr(target_backend, "package", None)
+        if package is None:
+            return None
+        partitions = getattr(ssd, "partitions", None) or []
+        for part in partitions:
+            state = getattr(part, "state", None)
+            if (
+                isinstance(state, tuple)
+                and len(state) == 2
+                and isinstance(state[1], mqt_dd.VectorDD)
+            ):
+                num_qubits = int(state[0])
+                try:
+                    return self.conversion_engine.clone_dd_edge(num_qubits, state[1], package)
+                except Exception:
+                    return None
+        return None
 
     def __post_init__(self) -> None:
         if self.backends is None:
@@ -1058,13 +1095,15 @@ class Scheduler:
                                     ),
                                 )
                             elif target == Backend.DECISION_DIAGRAM:
-                                rep = self.ssd_cache.convert(
-                                    prepared,
-                                    "dd",
-                                    lambda: self.conversion_engine.convert_boundary_to_dd(
-                                        prepared
-                                    ),
-                                )
+                                rep = self._clone_decision_diagram_state(prepared, sim_obj)
+                                if rep is None:
+                                    rep = self.ssd_cache.convert(
+                                        prepared,
+                                        "dd",
+                                        lambda: self.conversion_engine.convert_boundary_to_dd(
+                                            prepared
+                                        ),
+                                    )
                             else:
                                 rep = self.ssd_cache.convert(
                                     prepared,
@@ -1183,13 +1222,15 @@ class Scheduler:
                                         ),
                                     )
                                 elif target == Backend.DECISION_DIAGRAM:
-                                    rep = self.ssd_cache.convert(
-                                        conv_ssd,
-                                        "dd",
-                                        lambda: self.conversion_engine.convert_boundary_to_dd(
-                                            conv_ssd
-                                        ),
-                                    )
+                                    rep = self._clone_decision_diagram_state(current_ssd, sim_obj)
+                                    if rep is None:
+                                        rep = self.ssd_cache.convert(
+                                            conv_ssd,
+                                            "dd",
+                                            lambda: self.conversion_engine.convert_boundary_to_dd(
+                                                conv_ssd
+                                            ),
+                                        )
                                 else:
                                     rep = self.ssd_cache.convert(
                                         conv_ssd,
@@ -1236,13 +1277,15 @@ class Scheduler:
                                     ),
                                 )
                             elif target == Backend.DECISION_DIAGRAM:
-                                rep = self.ssd_cache.convert(
-                                    conv_ssd,
-                                    "dd",
-                                    lambda: self.conversion_engine.convert_boundary_to_dd(
-                                        conv_ssd
-                                    ),
-                                )
+                                rep = self._clone_decision_diagram_state(current_ssd, sim_obj)
+                                if rep is None:
+                                    rep = self.ssd_cache.convert(
+                                        conv_ssd,
+                                        "dd",
+                                        lambda: self.conversion_engine.convert_boundary_to_dd(
+                                            conv_ssd
+                                        ),
+                                    )
                             else:
                                 rep = self.ssd_cache.convert(
                                     conv_ssd,

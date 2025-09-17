@@ -66,7 +66,10 @@ class DecisionDiagramBackend(Backend):
         if mapping != list(range(n)):
             raise NotImplementedError("Qubit mapping not supported for decision diagrams")
         self.num_qubits = num_qubits
-        self.package = dd.DDPackage(self.num_qubits)
+        if self.package is None:
+            self.package = dd.DDPackage(self.num_qubits)
+        elif isinstance(self.state, dd.VectorDD):
+            self.package.dec_ref_vec(self.state)
         if isinstance(vec, dd.VectorDD) and num_qubits == n:
             self.package.inc_ref_vec(vec)
             self.state = vec
