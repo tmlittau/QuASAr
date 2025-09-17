@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from benchmarks.parallel_circuits import many_ghz_subsystems
+from quasar.circuit import Circuit
 from quasar.cost import Backend, Cost
-from quasar.planner import Planner
-from quasar.scheduler import Scheduler
+from quasar.planner import PlanResult, PlanStep, Planner
+from quasar.scheduler import Scheduler, _clone_backend_instance, merge_subsystems
 from quasar.ssd import ConversionLayer
 
 
@@ -115,3 +118,36 @@ def test_scheduler_parallelizes_independent_ghz_blocks(monkeypatch) -> None:
 
     observed_groups = sorted(entry[1] for entry in summary)
     assert observed_groups == sorted(expected_groups)
+
+
+def test_parallel_single_qubit_merge_creates_bridge_state() -> None:
+    """Merging two single-qubit subsystems should yield the expected tensor."""
+
+    scheduler = Scheduler()
+    template = scheduler.backends[Backend.STATEVECTOR]
+
+    left = _clone_backend_instance(template)
+    left.load(1)
+    left.apply_gate("H", [0], None)
+
+    right = _clone_backend_instance(template)
+    right.load(1)
+    right.apply_gate("X", [0], None)
+
+    gate = Circuit([
+        {"gate": "CX", "qubits": [0, 1]},
+    ], use_classical_simplification=False).gates[0]
+
+    merged, merged_qubits = merge_subsystems(
+        left,
+        right,
+        gate,
+        left_qubits=(0,),
+        right_qubits=(1,),
+    )
+
+    assert merged_qubits == (0, 1)
+    bridge_state = np.asarray(merged.statevector(), dtype=complex)
+    expected = np.zeros(4, dtype=complex)
+    expected[2] = expected[3] = 1 / np.sqrt(2)
+    assert np.allclose(bridge_state, expected)
