@@ -138,4 +138,83 @@ def mixed_backend_subsystems(
     return Circuit(gates, use_classical_simplification=False)
 
 
-__all__ = ["mixed_backend_subsystems"]
+def stim_to_dd_circuit(
+    *,
+    num_groups: int = 3,
+    group_size: int = 4,
+    entangling_layer: bool = False,
+) -> Circuit:
+    """Create disjoint GHZ subsystems that later require DD simulation.
+
+    The circuit builds ``num_groups`` independent GHZ states using only
+    Clifford gates so that the partitioner initially favours the tableau
+    backend.  A global layer of ``T`` rotations then breaks the Clifford
+    structure for every subsystem, forcing a conversion to the
+    decision-diagram backend while the groups remain independent.  When
+    ``entangling_layer`` is ``True`` the routine appends a final chain of
+    CNOT gates that couples neighbouring subsystems *after* the ``T``
+    layer, ensuring the conversion to decision diagrams happens on each
+    group before any cross-entanglement is introduced.
+
+    Parameters
+    ----------
+    num_groups:
+        Number of identical stabiliser subsystems to prepare.  Must be at
+        least one.
+    group_size:
+        Number of qubits per subsystem.  Requires at least three qubits to
+        form a non-trivial GHZ state.
+    entangling_layer:
+        When ``True`` append a final layer of CNOT gates that connects the
+        subsystems in a linear chain without disturbing the earlier
+        independent evolution.
+
+    Returns
+    -------
+    Circuit
+        A circuit where the stabiliser preparation favours tableau
+        simulation and the subsequent ``T`` layer triggers conversion to
+        the decision-diagram backend.
+    """
+
+    if num_groups < 1:
+        raise ValueError("num_groups must be at least one")
+    if group_size < 3:
+        raise ValueError("group_size must be at least three for GHZ preparation")
+
+    gates: List[Gate] = []
+
+    # Prepare independent GHZ states using only Clifford gates so the
+    # partitioner groups them into tableau-friendly partitions.
+    for group in range(num_groups):
+        offset = group * group_size
+        ghz = ghz_circuit(group_size)
+        gates.extend(_shift_gates(ghz.gates, offset))
+
+    # Apply identical non-Clifford rotations on each subsystem to force a
+    # conversion from the tableau backend to the decision-diagram backend.
+    for group in range(num_groups):
+        base = group * group_size
+        for qubit in range(group_size):
+            gates.append(Gate("T", [base + qubit]))
+
+    # Reapply a Clifford entangling chain within each subsystem so the
+    # resulting DD partition maintains the original group boundaries while
+    # still containing the non-Clifford ``T`` rotations.
+    for group in range(num_groups):
+        base = group * group_size
+        for qubit in range(1, group_size):
+            gates.append(Gate("CX", [base + qubit - 1, base + qubit]))
+
+    # Optionally entangle neighbouring subsystems after the conversion
+    # point so each group experiences the tableau->DD switch independently.
+    if entangling_layer and num_groups > 1:
+        for group in range(num_groups - 1):
+            control = (group + 1) * group_size - 1
+            target = (group + 1) * group_size
+            gates.append(Gate("CX", [control, target]))
+
+    return Circuit(gates, use_classical_simplification=False)
+
+
+__all__ = ["mixed_backend_subsystems", "stim_to_dd_circuit"]
