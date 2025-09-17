@@ -127,6 +127,23 @@ PYBIND11_MODULE(_conversion_engine, m) {
             std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(edge.p);
             return py::make_tuple(ssd.boundary_qubits.size(), ptr);
         })
+        .def("extract_local_window_dd",
+             [](quasar::ConversionEngine& eng,
+                py::object edge_obj,
+                const std::vector<uint32_t>& boundary) {
+                 dd::vEdge* edge_ptr = nullptr;
+                 try {
+                     edge_ptr = edge_obj.cast<dd::vEdge*>();
+                 } catch (const py::cast_error&) {
+                     throw std::runtime_error("Unable to access VectorDD edge pointer");
+                 }
+                 if (edge_ptr == nullptr) {
+                     throw std::runtime_error("Unable to access VectorDD edge pointer");
+                 }
+                 return eng.extract_local_window_dd(*edge_ptr, boundary);
+             },
+             py::arg("edge"),
+             py::arg("boundary"))
         .def("clone_dd_edge",
              [](quasar::ConversionEngine& eng,
                 std::size_t n,

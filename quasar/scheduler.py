@@ -1245,10 +1245,35 @@ class Scheduler:
                                     mapping=boundary,
                                 )
                         elif primitive == "LW":
-                            state = current_sim.statevector()
-                            rep = self.conversion_engine.extract_local_window(
-                                state, boundary
-                            )
+                            rep = None
+                            if (
+                                current_backend == Backend.DECISION_DIAGRAM
+                                and self.conversion_engine is not None
+                                and hasattr(
+                                    self.conversion_engine, "extract_local_window_dd"
+                                )
+                                and mqt_dd is not None
+                            ):
+                                partitions = getattr(current_ssd, "partitions", None) or []
+                                for part in partitions:
+                                    state_obj = getattr(part, "state", None)
+                                    if (
+                                        isinstance(state_obj, tuple)
+                                        and len(state_obj) == 2
+                                        and isinstance(state_obj[1], mqt_dd.VectorDD)
+                                    ):
+                                        try:
+                                            rep = self.conversion_engine.extract_local_window_dd(
+                                                state_obj[1], boundary
+                                            )
+                                        except Exception:
+                                            rep = None
+                                        break
+                            if rep is None:
+                                state = current_sim.statevector()
+                                rep = self.conversion_engine.extract_local_window(
+                                    state, boundary
+                                )
                             sim_obj.ingest(
                                 rep,
                                 num_qubits=circuit.num_qubits,

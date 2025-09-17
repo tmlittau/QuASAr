@@ -9,6 +9,8 @@
 #include <sstream>
 #include <stdexcept>
 #ifdef QUASAR_USE_MQT
+#include <dd/Edge.hpp>
+#include <dd/Node.hpp>
 #include <dd/StateGeneration.hpp>
 #include <dd/Export.hpp>
 #endif
@@ -334,6 +336,45 @@ ConversionEngine::mps_to_statevector(const MPS& mps) const {
 }
 
 #ifdef QUASAR_USE_MQT
+std::vector<std::complex<double>> ConversionEngine::extract_local_window_dd(
+    const dd::vEdge& edge, const std::vector<uint32_t>& boundary) const {
+    const std::size_t k = boundary.size();
+    const std::size_t dim = 1ULL << k;
+    std::vector<std::complex<double>> window(dim, {0.0, 0.0});
+    if (dim == 0) {
+        return window;
+    }
+    if (edge.w.exactlyZero()) {
+        return window;
+    }
+
+    std::size_t num_qubits = 0;
+    if (!dd::vNode::isTerminal(edge.p)) {
+        num_qubits = static_cast<std::size_t>(edge.p->v) + 1U;
+    }
+    for (auto q : boundary) {
+        if (q + 1U > num_qubits) {
+            num_qubits = static_cast<std::size_t>(q) + 1U;
+        }
+    }
+
+    for (std::size_t local = 0; local < dim; ++local) {
+        std::size_t idx = 0;
+        for (std::size_t bit = 0; bit < k; ++bit) {
+            if ((local >> bit) & 1ULL) {
+                idx |= 1ULL << boundary[bit];
+            }
+        }
+        if (num_qubits < sizeof(std::size_t) * 8 && idx >= (1ULL << num_qubits)) {
+            continue;
+        }
+        const auto amp = edge.getValueByIndex(idx);
+        window[local] = {static_cast<double>(amp.real()),
+                         static_cast<double>(amp.imag())};
+    }
+    return window;
+}
+
 dd::vEdge ConversionEngine::convert_boundary_to_dd(const SSD& ssd) const {
     // Produce a zero-state decision diagram for the boundary qubits.
     // The MQT Core package expects the number of qubits as a standard size type.
