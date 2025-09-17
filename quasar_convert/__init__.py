@@ -114,11 +114,23 @@ try:  # pragma: no cover - exercised when the extension is available
                 self._ensure_impl()
                 return self._impl.mps_to_statevector(*args, **kwargs)
 
+        if hasattr(_CEngine, "dense_statevector_queries"):
+
+            def dense_statevector_queries(self) -> int:  # type: ignore[override]
+                self._ensure_impl()
+                return int(self._impl.dense_statevector_queries())
+
         if hasattr(_CEngine, "convert_boundary_to_tableau"):
 
             def convert_boundary_to_tableau(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
                 return self._impl.convert_boundary_to_tableau(*args, **kwargs)
+
+        if hasattr(_CEngine, "dd_to_tableau"):
+
+            def dd_to_tableau(self, *args, **kwargs):  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.dd_to_tableau(*args, **kwargs)
 
         if hasattr(_CEngine, "tableau_to_statevector"):
 
@@ -421,6 +433,9 @@ except Exception:  # pragma: no cover - exercised when extension missing
 
             return Tableau(len(ssd.boundary_qubits or []))
 
+        def dd_to_tableau(self, *args, **kwargs):
+            return None
+
         def convert_boundary_to_dd(self, ssd: SSD):
             return (len(ssd.boundary_qubits or []), 0)
 
@@ -466,6 +481,9 @@ except Exception:  # pragma: no cover - exercised when extension missing
 
                 return Tableau(n)
             return None
+
+        def dense_statevector_queries(self) -> int:
+            return 0
 
     __all__ = [
         "SSD",

@@ -98,6 +98,7 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("convert_boundary_to_statevector", &quasar::ConversionEngine::convert_boundary_to_statevector)
         .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)
         .def("mps_to_statevector", &quasar::ConversionEngine::mps_to_statevector)
+        .def("dense_statevector_queries", &quasar::ConversionEngine::dense_statevector_queries)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("tableau_to_statevector", &quasar::ConversionEngine::tableau_to_statevector)
@@ -198,6 +199,14 @@ PYBIND11_MODULE(_conversion_engine, m) {
              py::arg("n"),
              py::arg("ptr"),
              py::arg("chi") = 0)
+#if defined(QUASAR_USE_MQT) && defined(QUASAR_USE_STIM)
+        .def("dd_to_tableau",
+             [](quasar::ConversionEngine& eng, std::size_t n, std::uintptr_t ptr) {
+                 dd::vEdge edge{reinterpret_cast<dd::vNode*>(ptr), dd::Complex::one};
+                 (void)n;
+                 return eng.dd_to_tableau(edge);
+             })
+#endif
 #endif
         ;
 }

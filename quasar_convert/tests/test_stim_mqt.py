@@ -59,6 +59,51 @@ class OptionalBackendTests(unittest.TestCase):
         else:
             self.skipTest('MQT DD support not built')
 
+    def test_dd_to_mps_sparse_path(self):
+        eng = qc.ConversionEngine()
+        required = all(
+            hasattr(eng, attr)
+            for attr in ('convert_boundary_to_dd', 'dd_to_mps', 'dense_statevector_queries')
+        )
+        if not required:
+            self.skipTest('MQT DD support not built')
+
+        ssd = qc.SSD()
+        ssd.boundary_qubits = list(range(6))
+        ssd.top_s = 6
+        edge = eng.convert_boundary_to_dd(ssd)
+        before = eng.dense_statevector_queries()
+        tensors = eng.dd_to_mps(*edge)
+        after = eng.dense_statevector_queries()
+
+        self.assertEqual(after, before, 'dd_to_mps should avoid dense exports')
+        self.assertEqual(len(tensors), len(ssd.boundary_qubits))
+
+    def test_dd_to_tableau_sparse_extraction(self):
+        eng = qc.ConversionEngine()
+        required = all(
+            hasattr(eng, attr)
+            for attr in (
+                'convert_boundary_to_dd',
+                'dd_to_tableau',
+                'dense_statevector_queries',
+            )
+        ) and hasattr(qc, 'StimTableau')
+        if not required:
+            self.skipTest('Stim or MQT support not built')
+
+        ssd = qc.SSD()
+        ssd.boundary_qubits = list(range(4))
+        ssd.top_s = 4
+        edge = eng.convert_boundary_to_dd(ssd)
+        before = eng.dense_statevector_queries()
+        tableau = eng.dd_to_tableau(*edge)
+        after = eng.dense_statevector_queries()
+
+        self.assertIsNotNone(tableau)
+        self.assertEqual(tableau.num_qubits, len(ssd.boundary_qubits))
+        self.assertEqual(after, before, 'dd_to_tableau should avoid dense exports')
+
     def test_tableau_to_statevector(self):
         eng = qc.ConversionEngine()
         if hasattr(eng, 'tableau_to_statevector') and hasattr(qc, 'StimTableau'):
