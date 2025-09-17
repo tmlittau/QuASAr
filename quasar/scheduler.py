@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
 import numpy as np
+import stim
 
 from .planner import Planner, PlanStep, PlanResult, PlanDiagnostics, _add_cost
 from .analyzer import AnalysisResult
@@ -22,6 +23,7 @@ from .backends import (
     StimBackend,
     DecisionDiagramBackend,
 )
+from .backends.stim_backend import direct_sum
 from quasar_convert import ConversionEngine, SSD as CESD
 
 # Type alias for cost monitoring hook
@@ -461,11 +463,29 @@ class Scheduler:
                             break
                     else:
                         groups.append(s)
+                merged_state = None
+                prev_state = prev_part.state
+                part_state = part.state
+                if prev_state is None:
+                    merged_state = part_state
+                elif part_state is None:
+                    merged_state = prev_state
+                elif (
+                    step.backend == Backend.TABLEAU
+                    and isinstance(prev_state, stim.Tableau)
+                    and isinstance(part_state, stim.Tableau)
+                ):
+                    try:
+                        merged_state = direct_sum(prev_state, part_state)
+                    except Exception:  # pragma: no cover - fallback when stim fails
+                        merged_state = None
+
                 merged_parts[-1] = SSDPartition(
                     subsystems=tuple(tuple(sorted(g)) for g in groups),
                     history=prev_part.history + part.history,
                     backend=prev_part.backend,
                     cost=_add_cost(prev_part.cost, part.cost),
+                    state=merged_state,
                 )
             else:
                 merged_steps.append(step)
