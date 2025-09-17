@@ -16,6 +16,26 @@ from dataclasses import dataclass, field
 from typing import Dict, Sequence, List, Tuple
 import stim
 
+
+def direct_sum(tableau_a: stim.Tableau, tableau_b: stim.Tableau) -> stim.Tableau:
+    """Return the direct sum of two independent Stim tableaus.
+
+    Stim composes independent subsystems by appending their tableaus using the
+    ``+=`` operator.  This helper performs the operation on a copy of
+    ``tableau_a`` so callers can freely reuse their inputs without worrying
+    about accidental mutation.  The resulting tableau represents a block-diagonal
+    stabilizer tableau where the qubits of ``tableau_b`` are appended after the
+    qubits of ``tableau_a``.
+    """
+
+    if not isinstance(tableau_a, stim.Tableau) or not isinstance(
+        tableau_b, stim.Tableau
+    ):
+        raise TypeError("direct_sum expects stim.Tableau operands")
+    result = tableau_a.copy()
+    result += tableau_b
+    return result
+
 from ..ssd import SSD, SSDPartition
 from ..cost import Backend as BackendType
 from .base import Backend
