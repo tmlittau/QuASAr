@@ -112,6 +112,38 @@ The notebook therefore captures the *shape* of the thresholds but omits how the
 planner's heuristics (sparsity checks, locality tests, rank limits) interact
 with these curves.
 
+#### Exported calibration-aligned figures
+
+`docs/partitioning_thresholds.ipynb` now uses the reusable helpers in
+`docs/utils/partitioning_analysis.py` to load the latest coefficient snapshot
+(`calibration/coeff_v1.json`) via :func:`load_calibrated_estimator`. Each plotting
+cell applies a shared Seaborn/Matplotlib style, annotates backend cross-over
+points, and exports SVG figures to ``benchmarks/figures/partitioning/`` so they
+can be embedded directly in the documentation (additional formats can be
+requested ad-hoc when running the notebook locally). The current calibrated
+outputs are shown below:
+
+![Tableau vs. statevector crossover predicted from calibration/coeff_v1.json.](../benchmarks/figures/partitioning/clifford_crossover.svg)
+*Figure 1 – Tableau becomes cheaper for Clifford fragments beyond the highlighted qubit count when evaluated with the calibrated coefficients.*
+
+![Statevector retention compared with switching to tableau with conversions.](../benchmarks/figures/partitioning/statevector_tableau_partition.svg)
+*Figure 2 – The planner's conversion-aware preference for switching to tableau once the boundary and rank (derived from `calibration/coeff_v1.json`) keep conversion costs under control.*
+
+![Statevector vs. χ=4 MPS crossover under the calibrated cost model.](../benchmarks/figures/partitioning/statevector_vs_mps.svg)
+*Figure 3 – Local MPS execution overtakes dense simulation at the annotated qubit count using the calibrated gate densities.*
+
+![Conversion-aware MPS planning with annotated conversion overheads.](../benchmarks/figures/partitioning/conversion_aware_mps.svg)
+*Figure 4 – Including statevector↔MPS conversion costs highlights when higher-χ paths become favourable according to the calibrated conversion coefficients.*
+
+![Decision diagram and statevector runtimes for sparse fragments.](../benchmarks/figures/partitioning/statevector_vs_decision_diagram.svg)
+*Figure 5 – Decision-diagram execution windows for sparse circuits using the current `coeff_v1` sparsity thresholds.*
+
+![Preferred conversion primitive per boundary size under the calibrated model.](../benchmarks/figures/partitioning/conversion_primitive_selection.svg)
+*Figure 6 – Conversion primitive choices as a function of boundary size mirroring the planner’s primitive selection heuristics.*
+
+![Partitioned vs. single-backend plan composition with calibrated timings.](../benchmarks/figures/partitioning/partition_plan_breakdown.svg)
+*Figure 7 – Aggregated fragment and conversion costs for a staged plan, directly derived from the calibrated cost model.*
+
 ## Implemented decision metrics
 
 ### MethodSelector heuristics
