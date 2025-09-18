@@ -63,13 +63,27 @@ def run_all(
             continue
 
         for backend in BASELINE_BACKENDS:
-            rec = runner.run_quasar_multiple(
-                circuit,
-                engine,
-                backend=backend,
-                repetitions=repetitions,
-                quick=True,
-            )
+            try:
+                rec = runner.run_quasar_multiple(
+                    circuit,
+                    engine,
+                    backend=backend,
+                    repetitions=repetitions,
+                    quick=True,
+                )
+            except RuntimeError as exc:
+                records.append(
+                    {
+                        "circuit": circuit_fn.__name__,
+                        "qubits": n,
+                        "framework": backend.value,
+                        "backend": backend.value,
+                        "unsupported": True,
+                        "error": str(exc),
+                    }
+                )
+                continue
+
             rec.pop("result", None)
             rec.update(
                 {
