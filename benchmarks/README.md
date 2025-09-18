@@ -73,15 +73,51 @@ reflects only the backend's execution.
 
 `run_benchmarks.py` already aggregates the baseline measurements into a single
 "baseline_best" curve. The helper functions in
-[`plot_utils.py`](plot_utils.py) can visualise these results and annotate both
-baseline and QuASAr points with the corresponding backend when requested:
+[`plot_utils.py`](plot_utils.py) centralise the styling used throughout the
+paper and expose dedicated entry points for the common notebook figures:
 
 ```python
-from benchmarks.plot_utils import plot_quasar_vs_baseline_best
+from benchmarks.plot_utils import (
+    setup_benchmark_style,
+    plot_quasar_vs_baseline_best,
+    plot_backend_timeseries,
+)
 
-df = runner.dataframe()
-plot_quasar_vs_baseline_best(df, annotate_backend=True)
+setup_benchmark_style()
+ax, speedups = plot_quasar_vs_baseline_best(
+    df,
+    annotate_backend=True,
+    return_table=True,
+    show_speedup_table=True,
+)
+print(speedups)
+
+forced = df[df["mode"] == "forced"]
+auto = df[df["mode"] == "auto"]
+plot_backend_timeseries(forced, auto, metric="run_time_mean")
 ```
+
+The module also provides `plot_metric_trend`, `plot_heatmap` and
+`plot_speedup_bars` for the ancillary figures used in the appendix. All
+functions share a palette that maps QuASAr backends to consistent colours and
+markers and they automatically annotate selected backends with short labels.
+
+### Regenerating paper figures
+
+Run [`paper_figures.py`](paper_figures.py) after collecting benchmark data to
+generate the publication figures and their CSV summaries:
+
+```bash
+python benchmarks/paper_figures.py
+```
+
+The script requires `seaborn` in addition to the core dependencies. It writes
+publication-ready PNG/PDF pairs to [`benchmarks/figures/`](figures/) and stores
+the tabular data, including per-circuit speedups, in
+[`benchmarks/results/`](results/). Generated figures are ignored by Git so that
+repositories do not accumulate large binary artefacts; rerun the script whenever
+you need fresh images. The CSV outputs remain versioned to provide reproducible
+numeric references for the paper.
 
 ## Using notebooks
 

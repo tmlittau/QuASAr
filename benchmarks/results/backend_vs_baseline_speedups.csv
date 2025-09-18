@@ -1,0 +1,4 @@
+circuit,qubits,run_time_mean_baseline,backend_baseline,run_time_mean_quasar,backend_quasar,speedup,baseline_backend,quasar_backend
+grover,3,0.0015719580005679745,DECISION_DIAGRAM,0.00899982800062086,MPS,0.17466533809974277,DD,MPS
+qft,3,5.6017000436744034e-05,TABLEAU,5.390700061980169e-05,TABLEAU,1.0391414805624943,Tableau,Tableau
+qft,4,5.5322333234168276e-05,TABLEAU,7.5211333144883e-05,TABLEAU,0.7355584713223785,Tableau,Tableau

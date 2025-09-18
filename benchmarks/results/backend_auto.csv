@@ -1,0 +1,4 @@
+framework,repetitions,backend,prepare_time_mean,prepare_time_std,run_time_mean,run_time_std,total_time_mean,total_time_std,prepare_peak_memory_mean,prepare_peak_memory_std,run_peak_memory_mean,run_peak_memory_std,circuit,qubits,mode
+quasar,3,TABLEAU,0.0,0.0,5.390700061980169e-05,1.4126026533099528e-05,5.390700061980169e-05,1.4126026533099528e-05,0.0,0.0,1454.6666666666667,3.7712361663282534,qft,3,auto
+quasar,3,TABLEAU,0.0,0.0,7.5211333144883e-05,1.753479624002994e-05,7.5211333144883e-05,1.753479624002994e-05,0.0,0.0,1536.0,0.0,qft,4,auto
+quasar,3,MPS,0.0,0.0,0.00899982800062086,0.0004029127517787809,0.00899982800062086,0.0004029127517787809,0.0,0.0,24742.0,184.71780278756748,grover,3,auto
