@@ -1,18 +1,18 @@
 # TODOs for the Paper
 
-## Benchmarking
+## 1. Benchmarking
 - finish more large-scale benchmarks
 - make theoretical analysis plots "nicer"
 - improve current included single-method-plots
 
-## Explanatory content
+## 2. Explanatory content
 - Add explanation for the different conversion-optimizations
     - **B2B**: boundary-to-boundary for MPS conversion of specific partitions
     - **LW**: local-window extraction for small dense window of qubits before conversion
     - **ST**: staged conversion through "capped" representation with bond dimension
     - **full**: a full state extraction, used when all other options are deemed infeasible
 
-## Rihan Suggestions
+## 3. Rihan Suggestions
 - Intro
     - too high level and general
     - be more explicit with Research Problem
