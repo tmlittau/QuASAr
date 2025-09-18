@@ -65,6 +65,22 @@ class ConversionEstimate:
     cost: Cost
 
 
+@dataclass
+class ConversionPrimitiveDetails:
+    """Breakdown for an individual conversion primitive."""
+
+    cost: Cost
+    window: Optional[int] = None
+    components: Dict[str, float] = None
+    memory_components: Dict[str, float] = None
+
+    def __post_init__(self) -> None:  # pragma: no cover - defensive
+        if self.components is None:
+            self.components = {}
+        if self.memory_components is None:
+            self.memory_components = {}
+
+
 class CostEstimator:
     """Estimate runtime and memory for simulation and conversion.
 
@@ -682,7 +698,7 @@ class CostEstimator:
 
     # Conversion cost estimation -------------------------------------
 
-    def conversion(
+    def conversion_candidates(
         self,
         source: Backend,
         target: Backend,
@@ -696,8 +712,8 @@ class CostEstimator:
         s_max: Optional[int] = None,
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
-    ) -> ConversionEstimate:
-        """Estimate cost to convert between representations.
+    ) -> Dict[str, ConversionPrimitiveDetails]:
+        """Return time and memory for each conversion primitive.
 
         Parameters
         ----------
@@ -713,38 +729,50 @@ class CostEstimator:
             Optional dense extraction window ``w`` for the LW primitive.
         window_1q_gates, window_2q_gates:
             Gate counts within the dense window used by the LW primitive.
-        Notes
-        -----
-        A fixed ``conversion_base`` overhead is applied to every backend switch
-        and ingestion costs are scaled with the full register size.
         """
 
         s_cap = s_max if s_max is not None else self.s_max
         r_cap = r_max if r_max is not None else self.r_max
         q_cap = q_max if q_max is not None else self.q_max
 
+        log_depth = math.log2(rank) if rank > 0 else 0.0
+
         if (
             (q_cap is not None and num_qubits > q_cap)
             or (s_cap is not None and rank > s_cap)
             or (r_cap is not None and frontier > r_cap)
         ):
-            return ConversionEstimate("Full", Cost(float("inf"), float("inf")))
+            inf_cost = Cost(float("inf"), float("inf"), log_depth=log_depth)
+            return {
+                primitive: ConversionPrimitiveDetails(cost=inf_cost)
+                for primitive in ("B2B", "LW", "ST", "Full")
+            }
 
         full = 2**num_qubits
         ingest_time = self.coeff[f"ingest_{target.value}"] * full
         ingest_mem = self.coeff.get(f"ingest_{target.value}_mem", 0.0) * full
         base_time = self.coeff.get("conversion_base", 0.0)
         overhead = ingest_time + base_time
+        overhead_components = {"ingest": ingest_time, "base": base_time}
+
+        details: Dict[str, ConversionPrimitiveDetails] = {}
 
         # --- B2B primitive ---
         svd_cost = min(num_qubits * (rank**2), rank * (num_qubits**2))
-        b2b_time = (
-            self.coeff["b2b_svd"] * svd_cost
-            + self.coeff["b2b_copy"] * num_qubits * (rank**2)
-            + overhead
-        )
+        svd_time = self.coeff["b2b_svd"] * svd_cost
+        copy_time = self.coeff["b2b_copy"] * num_qubits * (rank**2)
+        b2b_time = svd_time + copy_time + overhead
         svd_mem = self.coeff.get("b2b_svd_mem", 0.0) * (rank**2)
         b2b_mem = max(num_qubits * rank**2 + svd_mem, full) + ingest_mem
+        details["B2B"] = ConversionPrimitiveDetails(
+            cost=Cost(time=b2b_time, memory=b2b_mem, log_depth=log_depth),
+            components={**overhead_components, "svd": svd_time, "copy": copy_time},
+            memory_components={
+                "workspace": num_qubits * (rank**2) + svd_mem,
+                "full_register": full,
+                "ingest": ingest_mem,
+            },
+        )
 
         # --- LW primitive ---
         w = window if window is not None else min(num_qubits, 4)
@@ -753,37 +781,98 @@ class CostEstimator:
             self.coeff["sv_gate_1q"] * window_1q_gates
             + self.coeff["sv_gate_2q"] * window_2q_gates
         )
-        lw_time = self.coeff["lw_extract"] * dense + gate_time * dense + overhead
+        extract_time = self.coeff["lw_extract"] * dense
+        window_gate_time = gate_time * dense
+        lw_time = extract_time + window_gate_time + overhead
         temp_mem = self.coeff.get("lw_temp_mem", 0.0) * dense
         lw_mem = max(dense + temp_mem, full) + ingest_mem
+        details["LW"] = ConversionPrimitiveDetails(
+            cost=Cost(time=lw_time, memory=lw_mem, log_depth=log_depth),
+            window=w,
+            components={
+                **overhead_components,
+                "extract": extract_time,
+                "window_gates": window_gate_time,
+            },
+            memory_components={
+                "window_state": dense + temp_mem,
+                "full_register": full,
+                "ingest": ingest_mem,
+            },
+        )
 
         # --- ST primitive ---
         chi_cap = int(self.coeff.get("st_chi_cap", 16)) or 16
         chi_tilde = min(rank, chi_cap)
-        st_time = self.coeff["st_stage"] * (chi_tilde**3) + overhead
+        stage_time = self.coeff["st_stage"] * (chi_tilde**3)
+        st_time = stage_time + overhead
         st_mem = max(num_qubits * (chi_tilde**2), full) + ingest_mem
+        details["ST"] = ConversionPrimitiveDetails(
+            cost=Cost(time=st_time, memory=st_mem, log_depth=log_depth),
+            components={**overhead_components, "stage": stage_time},
+            memory_components={
+                "staged_state": num_qubits * (chi_tilde**2),
+                "full_register": full,
+                "ingest": ingest_mem,
+            },
+        )
 
         # --- Full extraction primitive ---
-        full_time = self.coeff["full_extract"] * full + overhead
+        extract_full_time = self.coeff["full_extract"] * full
+        full_time = extract_full_time + overhead
         full_mem = full + ingest_mem
-
-        candidates = {
-            "B2B": (b2b_time, b2b_mem),
-            "LW": (lw_time, lw_mem),
-            "ST": (st_time, st_mem),
-            "Full": (full_time, full_mem),
-        }
-
-        primitive, (time, memory) = min(candidates.items(), key=lambda kv: kv[1][0])
-        depth = math.log2(rank) if rank > 0 else 0.0
-        return ConversionEstimate(
-            primitive=primitive, cost=Cost(time=time, memory=memory, log_depth=depth)
+        details["Full"] = ConversionPrimitiveDetails(
+            cost=Cost(time=full_time, memory=full_mem, log_depth=log_depth),
+            components={**overhead_components, "extract": extract_full_time},
+            memory_components={
+                "full_register": full,
+                "ingest": ingest_mem,
+            },
         )
+
+        return details
+
+    def conversion(
+        self,
+        source: Backend,
+        target: Backend,
+        num_qubits: int,
+        rank: int,
+        frontier: int,
+        window: Optional[int] = None,
+        *,
+        window_1q_gates: int = 0,
+        window_2q_gates: int = 0,
+        s_max: Optional[int] = None,
+        r_max: Optional[int] = None,
+        q_max: Optional[int] = None,
+    ) -> ConversionEstimate:
+        """Estimate cost to convert between representations."""
+
+        details = self.conversion_candidates(
+            source,
+            target,
+            num_qubits,
+            rank,
+            frontier,
+            window,
+            window_1q_gates=window_1q_gates,
+            window_2q_gates=window_2q_gates,
+            s_max=s_max,
+            r_max=r_max,
+            q_max=q_max,
+        )
+
+        primitive, detail = min(details.items(), key=lambda kv: kv[1].cost.time)
+        if math.isinf(detail.cost.time):
+            primitive = "Full"
+        return ConversionEstimate(primitive=primitive, cost=detail.cost)
 
 
 __all__ = [
     "Backend",
     "Cost",
     "ConversionEstimate",
+    "ConversionPrimitiveDetails",
     "CostEstimator",
 ]

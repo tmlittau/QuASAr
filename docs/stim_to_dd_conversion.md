@@ -5,7 +5,8 @@ collection of identical GHZ subsystems that start on the stabiliser (Stim
 Tableau) backend and then transition to the decision-diagram simulator.
 It is designed to exercise QuASAr's conversion pipeline by keeping the
 subsystems independent until the exact moment non-Clifford gates are
-introduced.
+introduced. Refer to [conversion_primitives.md](conversion_primitives.md) for a
+glossary of the recorded boundary, rank and frontier fields.
 
 ## Circuit structure
 
