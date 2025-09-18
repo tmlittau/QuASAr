@@ -147,6 +147,21 @@ polynomials in the SSD parameters:
 | ``ingest_sv`` etc. | Per-amplitude ingestion cost for each backend; ``ingest_*_mem`` controls extra memory. |
 | ``conversion_base`` | Fixed overhead added to every backend transition. |
 
+### Conversion primitive glossary
+
+Planning reports and notebooks (for example ``partitioning_tradeoffs``)
+surface a ``primitive`` column indicating which conversion strategy the
+estimator selected for the boundary between fragments. The available
+values correspond to the following behaviours:
+
+| Primitive | Description |
+|-----------|-------------|
+| ``None`` | No conversion is required because both fragments run on the same backend. |
+| ``B2B`` | Boundary-to-boundary extraction: performs an SVD across the cut, truncates according to the allowed rank, and copies the resulting tensors into the target backend. |
+| ``LW`` | Local-window extraction: simulates a dense window of the boundary qubits (bounded by ``window_1q_gates`` / ``window_2q_gates`` if configured) before handing the reduced state to the target backend. |
+| ``ST`` | Staged transfer: routes the state through an intermediate representation capped by ``st_chi_cap`` to limit memory before converting back to the destination backend. |
+| ``Full`` | Full extraction: materialises the complete source state (or the maximum allowed by boundary/rank constraints) prior to ingestion by the destination backend. |
+
 ## Calibration sweeps
 
 The ``calibration/cost_model_sweeps.py`` module bundles synthetic
