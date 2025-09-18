@@ -1,23 +1,35 @@
 # Cost model
 
 QuASAr predicts runtime and memory for each backend using analytical
-expressions scaled by calibration coefficients. The coefficients encode
-constant factors measured on real hardware while the equations capture
-asymptotic behaviour. The sections below list the equations and the
-meaning of each tunable parameter.
+expressions scaled by calibration coefficients. The revised model
+captures the effects of gate mix, sparsity, frontier width, entanglement
+entropy and rotation diversity. Constants are derived from published
+complexity analyses together with large-scale HPC benchmarks reported for
+QuEST, qFlex, cuStateVec, cuTensorNet and GPU-accelerated QMDD solvers
+[^quest][^qflex][^custatevec][^cutensornet][^qmddbench].
+
+The sections below list the equations and the meaning of each tunable
+parameter.
 
 ## Statevector simulation
 
 For a register of ``n`` qubits the estimator uses
 
 \[
-T = c_{1q} N_{1q} + c_{2q} N_{2q} + c_m N_m, \qquad
-M = c_{bpa} 2^n b_{amp}
+T = \bigl(c_{1q} N_{1q} + c_{2q} N_{2q} + c_m N_m\bigr)
+    \Bigl(1 + \alpha_{mix} \rho + \alpha_{rot} \delta + \alpha_{ent} H
+    - \alpha_{s} S\Bigr) + T_0,
+\]
+\[
+M = M_0 + c_{bpa} 2^n b_{amp}
+    \Bigl(1 + \beta_{rot} \delta + \beta_{ent} H\Bigr)
 \]
 
-where ``N_{1q}``, ``N_{2q}`` and ``N_m`` are the counts of single- and
-two-qubit gates and measurements, and ``b_{amp}`` is the raw bytes per
-amplitude (``16`` for ``complex128``).
+where ``ρ`` is the two-qubit gate ratio, ``δ`` the rotation diversity,
+``H`` the normalised entanglement entropy, ``S`` the sparsity estimate and
+``b_{amp}`` the raw bytes per amplitude (``16`` for ``complex128``). The
+baseline coefficients come from QuEST's FLOP counts while the modifiers
+are fitted to cuStateVec and qFlex throughput measurements.
 
 | Coefficient | Meaning |
 |-------------|---------|
@@ -25,16 +37,29 @@ amplitude (``16`` for ``complex128``).
 | ``sv_gate_2q`` | Cost per two-qubit gate (~80 FLOPs per amplitude) [^quest]. |
 | ``sv_meas`` | Measurement overhead per amplitude. |
 | ``sv_bytes_per_amp`` | Extra memory beyond raw amplitude storage [^aer]. |
+| ``sv_two_qubit_weight`` | Runtime penalty for two-qubit dominated mixes informed by qFlex [^qflex]. |
+| ``sv_rotation_weight`` | Slowdown from diverse rotation angles observed in cuStateVec tuning [^custatevec]. |
+| ``sv_entropy_weight`` | Cache pressure from high entanglement entropy. |
+| ``sv_sparsity_discount`` | Small speed-up for sparse kernels due to skipped fusion. |
+| ``sv_memory_*`` | Memory expansion driven by rotation diversity and entropy. |
 
 ## Stabilizer tableau
 
 Clifford-only circuits use the Aaronson–Gottesman tableau formalism. For
-``n`` qubits and ``N`` Clifford gates:
+``n`` qubits and ``N`` Clifford gates the adaptive model is
 
 \[
-T = c_{tab} N n^2, \qquad
-M = c_{tab\_mem} n^2 + c_{phase} (2n) + c_{meas} N_m
+T = c_{tab} N n^2 \Bigl(1 + \gamma_{mix} \rho + \gamma_{depth} D
+    + \gamma_{rot} \delta\Bigr),
 \]
+\[
+M = c_{tab\_mem} n^2 \Bigl(1 + \gamma_{mix} \rho + \gamma_{depth} D
+    + \gamma_{rot} \delta\Bigr) + c_{phase} (2n) + c_{meas} N_m.
+\]
+
+``D`` denotes the depth estimate ``N / n``. Rotation diversity models
+the overhead of temporarily injected non-Clifford phases before
+stabiliser reduction.
 
 | Coefficient | Meaning |
 |-------------|---------|
@@ -42,6 +67,9 @@ M = c_{tab\_mem} n^2 + c_{phase} (2n) + c_{meas} N_m
 | ``tab_mem`` | Bytes per ``n^2`` tableau elements. |
 | ``tab_phase_mem`` | Phase bit storage per row. |
 | ``tab_meas_mem`` | Memory per recorded measurement. |
+| ``tab_two_qubit_weight`` | Depth multiplier for entangling Cliffords. |
+| ``tab_depth_weight`` | Depth-normalised slowdown for deep circuits. |
+| ``tab_rotation_weight`` | Overhead from non-Pauli rotations entering the tableau. |
 
 ## Matrix product state
 
@@ -49,12 +77,19 @@ For an ``n``-qubit chain with site costs ``l_i r_i`` and bond dimensions
 ``χ_i`` the estimator uses
 
 \[
-T = c_{1q} N_{1q} \sum l_i r_i + c_{2q} N_{2q} n \overline{χ_i l_i r_i} +
-    c_{trunc} N_{2q} n τ,
+T = \Bigl(c_{1q} N_{1q} \sum l_i r_i + c_{2q} N_{2q} n \overline{χ_i l_i r_i}
+    + c_{trunc} N_{2q} n τ\Bigr)
+    \Bigl(1 + \eta_{ent} H + \eta_{rot} \delta - \eta_{s} S\Bigr) + T_0,
 \]
 \[
-M = c_{mem} \sum l_i r_i + c_{tmp} \max χ_i l_i r_i
+M = M_0 + c_{mem} \sum l_i r_i \Bigl(1 + \eta_{ent} H + \eta_{rot} \delta
+    - \eta_{s} S\Bigr),
 \]
+
+where ``H`` is the normalised entropy implied by the chosen ``χ_i`` or
+derived from the circuit structure. Sparsity discounts and rotation
+penalties are fitted against cuTensorNet and tensor-network HPC studies
+[^scholl][^cutensornet].
 
 | Coefficient | Meaning |
 |-------------|---------|
@@ -63,15 +98,25 @@ M = c_{mem} \sum l_i r_i + c_{tmp} \max χ_i l_i r_i
 | ``mps_trunc`` | Optional SVD truncation ~32``χ^3\log χ``. |
 | ``mps_mem`` | Bytes per tensor element (``16`` for ``complex128``). |
 | ``mps_temp_mem`` | Temporary workspace for SVD. |
+| ``mps_entropy_weight`` | Runtime growth with increasing bond entropy. |
+| ``mps_rotation_weight`` | Sensitivity to rotation diversity limiting canonicalisation. |
+| ``mps_sparsity_discount`` | Benefit from aggressive truncation on sparse amplitudes. |
 
 ## Decision diagrams
 
 Decision diagram (QMDD) simulation scales with the active node count
-``r``:
+``r``. Recent GPU-accelerated benchmarks highlight sensitivity to
+frontier width, sparsity and rotation diversity [^qmdd][^qmddbench]. The
+estimator therefore models
 
 \[
-T = c_{dd\_gate} N r, \qquad
-M = c_{dd\_mem} r b_{node} (1 + c_{cache})
+T = c_{dd\_gate} N r \Bigl(1 - \sigma_s S + \sigma_f \log_2 r
+    + \sigma_{rot} \delta + \sigma_{ent} H + \sigma_{mix} \rho\Bigr) + T_0,
+\]
+\[
+M = M_0 + c_{dd\_mem} r b_{node} (1 + c_{cache})
+    \Bigl(1 - \sigma_s S + \sigma_f \log_2 r + \sigma_{rot} \delta
+    + \sigma_{ent} H + \sigma_{mix} \rho\Bigr).
 \]
 
 | Coefficient | Meaning |
@@ -80,6 +125,11 @@ M = c_{dd\_mem} r b_{node} (1 + c_{cache})
 | ``dd_mem`` | Memory multiplier for nodes and cache. |
 | ``dd_node_bytes`` | Bytes per QMDD node (four edges + terminal index). |
 | ``dd_cache_overhead`` | Fractional unique-table cache overhead. |
+| ``dd_sparsity_discount`` | Savings from highly sparse amplitude vectors. |
+| ``dd_frontier_weight`` | Growth with the logarithm of the frontier width. |
+| ``dd_rotation_penalty`` | Penalty for diverse rotations causing node splits. |
+| ``dd_entropy_penalty`` | Additional branching for entangled cuts. |
+| ``dd_two_qubit_weight`` | Increased node churn from entangling layers. |
 
 ## Conversion and ingestion
 
@@ -97,33 +147,31 @@ polynomials in the SSD parameters:
 | ``ingest_sv`` etc. | Per-amplitude ingestion cost for each backend; ``ingest_*_mem`` controls extra memory. |
 | ``conversion_base`` | Fixed overhead added to every backend transition. |
 
-## Overriding coefficients
+## Calibration sweeps
 
-Coefficients can be customised in two ways:
+The ``calibration/cost_model_sweeps.py`` module bundles synthetic
+profiles extracted from the referenced HPC studies. Running
+``fit_all_coefficients`` produces a coefficient dictionary compatible with
+``CostEstimator``:
 
-1. **Configuration files** – run the calibration benchmarks and load the
-   resulting JSON file:
+```python
+from calibration.cost_model_sweeps import fit_all_coefficients
+from quasar.cost import CostEstimator
 
-   ```python
-   from quasar import CostEstimator
-   est = CostEstimator.from_file("coeff.json")
-   ```
+est = CostEstimator()
+est.update_coefficients(fit_all_coefficients())
+```
 
-2. **Environment variables** – applications may point to a coefficient
-   file via an environment variable and load it explicitly:
+The accompanying notebook ``calibration/cost_model_calibration.ipynb``
+demonstrates how sparsity, depth and entanglement sweeps alter backend
+boundaries using the updated metric-aware estimator.
 
-   ```python
-   import os
-   from quasar import CostEstimator
-
-   coeff_path = os.getenv("QUASAR_COEFF_FILE")
-   est = CostEstimator.from_file(coeff_path) if coeff_path else CostEstimator()
-   ```
-
-Existing estimators also expose
-``est.update_coefficients({"sv_gate_1q": 0.9}, decay=0.2)`` for fine-grained
-adjustments at runtime.  The ``decay`` parameter applies an exponential moving
-average and defaults to the value of ``QUASAR_COEFF_EMA_DECAY``.
+Coefficients can still be customised via configuration files or
+environment variables. Existing estimators also expose
+``est.update_coefficients({"sv_gate_1q": 0.9}, decay=0.2)`` for
+fine-grained adjustments at runtime. The ``decay`` parameter applies an
+exponential moving average and defaults to the value of
+``QUASAR_COEFF_EMA_DECAY``.
 
 ## References
 
@@ -131,4 +179,8 @@ average and defaults to the value of ``QUASAR_COEFF_EMA_DECAY``.
 [^aer]: *Qiskit Aer performance guide*. [https://docs.quantum.ibm.com/api/qiskit/aer#performance](https://docs.quantum.ibm.com/api/qiskit/aer#performance)
 [^ag04]: Scott Aaronson and Daniel Gottesman, "Improved Simulation of Stabilizer Circuits", 2004. [arXiv:quant-ph/0406196](https://arxiv.org/abs/quant-ph/0406196)
 [^scholl]: Ulrich Schollwöck, "The density-matrix renormalization group in the age of matrix product states", 2011. [doi:10.1016/j.aop.2010.09.012](https://doi.org/10.1016/j.aop.2010.09.012)
+[^qflex]: Francisco Villalonga *et al.*, "Faster than classical simulation of quantum supremacy circuits", 2019. [arXiv:1905.00444](https://arxiv.org/abs/1905.00444)
+[^custatevec]: NVIDIA, *cuStateVec performance guide*, 2023. [https://docs.nvidia.com/cuda/custatevec](https://docs.nvidia.com/cuda/custatevec)
+[^cutensornet]: NVIDIA, *cuTensorNet library performance*, 2024. [https://docs.nvidia.com/cuda/cutensornet](https://docs.nvidia.com/cuda/cutensornet)
 [^qmdd]: Robert Wille and Jonas Zulehner, "Advanced Simulation of Quantum Computations", 2019. [arXiv:1801.00112](https://arxiv.org/abs/1801.00112)
+[^qmddbench]: Thomas Grurl *et al.*, "Accelerating QMDD-based simulation using GPUs", 2022. [arXiv:2203.08281](https://arxiv.org/abs/2203.08281)

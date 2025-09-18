@@ -11,7 +11,8 @@ steps between heterogeneous backends.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, MutableMapping, Sequence
+import math
+from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
 
 from quasar import config
 from quasar.cost import Backend, Cost, CostEstimator, ConversionEstimate
@@ -72,6 +73,8 @@ def evaluate_fragment_backends(
     max_time: float | None = None,
     target_accuracy: float | None = None,
     estimator: CostEstimator | None = None,
+    selection_metric: str | Callable[[Backend, Cost], float] = "weighted",
+    metric_weights: tuple[float, float] = (0.5, 0.5),
 ) -> tuple[Backend | None, MutableMapping[str, object]]:
     """Evaluate backend feasibility for a synthetic fragment.
 
@@ -92,6 +95,13 @@ def evaluate_fragment_backends(
     estimator:
         Optional estimator instance.  A new :class:`CostEstimator` is created
         when omitted.
+    selection_metric:
+        Strategy used to compare feasible backends.  ``"weighted"`` (default)
+        minimises a weighted sum of runtime and memory.  ``"pareto"`` keeps all
+        non-dominated backends and falls back to the weighted score.  A callable
+        may be supplied for custom scoring.
+    metric_weights:
+        Pair of ``(time_weight, memory_weight)`` used by the weighted metric.
 
     Returns
     -------
@@ -103,28 +113,50 @@ def evaluate_fragment_backends(
 
     estimator = estimator or CostEstimator()
 
+    total_gates = stats.total_gates
+    num_qubits = stats.num_qubits
+    two_qubit_ratio = stats.num_2q_gates / total_gates if total_gates else 0.0
+    rotation_density = (
+        (phase_rotation_diversity or 0) + (amplitude_rotation_diversity or 0)
+    ) / max(total_gates, 1)
+    depth_est = max(1, math.ceil(total_gates / num_qubits)) if num_qubits else 0
+    entanglement = min(
+        num_qubits,
+        (stats.num_2q_gates / max(num_qubits, 1))
+        * math.log2(num_qubits + 1)
+        * math.log2(depth_est + 1),
+    )
+
     diag: MutableMapping[str, object] = {
         "metrics": {
-            "num_qubits": stats.num_qubits,
-            "num_gates": stats.total_gates,
+            "num_qubits": num_qubits,
+            "num_gates": total_gates,
             "sparsity": sparsity if sparsity is not None else 0.0,
             "phase_rotation_diversity": phase_rotation_diversity or 0,
             "amplitude_rotation_diversity": amplitude_rotation_diversity or 0,
             "local": stats.is_local,
+            "two_qubit_ratio": two_qubit_ratio,
+            "rotation_density": rotation_density,
+            "depth_estimate": depth_est,
+            "entanglement_entropy": entanglement,
         },
         "backends": {},
     }
 
     candidates: dict[Backend, Cost] = {}
-    num_qubits = stats.num_qubits
-    num_gates = stats.total_gates
     frontier = stats.frontier or stats.num_qubits
 
     # ------------------------------------------------------------------
     # Tableau backend
     # ------------------------------------------------------------------
-    if allow_tableau and stats.is_clifford and num_gates:
-        table_cost = estimator.tableau(num_qubits, num_gates)
+    if allow_tableau and stats.is_clifford and total_gates:
+        table_cost = estimator.tableau(
+            num_qubits,
+            total_gates,
+            two_qubit_ratio=two_qubit_ratio,
+            depth=depth_est,
+            rotation_diversity=rotation_density,
+        )
         feasible = True
         reasons: list[str] = []
         if max_memory is not None and table_cost.memory > max_memory:
@@ -146,7 +178,7 @@ def evaluate_fragment_backends(
             reason = "tableau disabled"
         elif not stats.is_clifford:
             reason = "non-clifford fragment"
-        elif not num_gates:
+        elif not total_gates:
             reason = "no gates"
         diag["backends"][Backend.TABLEAU] = {
             "feasible": False,
@@ -211,7 +243,15 @@ def evaluate_fragment_backends(
         }
 
     if dd_metric:
-        dd_cost = estimator.decision_diagram(num_gates=num_gates, frontier=frontier)
+        dd_cost = estimator.decision_diagram(
+            num_gates=total_gates,
+            frontier=frontier,
+            sparsity=sparse,
+            phase_rotation_diversity=phase_rotation_diversity,
+            amplitude_rotation_diversity=amplitude_rotation_diversity,
+            entanglement_entropy=entanglement,
+            two_qubit_ratio=two_qubit_ratio,
+        )
         feasible = True
         reasons: list[str] = []
         if max_memory is not None and dd_cost.memory > max_memory:
@@ -258,6 +298,9 @@ def evaluate_fragment_backends(
             stats.num_2q_gates,
             chi=chosen_chi,
             svd=True,
+            entanglement_entropy=entanglement,
+            sparsity=sparse,
+            rotation_diversity=rotation_density,
         )
         feasible = not infeasible_chi
         reasons: list[str] = []
@@ -297,6 +340,10 @@ def evaluate_fragment_backends(
         stats.num_1q_gates,
         stats.num_2q_gates,
         stats.num_measurements,
+        sparsity=sparse,
+        two_qubit_ratio=two_qubit_ratio,
+        entanglement_entropy=entanglement,
+        rotation_diversity=rotation_density,
     )
     sv_feasible = True
     reasons: list[str] = []
@@ -319,12 +366,60 @@ def evaluate_fragment_backends(
         diag["selected_cost"] = None
         return None, diag
 
-    selected = min(candidates, key=lambda b: (candidates[b].memory, candidates[b].time))
+    scores: dict[Backend, float] = {}
+
+    def _weighted_score(cost: Cost) -> float:
+        time_weight, mem_weight = metric_weights
+        return time_weight * cost.time + mem_weight * cost.memory
+
+    if callable(selection_metric):
+        for backend, cost in candidates.items():
+            scores[backend] = selection_metric(backend, cost)
+        selected = min(scores, key=scores.__getitem__)
+    else:
+        metric_name = str(selection_metric).lower()
+        if metric_name == "weighted":
+            for backend, cost in candidates.items():
+                scores[backend] = _weighted_score(cost)
+            selected = min(scores, key=scores.__getitem__)
+        elif metric_name == "pareto":
+            pareto_front: list[Backend] = []
+            for backend, cost in candidates.items():
+                dominated = False
+                for other_backend, other_cost in candidates.items():
+                    if backend is other_backend:
+                        continue
+                    better_or_equal = (
+                        other_cost.memory <= cost.memory
+                        and other_cost.time <= cost.time
+                    )
+                    strictly_better = (
+                        other_cost.memory < cost.memory
+                        or other_cost.time < cost.time
+                    )
+                    if better_or_equal and strictly_better:
+                        dominated = True
+                        break
+                if not dominated:
+                    pareto_front.append(backend)
+            if not pareto_front:
+                pareto_front = list(candidates)
+            for backend in pareto_front:
+                scores[backend] = _weighted_score(candidates[backend])
+            selected = min(pareto_front, key=lambda b: scores[b])
+            for backend, entry in diag["backends"].items():
+                if isinstance(entry, MutableMapping):
+                    entry["pareto_optimal"] = backend in pareto_front
+        else:
+            raise ValueError(f"unknown selection metric: {selection_metric}")
+
     diag["selected_backend"] = selected
     diag["selected_cost"] = candidates[selected]
     for backend, entry in diag["backends"].items():
         if isinstance(entry, Mapping):
             entry["selected"] = backend == selected
+            if backend in scores:
+                entry["score"] = scores[backend]
     return selected, diag
 
 
