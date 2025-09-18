@@ -180,6 +180,29 @@ consults the cost model:
   partitioner keeps that backend for the remainder of the fragment to avoid
   oscillations (`statevector_lock`).
 
+#### Accuracy-driven χ propagation
+
+Accuracy requirements enter the planning loop at two points.  First,
+:meth:`Planner.plan` derives a global ``χ`` cap by invoking
+:meth:`~quasar.cost.CostEstimator.chi_for_constraints` on the full gate list and
+stores the result on ``estimator.chi_max``.  This upper bound already factors in
+``target_accuracy`` (defaulting to ``config.DEFAULT.mps_target_fidelity``) and
+any ``max_memory`` cap passed to the planner, so every subsequent call to
+``_supported_backends`` shares the same baseline constraint.【F:quasar/planner.py†L1248-L1296】【F:quasar/cost.py†L312-L366】
+
+Second, the :class:`Partitioner` forwards ``target_accuracy`` to
+:class:`MethodSelector` while it grows each fragment.  Whenever a proposed
+extension increases the inferred Schmidt rank, ``chi_for_constraints`` is
+re-evaluated on the new gate prefix.  If the fidelity target implies a bond
+dimension larger than the available memory, ``chi_for_constraints`` returns ``0``
+and the selector marks the MPS backend as infeasible, forcing the partitioner to
+either close the fragment or fall back to a dense method.  This mechanism also
+handles conversion-induced pressure: the boundary rank recorded by
+``_conversion_diagnostics`` (defaulting to ``2**|boundary|``) mirrors the amount
+of entanglement a downstream conversion must ingest, so fragments that would
+truncate below that rank are rejected before the conversion primitive is
+scheduled.【F:quasar/method_selector.py†L260-L318】【F:quasar/partitioner.py†L214-L275】【F:quasar/cost.py†L690-L779】
+
 ### Partitioner trace data
 
 `quasar/partitioner.py` orchestrates fragment construction and records the
