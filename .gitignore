@@ -3,7 +3,9 @@ __pycache__/
 .quasar_cache/
 quasar_convert/build/
 Pipfile
+Pipfile.lock
 .vscode/
+build/
 benchmark-results/
 benchmarks/figures/*
 !benchmarks/figures/.gitkeep
