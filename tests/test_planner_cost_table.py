@@ -6,8 +6,8 @@ from quasar.circuit import Circuit
 from quasar.planner import Planner, _simulation_cost, _supported_backends
 
 BASELINES = {
-    "bell": {"oracle": 20.0, "dp": 20.0, "greedy": 20.0},
-    "ghz3": {"oracle": 36.0, "dp": 36.0, "greedy": 36.0},
+    "bell": {"oracle": 23.96, "dp": 23.96, "greedy": 23.96},
+    "ghz3": {"oracle": 42.6, "dp": 42.6, "greedy": 42.6},
 }
 
 

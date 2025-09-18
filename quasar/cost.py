@@ -109,6 +109,17 @@ class CostEstimator:
             # small benchmark circuit.
             "sv_base_time": 0.009,
             "sv_base_mem": 86000.0,
+            # Modifiers derived from HPC benchmarks (see docs/cost_model.md).
+            # Two-qubit heavy mixes increase runtime pressure on dense
+            # backends, while rotation diversity prevents kernel fusion.  High
+            # entanglement raises cache pressure and memory traffic.
+            "sv_two_qubit_weight": 0.35,
+            "sv_rotation_weight": 0.12,
+            "sv_entropy_weight": 0.18,
+            "sv_sparsity_discount": 0.08,
+            "sv_modifier_floor": 0.2,
+            "sv_memory_rotation_weight": 0.06,
+            "sv_memory_entropy_weight": 0.1,
             # Stabilizer tableau coefficients -------------------------------
             # Aaronson & Gottesman (2004) show O(n^2) bit operations per
             # Clifford gate; we approximate the constant factor with 2.
@@ -120,6 +131,12 @@ class CostEstimator:
             "tab_phase_mem": 0.125,
             # Measurement outcomes recorded as single bits.
             "tab_meas_mem": 0.125,
+            # Heavy two-qubit Clifford structure and deep stabiliser circuits
+            # increase the constant factors.  Rotation diversity models
+            # injections of non-Pauli phases before stabiliser reduction.
+            "tab_two_qubit_weight": 0.25,
+            "tab_depth_weight": 0.08,
+            "tab_rotation_weight": 0.05,
             # Matrix product state coefficients ------------------------------
             # Single-qubit gates scale with 4 chi^2 multiplies (Schollwöck,
             # 2011); costs are normalised to one.
@@ -138,6 +155,12 @@ class CostEstimator:
             # Calibrated using a small W-state benchmark.
             "mps_base_time": 0.0175,
             "mps_base_mem": 56000.0,
+            # Entanglement entropy and rotation diversity increase bond growth
+            # while sparsity allows aggressive truncation.
+            "mps_entropy_weight": 0.55,
+            "mps_rotation_weight": 0.18,
+            "mps_sparsity_discount": 0.35,
+            "mps_modifier_floor": 0.1,
             # Decision diagram coefficients ----------------------------------
             # Zulehner & Wille (2019) report node operations linear in the
             # active frontier size; we keep the unit constant.
@@ -157,6 +180,14 @@ class CostEstimator:
             "dd_node_bytes": 32.0,
             # Approximate unique table overhead of 20% for edge caches.
             "dd_cache_overhead": 0.2,
+            # Sensitivity of node growth to sparsity, frontier expansion and
+            # rotation diversity gleaned from recent QMDD benchmarks.
+            "dd_sparsity_discount": 0.75,
+            "dd_rotation_penalty": 0.08,
+            "dd_entropy_penalty": 0.04,
+            "dd_two_qubit_weight": 0.22,
+            "dd_frontier_weight": 0.35,
+            "dd_modifier_floor": 0.05,
             # Conversion primitives -----------------------------------------
             # Boundary-to-boundary SVD and copy steps from the QuASAr draft.
             "b2b_svd": 4.0,
@@ -355,6 +386,10 @@ class CostEstimator:
         num_meas: int,
         *,
         precision: str = "complex128",
+        sparsity: float | None = None,
+        two_qubit_ratio: float | None = None,
+        entanglement_entropy: float | None = None,
+        rotation_diversity: float | None = None,
     ) -> Cost:
         """Estimate cost for dense statevector simulation.
 
@@ -375,8 +410,24 @@ class CostEstimator:
             + self.coeff["sv_gate_2q"] * num_2q_gates
             + self.coeff["sv_meas"] * num_meas
         )
+        total_ops = num_1q_gates + num_2q_gates + num_meas
+        mix = (
+            two_qubit_ratio
+            if two_qubit_ratio is not None
+            else (num_2q_gates / total_ops if total_ops else 0.0)
+        )
+        rotation = rotation_diversity or 0.0
+        entropy = entanglement_entropy or 0.0
+        entropy_norm = entropy / max(num_qubits, 1)
+        sparse = min(max(sparsity if sparsity is not None else 0.0, 0.0), 1.0)
+        modifier = 1.0
+        modifier += self.coeff.get("sv_two_qubit_weight", 0.0) * mix
+        modifier += self.coeff.get("sv_rotation_weight", 0.0) * rotation
+        modifier += self.coeff.get("sv_entropy_weight", 0.0) * entropy_norm
+        modifier -= self.coeff.get("sv_sparsity_discount", 0.0) * sparse
+        modifier = max(modifier, self.coeff.get("sv_modifier_floor", 0.0))
         base_time = self.coeff.get("sv_base_time", 0.0)
-        time = base_time + gate_time * amp
+        time = base_time + gate_time * amp * modifier
         if precision == "complex64":
             bytes_per_amp = 8
         elif precision == "complex128":
@@ -384,7 +435,13 @@ class CostEstimator:
         else:  # pragma: no cover - defensive branch
             raise ValueError(f"unsupported precision: {precision}")
         base_mem = self.coeff.get("sv_base_mem", 0.0)
-        memory = base_mem + self.coeff["sv_bytes_per_amp"] * amp * bytes_per_amp
+        mem_modifier = 1.0
+        mem_modifier += self.coeff.get("sv_memory_rotation_weight", 0.0) * rotation
+        mem_modifier += self.coeff.get("sv_memory_entropy_weight", 0.0) * entropy_norm
+        memory = (
+            base_mem
+            + self.coeff["sv_bytes_per_amp"] * amp * bytes_per_amp * mem_modifier
+        )
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
@@ -399,6 +456,9 @@ class CostEstimator:
         dest_cols: int | None = None,
         phase_bits: bool = False,
         num_meas: int = 0,
+        two_qubit_ratio: float | None = None,
+        depth: int | None = None,
+        rotation_diversity: float | None = None,
     ) -> Cost:
         """Estimate cost for stabilizer tableau simulation.
 
@@ -429,8 +489,20 @@ class CostEstimator:
         dest_cells = dest_rows * dest_cols
         quad = stab_cells + dest_cells
 
-        time = self.coeff["tab_gate"] * num_gates * quad
-        memory = self.coeff["tab_mem"] * quad
+        mix = (
+            two_qubit_ratio
+            if two_qubit_ratio is not None
+            else (num_gates / max(stab_rows, 1))
+        )
+        rot = rotation_diversity or 0.0
+        norm_depth = (depth or num_gates) / max(num_qubits, 1)
+        modifier = 1.0
+        modifier += self.coeff.get("tab_two_qubit_weight", 0.0) * mix
+        modifier += self.coeff.get("tab_depth_weight", 0.0) * norm_depth
+        modifier += self.coeff.get("tab_rotation_weight", 0.0) * rot
+        modifier = max(modifier, 1.0)
+        time = self.coeff["tab_gate"] * num_gates * quad * modifier
+        memory = self.coeff["tab_mem"] * quad * modifier
 
         if phase_bits:
             memory += self.coeff["tab_phase_mem"] * (stab_rows + dest_rows)
@@ -449,6 +521,9 @@ class CostEstimator:
         *,
         svd: bool = False,
         gates: Iterable["Gate"] | None = None,
+        entanglement_entropy: float | None = None,
+        sparsity: float | None = None,
+        rotation_diversity: float | None = None,
     ) -> Cost:
         r"""Estimate cost for matrix product state simulation.
 
@@ -501,30 +576,65 @@ class CostEstimator:
         bond_costs = [left[i] * bond_dims[i] * right[i + 1] for i in range(len(bond_dims))]
 
         base_time = self.coeff.get("mps_base_time", 0.0)
-        time = base_time + self.coeff["mps_gate_1q"] * num_1q_gates * sum(site_costs)
+        ent = (
+            entanglement_entropy
+            if entanglement_entropy is not None
+            else math.log2(max(max(bond_dims, default=1), 1))
+        )
+        ent_norm = ent / max(num_qubits, 1)
+        sparse = min(max(sparsity if sparsity is not None else 0.0, 0.0), 1.0)
+        rot = rotation_diversity or 0.0
+        modifier = 1.0
+        modifier += self.coeff.get("mps_entropy_weight", 0.0) * ent_norm
+        modifier += self.coeff.get("mps_rotation_weight", 0.0) * rot
+        modifier -= self.coeff.get("mps_sparsity_discount", 0.0) * sparse
+        modifier = max(modifier, self.coeff.get("mps_modifier_floor", 0.0))
+        time = (
+            base_time
+            + self.coeff["mps_gate_1q"]
+            * num_1q_gates
+            * sum(site_costs)
+            * modifier
+        )
         if n > 1:
             avg_bond_cost = sum(bond_costs) / (n - 1)
-            time += self.coeff["mps_gate_2q"] * num_2q_gates * n * avg_bond_cost
+            time += (
+                self.coeff["mps_gate_2q"]
+                * num_2q_gates
+                * n
+                * avg_bond_cost
+                * modifier
+            )
             if svd and num_2q_gates > 0:
                 trunc = sum(
                     c * math.log2(b) if b > 1 else 0.0
                     for c, b in zip(bond_costs, bond_dims)
                 )
                 trunc /= (n - 1)
-                time += self.coeff["mps_trunc"] * num_2q_gates * n * trunc
+                time += self.coeff["mps_trunc"] * num_2q_gates * n * trunc * modifier
         elif svd and num_2q_gates > 0:
             # Defensive branch for single qubit with svd flag
             time += 0.0
 
         base_mem = self.coeff.get("mps_base_mem", 0.0)
-        memory = base_mem + self.coeff["mps_mem"] * sum(site_costs)
+        memory = base_mem + self.coeff["mps_mem"] * sum(site_costs) * modifier
         if svd and num_2q_gates > 0 and bond_costs:
             memory += self.coeff.get("mps_temp_mem", 0.0) * max(bond_costs)
 
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
-    def decision_diagram(self, num_gates: int, frontier: int) -> Cost:
+    def decision_diagram(
+        self,
+        num_gates: int,
+        frontier: int,
+        *,
+        sparsity: float | None = None,
+        phase_rotation_diversity: float | None = None,
+        amplitude_rotation_diversity: float | None = None,
+        entanglement_entropy: float | None = None,
+        two_qubit_ratio: float | None = None,
+    ) -> Cost:
         """Estimate cost for decision diagram simulation.
 
         The number of active nodes is approximated by
@@ -537,12 +647,27 @@ class CostEstimator:
 
         threshold = 2
         if frontier < threshold:
-            active_nodes = frontier
+            base_nodes = frontier
         else:
-            active_nodes = frontier * math.log2(frontier)
+            base_nodes = frontier * math.log2(frontier)
+
+        sparse = min(max(sparsity if sparsity is not None else 0.0, 0.0), 1.0)
+        phase_rot = phase_rotation_diversity or 0.0
+        amp_rot = amplitude_rotation_diversity or 0.0
+        rotation = phase_rot + amp_rot
+        entropy = entanglement_entropy or 0.0
+        entropy_norm = entropy / max(math.log2(frontier + 1) if frontier else 1.0, 1.0)
+        mix = two_qubit_ratio or 0.0
+        modifier = 1.0
+        modifier += self.coeff.get("dd_frontier_weight", 0.0) * math.log2(frontier + 1)
+        modifier += self.coeff.get("dd_rotation_penalty", 0.0) * rotation
+        modifier += self.coeff.get("dd_entropy_penalty", 0.0) * entropy_norm
+        modifier += self.coeff.get("dd_two_qubit_weight", 0.0) * mix
+        modifier -= self.coeff.get("dd_sparsity_discount", 0.0) * sparse
+        modifier = max(modifier, self.coeff.get("dd_modifier_floor", 0.0))
 
         gate_factor = math.log2(num_gates + 1)
-        node_count = active_nodes * gate_factor
+        node_count = base_nodes * modifier * gate_factor
 
         base_time = self.coeff.get("dd_base_time", 0.0)
         time = base_time + self.coeff["dd_gate"] * num_gates * node_count

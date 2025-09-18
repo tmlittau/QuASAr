@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import math
 
 from docs.utils.partitioning_analysis import (
