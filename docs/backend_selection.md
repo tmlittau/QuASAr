@@ -54,6 +54,86 @@ This lightweight heuristic steers the planner towards specialised backends for
 circuits exhibiting repeated structure, large zero‑amplitude regions or limited
 entanglement while favouring dense methods otherwise.
 
+## Fidelity-driven χ estimation
+
+When the selector entertains an MPS candidate it traces a deterministic pipeline
+from fidelity requirements to a concrete bond dimension.  The steps mirror the
+helpers in :mod:`quasar.cost` and are exposed by the documentation utilities in
+``docs/utils/partitioning_analysis.py``:
+
+1. :meth:`~quasar.cost.CostEstimator.bond_dimensions` walks the gate sequence
+   and doubles the Schmidt rank of every cut crossed by a two-qubit gate.  This
+   yields the maximal entanglement that the fragment could exhibit along the
+   linearised qubit order.【F:quasar/cost.py†L268-L287】
+2. :meth:`~quasar.cost.CostEstimator.chi_for_fidelity` scales the maximal rank
+   by the requested fidelity.  The method raises the rank when the target
+   exceeds the default ``mps_target_fidelity`` and lowers it when the caller
+   accepts truncation error; circuit depth influences the scaling exponent so
+   deeper fragments require larger ``χ`` even at identical fidelity targets.【F:quasar/cost.py†L312-L324】
+3. :meth:`~quasar.cost.CostEstimator.chi_from_memory` compares the candidate
+   rank with the available memory budget (``max_memory`` passed to
+   :class:`Planner.plan`).  The heuristic models the quadratic storage cost of
+   MPS tensors using the calibrated ``mps_mem`` coefficient and rejects
+   configurations where the requested ``χ`` would overflow the cap.【F:quasar/cost.py†L326-L345】
+4. :meth:`~quasar.cost.CostEstimator.chi_for_constraints` combines the previous
+   stages.  When the fidelity-driven ``χ`` violates the memory ceiling the
+   method returns ``0`` so :class:`~quasar.method_selector.MethodSelector`
+   records the MPS backend as infeasible (“bond dimension exceeds memory
+   limit”). Otherwise the selector evaluates the MPS cost model with the
+   computed ``χ`` and still applies explicit time and memory checks against the
+   calibrated estimates, ensuring base overheads such as ``mps_base_mem`` are
+   respected.【F:quasar/cost.py†L347-L366】【F:quasar/method_selector.py†L260-L318】
+
+``docs/utils/partitioning_analysis.load_calibrated_estimator`` exposes the same
+helpers used by the planner so tutorials and notebooks can reproduce the
+fidelity-to-``χ`` trace without instantiating full circuits.【F:docs/utils/partitioning_analysis.py†L24-L81】
+
+### Worked example: six-qubit ladder fragment
+
+Consider a six-qubit fragment containing two layers of nearest-neighbour CX
+gates (ten entangling operations) interleaved with twelve single-qubit
+rotations.  With the default calibration table the selector performs the
+following calculations when the caller asks for ``97%`` fidelity and a
+``75 000`` byte memory ceiling:
+
+| Stage | Calculation | Result |
+| --- | --- | --- |
+| 1 | ``bond_dimensions`` over the gate list | ``[4, 4, 4, 4, 4]`` → ``χ_max = 4`` |
+| 2 | ``chi_for_fidelity(num_qubits=6, fidelity=0.97)`` | ``χ_fid = 3`` |
+| 3 | ``chi_from_memory(num_qubits=6, max_memory=75_000)`` | ``χ_mem = 111`` |
+| 4 | ``chi_for_constraints(...)`` | ``χ = 3`` (feasible) |
+
+Once ``χ`` is fixed, the cost model predicts runtime and memory as shown below
+(``svd=True`` includes truncation overheads):
+
+| χ | Runtime (model units) | Peak memory (bytes) |
+| --- | --- | --- |
+| 2 | 1.10 × 10³ | 5.60 × 10⁴ |
+| 3 | 4.09 × 10³ | 5.61 × 10⁴ |
+| 4 | 1.06 × 10⁴ | 5.61 × 10⁴ |
+
+Lowering the memory ceiling to ``50 000`` bytes keeps ``χ`` at ``3`` but the
+final memory check rejects the fragment because the calibrated base footprint
+``mps_base_mem`` already consumes ``56 000`` bytes.  This interaction explains
+why the planner may skip MPS even when ``chi_from_memory`` appears permissive.
+
+### Configuration knobs
+
+Two configuration layers control this behaviour:
+
+* ``config.DEFAULT.mps_target_fidelity`` (environment variable
+  ``QUASAR_MPS_TARGET_FIDELITY``) defaults to ``1.0`` and defines the fidelity
+  used when the caller does not supply ``target_accuracy``. Tightening the
+  target increases ``χ`` globally.【F:quasar/config.py†L63-L112】
+* :meth:`Planner.plan` accepts ``max_memory`` and ``target_accuracy``.  The
+  planner forwards these caps to ``chi_for_constraints`` to derive
+  ``estimator.chi_max`` for the full circuit, ensuring subsequent fragment-level
+  checks reuse the same limit.【F:quasar/planner.py†L1248-L1296】
+
+Additional planner options such as ``max_time`` and ``perf_prio`` continue to
+filter backends after the ``χ`` calculation, but they do not alter the fidelity
+trace described above.
+
 Example: planning a small quantum Fourier transform selects the MPS backend:
 
 ```python
