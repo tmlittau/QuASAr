@@ -1,9 +1,9 @@
 # TODOs for the Paper
 
 ## 1. Benchmarking
-- finish more large-scale benchmarks
-- make theoretical analysis plots "nicer"
-- improve current included single-method-plots
+- make theoretical analysis plots from the partitioning_theory notebook "nicer" (using seaborn style and better coloring)
+- improve current included single-method-plots optically
+- add more large-scale benchmarks based on the analyses in the partitioning notebooks
 
 ## 2. Explanatory content
 - Add explanation for the different conversion-optimizations
@@ -11,6 +11,7 @@
     - **LW**: local-window extraction for small dense window of qubits before conversion
     - **ST**: staged conversion through "capped" representation with bond dimension
     - **full**: a full state extraction, used when all other options are deemed infeasible
+- Accuracy Estimation for complete MPS cost estimation
 
 ## 3. Rihan Suggestions
 - Intro
