@@ -12,10 +12,94 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from pathlib import Path
 from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
 
+import numpy as np
+from matplotlib.figure import Figure
+
 from quasar import config
+from quasar.calibration import apply_calibration, load_coefficients
 from quasar.cost import Backend, Cost, CostEstimator, ConversionEstimate
+
+
+_ROOT = Path(__file__).resolve().parents[2]
+_FIGURE_DIR = _ROOT / "benchmarks" / "figures" / "partitioning"
+_CALIB_DIR = _ROOT / "calibration"
+
+
+def _latest_calibration_path() -> Path | None:
+    """Return the most recent calibration JSON file if present."""
+
+    if not _CALIB_DIR.exists():
+        return None
+    files = sorted(_CALIB_DIR.glob("coeff_v*.json"))
+    return files[-1] if files else None
+
+
+def load_calibrated_estimator(
+    calibration_path: str | Path | None = None,
+) -> tuple[CostEstimator, Path | None]:
+    """Create an estimator aligned with stored calibration coefficients."""
+
+    estimator = CostEstimator()
+    path: Path | None
+    if calibration_path is not None:
+        path = Path(calibration_path)
+    else:
+        path = _latest_calibration_path()
+    if path is not None and path.exists():
+        coeff = load_coefficients(path)
+        apply_calibration(estimator, coeff)
+    else:
+        path = None
+    return estimator, path
+
+
+def apply_partitioning_style(
+    *, context: str = "talk", font_scale: float = 0.9, palette: str = "colorblind"
+) -> None:
+    """Apply a shared Seaborn/Matplotlib style for partitioning plots."""
+
+    try:
+        import seaborn as sns
+
+        sns.set_theme(context=context, style="whitegrid", palette=palette, font_scale=font_scale)
+    except ModuleNotFoundError:  # pragma: no cover - optional styling dependency
+        import matplotlib.pyplot as plt
+
+        plt.style.use("seaborn-v0_8-whitegrid")
+        plt.rcParams.update(
+            {
+                "axes.prop_cycle": plt.cycler(color=plt.cm.tab10.colors),
+                "axes.titlesize": "medium",
+                "axes.labelsize": "medium",
+            }
+        )
+
+
+def export_figure(
+    fig: Figure,
+    name: str,
+    *,
+    directory: str | Path | None = None,
+    formats: Sequence[str] = ("svg",),
+    dpi: int = 300,
+) -> list[Path]:
+    """Persist ``fig`` under ``benchmarks/figures/partitioning`` for reuse."""
+
+    # Only vector images are exported by default so documentation commits avoid
+    # binary payloads.  Additional formats (e.g., ``png``) can be requested by
+    # passing them explicitly when running the notebook locally.
+
+    target_dir = Path(directory) if directory is not None else _FIGURE_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+    for fmt in formats:
+        outfile = target_dir / f"{name}.{fmt}"
+        fig.savefig(outfile, dpi=dpi, bbox_inches="tight")
+        saved.append(outfile)
+    return saved
 
 
 @dataclass(slots=True)
@@ -51,6 +135,368 @@ class BoundarySpec:
     s_max: int | None = None
     r_max: int | None = None
     q_max: int | None = None
+
+
+def build_clifford_fragment_curves(
+    estimator: CostEstimator,
+    *,
+    num_qubits: Iterable[int] = range(1, 15),
+    gate_density: int = 10,
+) -> Mapping[str, np.ndarray | int | None]:
+    """Return statevector/tableau runtimes for Clifford-only fragments."""
+
+    n_values = np.asarray(list(num_qubits), dtype=int)
+    sv_times: list[float] = []
+    tab_times: list[float] = []
+    for n in n_values:
+        total_gates = gate_density * n
+        sv_times.append(estimator.statevector(n, total_gates, 0, 0).time)
+        tab_times.append(estimator.tableau(n, total_gates).time)
+    sv_arr = np.asarray(sv_times, dtype=float)
+    tab_arr = np.asarray(tab_times, dtype=float)
+    cheaper = np.where(tab_arr < sv_arr)[0]
+    threshold = int(n_values[cheaper[0]]) if cheaper.size else None
+    return {
+        "num_qubits": n_values,
+        "statevector": sv_arr,
+        "tableau": tab_arr,
+        "threshold": threshold,
+    }
+
+
+def build_statevector_partition_tradeoff(
+    estimator: CostEstimator,
+    *,
+    num_qubits: Iterable[int] = range(4, 33),
+    prefix_density_1q: int = 2,
+    prefix_density_2q: int = 2,
+    clifford_density_1q: int = 6,
+    clifford_density_2q: int = 6,
+    boundary_cap: int = 6,
+    rank_cap: int = 32,
+) -> Mapping[str, np.ndarray | int | None]:
+    """Compare staying on statevector versus switching to tableau mid-circuit."""
+
+    n_values = np.asarray(list(num_qubits), dtype=int)
+    stay_times: list[float] = []
+    partition_times: list[float] = []
+    boundaries: list[int] = []
+    ranks: list[int] = []
+    for n in n_values:
+        boundary = min(n, boundary_cap)
+        rank = min(2**boundary, rank_cap)
+        boundaries.append(boundary)
+        ranks.append(rank)
+        prefix_1q = prefix_density_1q * n
+        prefix_2q = prefix_density_2q * max(n - 1, 0)
+        clifford_1q = clifford_density_1q * n
+        clifford_2q = clifford_density_2q * max(n - 1, 0)
+        stay = estimator.statevector(
+            n,
+            prefix_1q + clifford_1q,
+            prefix_2q + clifford_2q,
+            0,
+        ).time
+        prefix_cost = estimator.statevector(n, prefix_1q, prefix_2q, 0).time
+        tableau_cost = estimator.tableau(n, clifford_1q + clifford_2q).time
+        sv_to_tab = estimator.conversion(
+            Backend.STATEVECTOR,
+            Backend.TABLEAU,
+            num_qubits=boundary,
+            rank=rank,
+            frontier=boundary,
+        ).cost.time
+        tab_to_sv = estimator.conversion(
+            Backend.TABLEAU,
+            Backend.STATEVECTOR,
+            num_qubits=boundary,
+            rank=rank,
+            frontier=boundary,
+        ).cost.time
+        stay_times.append(stay)
+        partition_times.append(prefix_cost + sv_to_tab + tableau_cost + tab_to_sv)
+    stay_arr = np.asarray(stay_times, dtype=float)
+    partition_arr = np.asarray(partition_times, dtype=float)
+    cheaper = np.where(partition_arr < stay_arr)[0]
+    threshold = int(n_values[cheaper[0]]) if cheaper.size else None
+    return {
+        "num_qubits": n_values,
+        "statevector": stay_arr,
+        "partitioned": partition_arr,
+        "boundary": np.asarray(boundaries, dtype=int),
+        "rank": np.asarray(ranks, dtype=int),
+        "threshold": threshold,
+    }
+
+
+def build_statevector_vs_mps(
+    estimator: CostEstimator,
+    *,
+    num_qubits: Iterable[int] = range(2, 15),
+    gate_density_1q: int = 5,
+    gate_density_2q: int = 5,
+    chi: int = 4,
+) -> Mapping[str, np.ndarray | int | None]:
+    """Return runtimes for dense versus local MPS simulation."""
+
+    n_values = np.asarray(list(num_qubits), dtype=int)
+    sv_times: list[float] = []
+    mps_times: list[float] = []
+    for n in n_values:
+        num_1q = gate_density_1q * n
+        num_2q = gate_density_2q * max(n - 1, 0)
+        sv_times.append(estimator.statevector(n, num_1q, num_2q, 0).time)
+        mps_times.append(estimator.mps(n, num_1q, num_2q, chi=chi, svd=True).time)
+    sv_arr = np.asarray(sv_times, dtype=float)
+    mps_arr = np.asarray(mps_times, dtype=float)
+    cheaper = np.where(mps_arr < sv_arr)[0]
+    threshold = int(n_values[cheaper[0]]) if cheaper.size else None
+    return {
+        "num_qubits": n_values,
+        "statevector": sv_arr,
+        "mps": mps_arr,
+        "threshold": threshold,
+    }
+
+
+def build_conversion_aware_mps_paths(
+    estimator: CostEstimator,
+    *,
+    num_qubits: Iterable[int] = range(6, 26),
+    boundary: int = 4,
+    gate_density_1q: int = 5,
+    gate_density_2q: int = 5,
+    scenarios: Sequence[Mapping[str, int]] | None = None,
+) -> Mapping[str, object]:
+    """Return statevector baseline and conversion-aware MPS totals."""
+
+    if scenarios is None:
+        scenarios = (
+            {"label": r"$\\chi=4$, window=6", "chi": 4, "window": 6},
+            {"label": r"$\\chi=6$, window=10", "chi": 6, "window": 10},
+        )
+    n_values = np.asarray(list(num_qubits), dtype=int)
+    sv_times: list[float] = []
+    for n in n_values:
+        num_1q = gate_density_1q * n
+        num_2q = gate_density_2q * max(n - 1, 0)
+        sv_times.append(estimator.statevector(n, num_1q, num_2q, 0).time)
+    sv_arr = np.asarray(sv_times, dtype=float)
+    scenario_results: list[dict[str, object]] = []
+    for spec in scenarios:
+        chi = int(spec["chi"])
+        window = int(spec["window"])
+        label = str(spec.get("label", f"chi={chi}"))
+        rank = int(spec.get("rank", chi**2))
+        window_1q = gate_density_1q * window
+        window_2q = gate_density_2q * max(window - 1, 0)
+        sv_to_mps = estimator.conversion(
+            Backend.STATEVECTOR,
+            Backend.MPS,
+            num_qubits=boundary,
+            rank=rank,
+            frontier=0,
+            window=window,
+            window_1q_gates=window_1q,
+            window_2q_gates=window_2q,
+        ).cost.time
+        mps_to_sv = estimator.conversion(
+            Backend.MPS,
+            Backend.STATEVECTOR,
+            num_qubits=boundary,
+            rank=rank,
+            frontier=0,
+            window=window,
+            window_1q_gates=window_1q,
+            window_2q_gates=window_2q,
+        ).cost.time
+        totals: list[float] = []
+        for n in n_values:
+            num_1q = gate_density_1q * n
+            num_2q = gate_density_2q * max(n - 1, 0)
+            mps_time = estimator.mps(n, num_1q, num_2q, chi=chi, svd=True).time
+            totals.append(sv_to_mps + mps_time + mps_to_sv)
+        totals_arr = np.asarray(totals, dtype=float)
+        cheaper = np.where(totals_arr < sv_arr)[0]
+        threshold = int(n_values[cheaper[0]]) if cheaper.size else None
+        scenario_results.append(
+            {
+                "label": label,
+                "chi": chi,
+                "window": window,
+                "rank": rank,
+                "sv_to_mps": sv_to_mps,
+                "mps_to_sv": mps_to_sv,
+                "total": totals_arr,
+                "threshold": threshold,
+            }
+        )
+    return {
+        "num_qubits": n_values,
+        "statevector": sv_arr,
+        "scenarios": scenario_results,
+    }
+
+
+def build_statevector_vs_decision_diagram(
+    estimator: CostEstimator,
+    *,
+    num_qubits: Iterable[int] = range(1, 20),
+    gate_density: int = 10,
+) -> Mapping[str, np.ndarray | int | None]:
+    """Return runtimes for dense versus decision diagram simulation."""
+
+    n_values = np.asarray(list(num_qubits), dtype=int)
+    sv_times: list[float] = []
+    dd_times: list[float] = []
+    for n in n_values:
+        gates = gate_density * n
+        sv_times.append(estimator.statevector(n, gates, 0, 0).time)
+        dd_times.append(
+            estimator.decision_diagram(
+                num_gates=gates,
+                frontier=n,
+                sparsity=0.7,
+                entanglement_entropy=max(0.0, math.log2(n) if n > 1 else 0.0),
+            ).time
+        )
+    return {
+        "num_qubits": n_values,
+        "statevector": np.asarray(sv_times, dtype=float),
+        "decision_diagram": np.asarray(dd_times, dtype=float),
+    }
+
+
+def build_conversion_primitive_costs(
+    estimator: CostEstimator,
+    *,
+    num_qubits: Iterable[int] = range(1, 10),
+    source: Backend = Backend.STATEVECTOR,
+    target: Backend = Backend.DECISION_DIAGRAM,
+) -> list[dict[str, object]]:
+    """Return the cheapest primitive for a range of boundary sizes."""
+
+    entries: list[dict[str, object]] = []
+    for q in num_qubits:
+        estimate = estimator.conversion(source, target, num_qubits=q, rank=2**q, frontier=q)
+        entries.append(
+            {
+                "boundary": int(q),
+                "primitive": estimate.primitive,
+                "time": estimate.cost.time,
+                "memory": estimate.cost.memory,
+            }
+        )
+    return entries
+
+
+def build_partition_plan(
+    estimator: CostEstimator,
+    fragments: Sequence[Mapping[str, object]],
+    boundaries: Sequence[Mapping[str, object]],
+    *,
+    total_qubits: int,
+    entanglement_entropy: float,
+    rotation_diversity: float,
+    sparsity: float,
+) -> Mapping[str, object]:
+    """Evaluate a synthetic plan comparing single-backend and partitioned runs."""
+
+    total_1q = sum(int(frag.get("num_1q", 0)) for frag in fragments)
+    total_2q = sum(int(frag.get("num_2q", 0)) for frag in fragments)
+    single_backend = estimator.statevector(
+        num_qubits=total_qubits,
+        num_1q_gates=total_1q,
+        num_2q_gates=total_2q,
+        num_meas=0,
+        entanglement_entropy=entanglement_entropy,
+        rotation_diversity=rotation_diversity,
+        sparsity=sparsity,
+    )
+
+    fragment_costs: list[tuple[Backend, Cost]] = []
+    fragment_results: list[dict[str, object]] = []
+    for frag in fragments:
+        backend = frag["backend"]
+        if backend == Backend.TABLEAU:
+            total_gates = int(frag.get("num_1q", 0)) + int(frag.get("num_2q", 0))
+            two_qubit_ratio = (
+                int(frag.get("num_2q", 0)) / total_gates if total_gates else 0.0
+            )
+            cost = estimator.tableau(
+                num_qubits=int(frag.get("num_qubits", total_qubits)),
+                num_gates=total_gates,
+                two_qubit_ratio=two_qubit_ratio,
+                depth=int(frag.get("depth", max(total_gates // max(total_qubits, 1), 1))),
+                rotation_diversity=float(frag.get("rotation_diversity", 0.2)),
+            )
+        elif backend == Backend.STATEVECTOR:
+            cost = estimator.statevector(
+                num_qubits=int(frag.get("num_qubits", total_qubits)),
+                num_1q_gates=int(frag.get("num_1q", 0)),
+                num_2q_gates=int(frag.get("num_2q", 0)),
+                num_meas=int(frag.get("num_meas", 0)),
+                entanglement_entropy=float(frag.get("entanglement_entropy", entanglement_entropy)),
+                rotation_diversity=float(frag.get("rotation_diversity", rotation_diversity)),
+                sparsity=float(frag.get("sparsity", sparsity)),
+            )
+        elif backend == Backend.DECISION_DIAGRAM:
+            total_gates = int(frag.get("num_1q", 0)) + int(frag.get("num_2q", 0))
+            two_qubit_ratio = (
+                int(frag.get("num_2q", 0)) / total_gates if total_gates else 0.0
+            )
+            cost = estimator.decision_diagram(
+                num_gates=total_gates,
+                frontier=int(frag.get("frontier", total_qubits)),
+                sparsity=float(frag.get("sparsity", sparsity)),
+                entanglement_entropy=float(frag.get("entanglement_entropy", entanglement_entropy)),
+                two_qubit_ratio=two_qubit_ratio,
+                phase_rotation_diversity=float(frag.get("phase_rotation", 0.0)),
+                amplitude_rotation_diversity=float(frag.get("amplitude_rotation", 0.0)),
+            )
+        else:  # pragma: no cover - defensive guard for new backends
+            raise ValueError(f"unsupported backend: {backend}")
+        fragment_costs.append((backend, cost))
+        frag_entry = dict(frag)
+        frag_entry["cost"] = cost
+        fragment_results.append(frag_entry)
+
+    boundary_specs = [
+        BoundarySpec(
+            num_qubits=int(spec["num_qubits"]),
+            rank=int(spec["rank"]),
+            frontier=int(spec["frontier"]),
+            window=int(spec.get("window")) if spec.get("window") is not None else None,
+            window_1q_gates=int(spec.get("window_1q", 0)),
+            window_2q_gates=int(spec.get("window_2q", 0)),
+            s_max=spec.get("s_max"),
+            r_max=spec.get("r_max"),
+            q_max=spec.get("q_max"),
+        )
+        for spec in boundaries
+    ]
+
+    aggregate = aggregate_partitioned_plan(fragment_costs, boundary_specs, estimator=estimator)
+
+    conversion_results: list[dict[str, object]] = []
+    for conv in aggregate["conversions"]:
+        spec = dict(boundaries[conv["index"]])
+        spec.update(
+            {
+                "source": conv["source"],
+                "target": conv["target"],
+                "primitive": conv["primitive"],
+                "cost": conv["cost"],
+            }
+        )
+        conversion_results.append(spec)
+
+    return {
+        "single_backend": single_backend,
+        "fragments": fragment_results,
+        "conversions": conversion_results,
+        "aggregate": aggregate,
+    }
 
 
 def _update_peak_memory(current: float, candidates: Iterable[float]) -> float:
@@ -533,6 +979,16 @@ __all__ = [
     "FragmentStats",
     "aggregate_partitioned_plan",
     "aggregate_single_backend_plan",
+    "apply_partitioning_style",
+    "build_clifford_fragment_curves",
+    "build_conversion_aware_mps_paths",
+    "build_conversion_primitive_costs",
+    "build_partition_plan",
+    "build_statevector_partition_tradeoff",
+    "build_statevector_vs_mps",
+    "build_statevector_vs_decision_diagram",
     "evaluate_fragment_backends",
     "estimate_conversion",
+    "export_figure",
+    "load_calibrated_estimator",
 ]

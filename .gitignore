@@ -9,3 +9,6 @@ build/
 benchmark-results/
 benchmarks/figures/*
 !benchmarks/figures/.gitkeep
+!benchmarks/figures/partitioning/
+!benchmarks/figures/partitioning/**
+benchmarks/figures/partitioning/*.png
