@@ -135,7 +135,10 @@ M = M_0 + c_{dd\_mem} r b_{node} (1 + c_{cache})
 
 Switching backends adds a fixed cost ``conversion_base`` and a
 per-amplitude ingestion term ``ingest_*``. Conversion primitives use
-polynomials in the SSD parameters:
+polynomials in the SSD parameters ``q`` (boundary size), ``s``
+(Schmidt-rank bound), ``r`` (frontier) and the optional LW window ``w``.
+See [conversion_primitives.md](conversion_primitives.md) for the
+parameter glossary, worked examples and planner trace alignment.
 
 | Coefficient | Meaning |
 |-------------|---------|
@@ -158,8 +161,8 @@ values correspond to the following behaviours:
 |-----------|-------------|
 | ``None`` | No conversion is required because both fragments run on the same backend. |
 | ``B2B`` | Boundary-to-boundary extraction: performs an SVD across the cut, truncates according to the allowed rank, and copies the resulting tensors into the target backend. |
-| ``LW`` | Local-window extraction: simulates a dense window of the boundary qubits (bounded by ``window_1q_gates`` / ``window_2q_gates`` if configured) before handing the reduced state to the target backend. |
-| ``ST`` | Staged transfer: routes the state through an intermediate representation capped by ``st_chi_cap`` to limit memory before converting back to the destination backend. |
+| ``LW`` | Local-window extraction: simulates a dense window ``w`` of the boundary qubits (bounded by ``window_1q_gates`` / ``window_2q_gates`` if configured) before handing the reduced state to the target backend. |
+| ``ST`` | Staged transfer: routes the state through an intermediate representation capped by ``st_chi_cap`` (``χ̃ = min(s, st_chi_cap)``) to limit memory before converting back to the destination backend. |
 | ``Full`` | Full extraction: materialises the complete source state (or the maximum allowed by boundary/rank constraints) prior to ingestion by the destination backend. |
 
 ## Calibration sweeps

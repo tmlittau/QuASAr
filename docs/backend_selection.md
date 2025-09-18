@@ -111,4 +111,8 @@ When ``Planner.plan`` is invoked with ``explain=True`` the returned
 ``PlanDiagnostics`` object exposes a ``backend_selection`` mapping with the
 same diagnostic payload.  Each entry captures the heuristics, estimated costs
 and the reasons why candidates were accepted or rejected, making it easier to
-trace planning decisions without relying solely on console output.
+trace planning decisions without relying solely on console output. When a
+backend switch is applied, the planner also records the chosen conversion
+primitive together with ``boundary_size``, ``rank`` and ``frontier``; refer to
+[conversion_primitives.md](conversion_primitives.md) for the glossary and the
+helper utilities that reproduce these trace entries.【F:quasar/partitioner.py†L132-L201】【F:quasar/ssd.py†L18-L160】

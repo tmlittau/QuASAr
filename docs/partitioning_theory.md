@@ -85,9 +85,12 @@ parameterised by calibration coefficients. The current assumptions are:
   node/frontier count ``r`` using coefficients `dd_gate`, `dd_mem`,
   `dd_node_bytes`, and cache overhead.
 * **Conversions:** Boundary-to-boundary (B2B), local window (LW), staged (ST),
-  and full extraction primitives are expressed as polynomials in boundary size,
-  Schmidt rank, and frontier width. Fixed ingestion and conversion base terms
-  (`ingest_*`, `conversion_base`) approximate backend switching overheads.
+  and full extraction primitives are expressed as polynomials in boundary size
+  ``q``, Schmidt rank ``s``, frontier width ``r`` and the optional LW window
+  ``w``. Fixed ingestion and conversion base terms (`ingest_*`,
+  `conversion_base`) approximate backend switching overheads. See
+  [conversion_primitives.md](conversion_primitives.md) for the detailed
+  parameter glossary.
 
 These expressions depend entirely on calibrated constants; no stochastic terms
 or hardware counters are incorporated in the analytical layer.
@@ -106,7 +109,9 @@ modelled today:
   trends but do not yet cover heterogeneous depths, non-local interactions, or
   adaptive ``χ`` estimates.
 * Conversion primitives are chosen by comparing the polynomial cost models for a
-  boundary of size ``q`` without feeding back empirical conversion traces.
+  boundary of size ``q`` (and associated ``s``, ``r``, ``w`` parameters) without
+  feeding back empirical conversion traces; see the worked examples in
+  [conversion_primitives.md](conversion_primitives.md).
 
 The notebook therefore captures the *shape* of the thresholds but omits how the
 planner's heuristics (sparsity checks, locality tests, rank limits) interact
@@ -193,9 +198,12 @@ inputs needed to reason about partition boundaries:
 * **Trace emission:** Whenever a backend change is considered, the partitioner
   logs a `PartitionTraceEntry` containing the gate index, boundary qubits and
   size, estimated Schmidt rank (`2**|boundary|` by default), decision-diagram
-  frontier width, selected conversion primitive, and its estimated cost. This
-  trace is available both via explicit callbacks and on the returned SSD when
-  `debug=True`.
+  frontier width, selected conversion primitive, and its estimated cost. The
+  recorded fields (`boundary_size`, `rank`, `frontier`, `primitive`, `cost`)
+  match the glossary in [conversion_primitives.md](conversion_primitives.md);
+  the LW window parameter stays implicit and follows the estimator default when
+  no override is supplied. This trace is available both via explicit callbacks
+  and on the returned SSD when `debug=True`.
 * **Conversion layers:** Accepted backend switches produce `ConversionLayer`
   records that persist the boundary tuple, source/target backends, rank,
   frontier, primitive, and conversion cost so the SSD retains the inputs needed
@@ -237,7 +245,8 @@ for each candidate fragment and potential boundary:
   available—refined Schmidt rank/frontier estimates beyond the default
   ``2**|boundary|``.
 * **Conversion diagnostics:** The conversion primitive chosen by the estimator,
-  its runtime/memory cost, and any ingestion multipliers.
+  its runtime/memory cost, any ingestion multipliers, and LW window overrides
+  if the planner supplied them.
 * **Calibration coefficients:** The current `CostEstimator` coefficient table and
   any policy caps (`s_max`, `r_max`, `q_max`, `chi_max`) that alter feasibility
   decisions.
@@ -282,7 +291,8 @@ When inspecting a trace entry ``entry``, align notebook predictions as follows:
   custom entanglement profiles.
 * **Conversion primitive:** Notebook choices between B2B, LW, staged or full
   extraction should be compared with ``entry.primitive`` and its estimated
-  ``entry.cost``.
+  ``entry.cost``; refer to [conversion_primitives.md](conversion_primitives.md)
+  for the parameter mapping.
 * **Backend transitions:** The predicted source/target backends match
   ``entry.from_backend`` and ``entry.to_backend``.  The ``entry.applied`` flag
   shows whether the planner committed to the switch after evaluating runtime and

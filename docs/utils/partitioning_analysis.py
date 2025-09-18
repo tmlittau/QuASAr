@@ -229,6 +229,55 @@ def build_statevector_partition_tradeoff(
     }
 
 
+def build_conversion_primitive_examples(
+    estimator: CostEstimator,
+    *,
+    source: Backend = Backend.STATEVECTOR,
+    target: Backend = Backend.MPS,
+    boundaries: Sequence[int] = (2, 4, 6),
+    rank_override: Mapping[int, int] | None = None,
+    frontier_fn: Callable[[int], int] | None = None,
+    window: int | None = None,
+    window_1q_gates: int = 0,
+    window_2q_gates: int = 0,
+) -> list[dict[str, float | int | str | bool | None]]:
+    """Return per-primitive costs for small conversion scenarios."""
+
+    results: list[dict[str, float | int | str | bool | None]] = []
+    for boundary in boundaries:
+        rank = (
+            rank_override[boundary]
+            if rank_override is not None and boundary in rank_override
+            else min(2**boundary, 64)
+        )
+        frontier = frontier_fn(boundary) if frontier_fn is not None else max(boundary, 1)
+        details = estimator.conversion_candidates(
+            source,
+            target,
+            num_qubits=boundary,
+            rank=rank,
+            frontier=frontier,
+            window=window,
+            window_1q_gates=window_1q_gates,
+            window_2q_gates=window_2q_gates,
+        )
+        best = min(details.items(), key=lambda kv: kv[1].cost.time)[0]
+        for primitive, info in details.items():
+            results.append(
+                {
+                    "boundary": boundary,
+                    "rank": rank,
+                    "frontier": frontier,
+                    "primitive": primitive,
+                    "time": info.cost.time,
+                    "memory": info.cost.memory,
+                    "window": info.window,
+                    "selected": primitive == best,
+                }
+            )
+    return results
+
+
 def build_statevector_vs_mps(
     estimator: CostEstimator,
     *,
@@ -983,6 +1032,7 @@ __all__ = [
     "build_clifford_fragment_curves",
     "build_conversion_aware_mps_paths",
     "build_conversion_primitive_costs",
+    "build_conversion_primitive_examples",
     "build_partition_plan",
     "build_statevector_partition_tradeoff",
     "build_statevector_vs_mps",
