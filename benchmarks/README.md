@@ -149,6 +149,67 @@ repositories do not accumulate large binary artefacts; rerun the script whenever
 you need fresh images. The CSV outputs remain versioned to provide reproducible
 numeric references for the paper.
 
+### High-qubit workloads derived from the partitioning notebooks
+
+`paper_figures.py` now includes three circuit families that mirror the
+partitioning notebooks.  Each entry specifies its parameter sweep directly in
+`CIRCUITS` so the figures can be regenerated without consulting the notebooks.
+The configurations below assume the default repetition count of three runs per
+point and should be combined with `--memory-bytes` limits that keep statevector
+simulations feasible on the target hardware.
+
+#### GHZ ladder partitions
+
+- **Builder** – `parallel_circuits.many_ghz_subsystems` via the
+  `ghz_ladder` entry in `paper_figures.py`.
+- **Qubit counts** – `20, 24, 28, 32`.  With the fixed `group_size=4` this
+  sweeps five through eight independent ladders.
+- **Knobs** – `group_size` may be increased to stress wider ladders provided the
+  qubit counts remain multiples of the chosen value.  Keep
+  `use_classical_simplification=False` so the tableau backend handles each
+  ladder before non-Clifford gates appear.
+- **Resources** – Tableau and MPS runs remain lightweight, but forcing the
+  statevector backend at 32 qubits requires at least 64 GiB of addressable
+  memory (8 bytes × 2^32 amplitudes).  Disable the quick path when measuring
+  plan cache warm-up so partition reuse is visible.
+
+#### Random Clifford+T hybrids
+
+- **Builder** – `random_hybrid_circuit` via the `random_clifford_t` entry.
+- **Qubit counts** – `20, 24, 28, 32` with a depth of `3 × n_qubits` per
+  instance.
+- **Knobs** – The deterministic seed is `97 + n_qubits`; adjust the
+  `depth_multiplier` to scale circuit depth and raise `base_seed` if multiple
+  independent sweeps are required.
+- **Resources** – Expect dense partitions and substantial T-counts.  Allocate at
+  least 96 GiB when forcing statevector backends beyond 28 qubits or cap the
+  run with `--memory-bytes` to skip infeasible baselines.  Adaptive QuASAr runs
+  favour MPS/DD mixes.
+
+#### Larger Grover instances
+
+- **Builder** – `grover_circuit` via the `grover_large` entry.
+- **Qubit counts** – `20, 24, 28, 32` with two Grover iterations per problem
+  size.
+- **Knobs** – Increase the `iterations` keyword to probe longer amplitude
+  amplification phases.  All runs keep `use_classical_simplification=True` in
+  automatic mode so the optimiser prunes redundant Clifford layers.
+- **Resources** – Forcing a statevector backend at 32 qubits again needs at
+  least 64 GiB.  Disable the quick path when contrasting plan cache behaviour to
+  ensure the planner runs on every configuration.
+
+### Scheduled experiments
+
+To extend the partitioning study, schedule the following batches once the new
+workloads have been generated:
+
+- Random-hybrid circuits at 24 and 32 qubits using adaptive backend selection to
+  contrast QuASAr with the best fixed-method baseline.
+- Surface-corrected QAOA at 24 and 32 qubits comparing QuASAr versus runs forced
+  onto pure MPS and pure statevector backends.
+- GHZₙ and Groverₙ for `n ≥ 6` with the plan cache warm-up measured while the
+  quick path is disabled so cache misses are observable.
+
 ## Using notebooks
 
 Benchmark results can be explored with the Jupyter notebooks in

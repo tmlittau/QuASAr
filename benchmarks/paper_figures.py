@@ -29,6 +29,7 @@ if __package__ in {None, ""}:
     )
     from runner import BenchmarkRunner  # type: ignore[no-redef]
     import circuits as circuit_lib  # type: ignore[no-redef]
+    from parallel_circuits import many_ghz_subsystems  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import (
         backend_labels,
@@ -40,6 +41,7 @@ else:  # pragma: no cover - exercised via runtime execution
     )
     from .runner import BenchmarkRunner
     from . import circuits as circuit_lib
+    from .parallel_circuits import many_ghz_subsystems
 
 from quasar import SimulationEngine
 from quasar.cost import Backend
@@ -67,9 +69,62 @@ BACKENDS: Sequence[Backend] = (
 )
 
 
+def _ghz_ladder_circuit(n_qubits: int, *, group_size: int = 4):
+    """Return disjoint GHZ ladders that sum to ``n_qubits``."""
+
+    if group_size <= 0:
+        raise ValueError("group_size must be positive")
+    if n_qubits % group_size != 0:
+        raise ValueError(
+            "n_qubits must be divisible by group_size for ghz ladder construction"
+        )
+    num_groups = n_qubits // group_size
+    return many_ghz_subsystems(num_groups=num_groups, group_size=group_size)
+
+
+def _random_clifford_t_circuit(
+    n_qubits: int, *, depth_multiplier: int = 3, base_seed: int = 97
+):
+    """Return a reproducible Clifford+T hybrid circuit."""
+
+    if depth_multiplier <= 0:
+        raise ValueError("depth_multiplier must be positive")
+    depth = depth_multiplier * n_qubits
+    seed = base_seed + n_qubits
+    return circuit_lib.random_hybrid_circuit(n_qubits, depth=depth, seed=seed)
+
+
+def _large_grover_circuit(n_qubits: int, *, iterations: int = 2):
+    """Return a Grover search circuit scaled to ``n_qubits``."""
+
+    if iterations <= 0:
+        raise ValueError("iterations must be positive")
+    return circuit_lib.grover_circuit(n_qubits, n_iterations=iterations)
+
+
 CIRCUITS: Sequence[CircuitSpec] = (
     CircuitSpec("qft", circuit_lib.qft_circuit, (3, 4)),
     CircuitSpec("grover", circuit_lib.grover_circuit, (3, 4), {"n_iterations": 1}),
+    CircuitSpec(
+        "ghz_ladder",
+        lambda n, *, group_size=4: _ghz_ladder_circuit(n, group_size=group_size),
+        (20, 24, 28, 32),
+        {"group_size": 4},
+    ),
+    CircuitSpec(
+        "random_clifford_t",
+        lambda n, *, depth_multiplier=3, seed=97: _random_clifford_t_circuit(
+            n, depth_multiplier=depth_multiplier, base_seed=seed
+        ),
+        (20, 24, 28, 32),
+        {"depth_multiplier": 3, "seed": 97},
+    ),
+    CircuitSpec(
+        "grover_large",
+        lambda n, *, iterations=2: _large_grover_circuit(n, iterations=iterations),
+        (20, 24, 28, 32),
+        {"iterations": 2},
+    ),
 )
 
 
