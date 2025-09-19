@@ -10,10 +10,15 @@ included in both cases to demonstrate hybrid behaviour.
 from __future__ import annotations
 
 import networkx as nx
+from random import Random
 from typing import List
 
 from quasar.circuit import Circuit, Gate
-from .circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates
+
+try:  # Allow execution when the module is imported as a script
+    from .circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates
+except ImportError:  # pragma: no cover - fallback for script execution
+    from circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates  # type: ignore
 
 # Names of gates forming the Clifford group used in benchmark filtering.
 CLIFFORD_GATES = {
@@ -381,3 +386,292 @@ def phase_estimation_classical_unitary(
     gates.extend(_iqft_gates(precision_qubits, 0))
 
     return Circuit(gates)
+
+
+def dense_to_clifford_partition_circuit(
+    dense_qubits: int,
+    clifford_qubits: int,
+    *,
+    boundary: int = 6,
+    schmidt_layers: int = 2,
+    prefix_layers: int = 2,
+    clifford_layers: int = 6,
+    seed: int = 0,
+) -> Circuit:
+    """Model a dense-to-Clifford partition used in boundary sweeps.
+
+    The construction mirrors the assumptions in
+    ``docs/partitioning_thresholds.ipynb`` where an initial dense prefix is
+    followed by a Clifford fragment that prefers tableau simulation.  The
+    interface between the two fragments exposes ``boundary`` qubits and the
+    ``schmidt_layers`` parameter controls how many rounds of cross-fragment
+    entanglers are inserted to increase the effective Schmidt rank at the cut.
+
+    Parameters
+    ----------
+    dense_qubits:
+        Number of qubits in the dense, non-Clifford prefix.
+    clifford_qubits:
+        Number of qubits evolved by the trailing Clifford fragment.
+    boundary:
+        Number of qubits shared between the fragments.  The value must not
+        exceed either register size.
+    schmidt_layers:
+        Number of cross-fragment entangling layers used to raise the Schmidt
+        rank.  Each layer applies ``CRZ`` bridges and alternating ``CX`` gates
+        across the boundary.
+    prefix_layers:
+        Number of dense non-Clifford layers applied before partitioning.
+    clifford_layers:
+        Number of tableau-friendly Clifford layers applied to the suffix.
+    seed:
+        Seed controlling the deterministic rotation angles.
+    """
+
+    if dense_qubits <= 0 or clifford_qubits <= 0:
+        return Circuit([])
+    if boundary <= 0:
+        raise ValueError("boundary must be positive")
+    if boundary > min(dense_qubits, clifford_qubits):
+        raise ValueError("boundary must not exceed either fragment size")
+    if schmidt_layers <= 0:
+        raise ValueError("schmidt_layers must be positive")
+    if prefix_layers <= 0:
+        raise ValueError("prefix_layers must be positive")
+    if clifford_layers <= 0:
+        raise ValueError("clifford_layers must be positive")
+
+    rng = Random(seed)
+    gates: List[Gate] = []
+
+    dense_offset = 0
+    clifford_offset = dense_qubits
+
+    # Dense prefix: alternating non-Clifford single-qubit rotations and
+    # nearest-neighbour entanglers.
+    for layer in range(prefix_layers):
+        for q in range(dense_qubits):
+            theta = rng.uniform(0.25, 1.35)
+            phi = rng.uniform(0.2, 1.1)
+            gates.append(Gate("RY", [dense_offset + q], {"theta": theta}))
+            gates.append(Gate("RZ", [dense_offset + q], {"phi": phi}))
+        for q in range(dense_qubits - 1):
+            angle = rng.uniform(0.35, 1.25)
+            gates.append(
+                Gate(
+                    "CRZ",
+                    [dense_offset + q, dense_offset + q + 1],
+                    {"phi": angle},
+                )
+            )
+        # Introduce long-range entanglement so the prefix retains a dense
+        # character even when partitioned away from the Clifford suffix.
+        if dense_qubits > 2:
+            target = (layer % (dense_qubits - 1)) + 1
+            gates.append(
+                Gate(
+                    "CRZ",
+                    [dense_offset, dense_offset + target],
+                    {"phi": rng.uniform(0.3, 1.0)},
+                )
+            )
+        for q in range(0, dense_qubits, 3):
+            gates.append(Gate("T", [dense_offset + q % dense_qubits]))
+
+    # Cross-fragment entanglement to expose a tunable conversion boundary.
+    prefix_boundary = list(range(dense_offset + dense_qubits - boundary, dense_offset + dense_qubits))
+    suffix_boundary = list(range(clifford_offset, clifford_offset + boundary))
+    for layer in range(schmidt_layers):
+        for src, dst in zip(prefix_boundary, suffix_boundary):
+            angle = rng.uniform(0.25, 1.05)
+            gates.append(Gate("CRZ", [src, dst], {"phi": angle}))
+            if layer % 2 == 0:
+                gates.append(Gate("CX", [src, dst]))
+        for dst in suffix_boundary:
+            gates.append(Gate("T", [dst]))
+
+    # Tableau-friendly suffix dominated by Clifford operations.
+    for _ in range(clifford_layers):
+        for q in range(clifford_qubits):
+            gates.append(Gate("H", [clifford_offset + q]))
+        for q in range(clifford_qubits - 1):
+            gates.append(Gate("CX", [clifford_offset + q, clifford_offset + q + 1]))
+        if clifford_qubits > 2:
+            gates.append(
+                Gate(
+                    "CX",
+                    [clifford_offset + clifford_qubits - 1, clifford_offset],
+                )
+            )
+
+    return Circuit(gates, use_classical_simplification=False)
+
+
+def staged_partition_circuit(
+    clifford_qubits: int,
+    core_qubits: int,
+    suffix_qubits: int,
+    *,
+    prefix_depth: int = 4,
+    core_layers: int = 3,
+    suffix_layers: int = 3,
+    prefix_core_boundary: int = 6,
+    core_suffix_boundary: int = 4,
+    cross_layers: int = 2,
+    suffix_sparsity: float = 0.6,
+    seed: int = 1,
+) -> Circuit:
+    """Combine Clifford, dense and sparse fragments into a single workload.
+
+    The generator reflects the three-fragment case study from
+    ``docs/partitioning_tradeoffs.ipynb``.  A tableau-friendly Clifford
+    initialisation is followed by a dense, non-local core that favours the
+    statevector backend.  The final suffix remains mostly diagonal and sparse
+    so that the decision-diagram backend can accelerate it.  Conversion
+    boundaries between the fragments are governed by ``prefix_core_boundary``
+    and ``core_suffix_boundary`` while ``cross_layers`` controls how many
+    rounds of cross-fragment entanglement raise the effective Schmidt ranks.
+
+    Parameters
+    ----------
+    clifford_qubits:
+        Width of the initial Clifford fragment.
+    core_qubits:
+        Width of the dense middle fragment.
+    suffix_qubits:
+        Width of the sparse decision-diagram suffix.
+    prefix_depth:
+        Number of tableau-friendly layers used for the initial fragment.
+    core_layers:
+        Number of dense, non-Clifford layers in the middle fragment.
+    suffix_layers:
+        Number of sparse layers in the suffix.
+    prefix_core_boundary:
+        Number of qubits exposed between the first two fragments.
+    core_suffix_boundary:
+        Number of qubits exposed between the second and third fragments.
+    cross_layers:
+        Number of cross-fragment entangling rounds.
+    suffix_sparsity:
+        Fraction in ``[0, 1]`` describing how sparse the suffix remains.  A
+        value near ``1`` keeps most operations diagonal, whereas ``0`` applies
+        amplitude-mixing rotations to all suffix qubits.
+    seed:
+        Seed controlling deterministic angle selection.
+    """
+
+    if clifford_qubits <= 0 or core_qubits <= 0 or suffix_qubits <= 0:
+        return Circuit([])
+    if prefix_core_boundary <= 0 or core_suffix_boundary <= 0:
+        raise ValueError("boundaries must be positive")
+    if prefix_core_boundary > min(clifford_qubits, core_qubits):
+        raise ValueError("prefix_core_boundary too large for fragment sizes")
+    if core_suffix_boundary > min(core_qubits, suffix_qubits):
+        raise ValueError("core_suffix_boundary too large for fragment sizes")
+    if cross_layers <= 0:
+        raise ValueError("cross_layers must be positive")
+    if not 0.0 <= suffix_sparsity <= 1.0:
+        raise ValueError("suffix_sparsity must be between 0 and 1")
+
+    rng = Random(seed)
+    gates: List[Gate] = []
+
+    clifford_offset = 0
+    core_offset = clifford_qubits
+    suffix_offset = clifford_qubits + core_qubits
+
+    # Clifford fragment: repeated GHZ-like layers to remain tableau friendly.
+    for _ in range(prefix_depth):
+        for q in range(clifford_qubits):
+            gates.append(Gate("H", [clifford_offset + q]))
+        for q in range(clifford_qubits - 1):
+            gates.append(Gate("CX", [clifford_offset + q, clifford_offset + q + 1]))
+        if clifford_qubits > 2:
+            gates.append(Gate("CZ", [clifford_offset, clifford_offset + clifford_qubits - 1]))
+
+    # Dense core: layers of non-local rotations and entanglers.
+    for layer in range(core_layers):
+        for q in range(core_qubits):
+            theta = rng.uniform(0.2, 1.4)
+            phi = rng.uniform(0.15, 1.2)
+            gates.append(Gate("RY", [core_offset + q], {"theta": theta}))
+            gates.append(Gate("RZ", [core_offset + q], {"phi": phi}))
+        for q in range(core_qubits - 1):
+            gates.append(
+                Gate(
+                    "CRZ",
+                    [core_offset + q, core_offset + q + 1],
+                    {"phi": rng.uniform(0.3, 1.1)},
+                )
+            )
+        if core_qubits > 2:
+            offset = (layer % (core_qubits - 1)) + 1
+            gates.append(
+                Gate(
+                    "CRZ",
+                    [core_offset, core_offset + offset],
+                    {"phi": rng.uniform(0.25, 1.0)},
+                )
+            )
+        gates.append(Gate("T", [core_offset + layer % core_qubits]))
+
+    # Cross entanglement between Clifford prefix and dense core.
+    prefix_boundary = list(range(clifford_offset + clifford_qubits - prefix_core_boundary, clifford_offset + clifford_qubits))
+    core_left_boundary = list(range(core_offset, core_offset + prefix_core_boundary))
+    for layer in range(cross_layers):
+        for src, dst in zip(prefix_boundary, core_left_boundary):
+            gates.append(
+                Gate(
+                    "CRZ",
+                    [src, dst],
+                    {"phi": rng.uniform(0.25, 1.0)},
+                )
+            )
+            if layer % 2 == 0:
+                gates.append(Gate("CX", [src, dst]))
+        for dst in core_left_boundary:
+            gates.append(Gate("T", [dst]))
+
+    # Sparse suffix dominated by diagonal rotations.
+    mix_qubits = max(0, round((1.0 - suffix_sparsity) * suffix_qubits))
+    mix_indices = list(range(mix_qubits))
+    for layer in range(suffix_layers):
+        for q in range(suffix_qubits):
+            phi = rng.uniform(0.05, 0.8)
+            gates.append(Gate("RZ", [suffix_offset + q], {"phi": phi}))
+        for idx in mix_indices:
+            gates.append(
+                Gate(
+                    "RX",
+                    [suffix_offset + (idx + layer) % suffix_qubits],
+                    {"theta": rng.uniform(0.1, 1.0)},
+                )
+            )
+        if suffix_qubits > 1:
+            gates.append(
+                Gate(
+                    "CZ",
+                    [suffix_offset, suffix_offset + suffix_qubits - 1],
+                )
+            )
+        for q in range(0, suffix_qubits, 3):
+            gates.append(Gate("T", [suffix_offset + q % suffix_qubits]))
+
+    # Cross entanglement between dense core and sparse suffix.
+    core_right_boundary = list(range(core_offset + core_qubits - core_suffix_boundary, core_offset + core_qubits))
+    suffix_boundary = list(range(suffix_offset, suffix_offset + core_suffix_boundary))
+    for layer in range(cross_layers):
+        for src, dst in zip(core_right_boundary, suffix_boundary):
+            gates.append(
+                Gate(
+                    "CRZ",
+                    [src, dst],
+                    {"phi": rng.uniform(0.15, 0.9)},
+                )
+            )
+            if layer % 2 == 1:
+                gates.append(Gate("CX", [src, dst]))
+        for src in core_right_boundary:
+            gates.append(Gate("T", [src]))
+
+    return Circuit(gates, use_classical_simplification=False)

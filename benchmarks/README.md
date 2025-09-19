@@ -21,7 +21,7 @@ fastest non‑QuASAr backend is determined and only this aggregate baseline is
 stored alongside the QuASAr result:
 
 ```bash
-python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 5 --output results/ghz
+python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 5 --output benchmarks/results/ghz
 ```
 
 - `--circuit` selects a family from [circuits.py](circuits.py) using the
@@ -32,6 +32,22 @@ python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 
 - Circuit families composed solely of Clifford gates (`H`, `S`, `CX`, `CZ`, etc.)
   are skipped to avoid benchmarking workloads that are trivial for stabiliser
   simulators.
+
+The new `--scenario` flag drives the partitioning experiments derived from the
+`docs/partitioning_*.ipynb` notebooks.  Each scenario enumerates a deterministic
+parameter sweep defined in [`partitioning_workloads.py`](partitioning_workloads.py)
+and maps the settings onto the large-scale circuit generators.  For example,
+the boundary-width sweep is executed with:
+
+```bash
+python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
+```
+
+Scenario runs emit two sets of artefacts: the raw measurement table
+(`tableau_boundary.csv`/`.json`) and an aggregated summary table in CSV and
+Markdown form (`tableau_boundary_summary.csv`/`.md`).  The Markdown output is
+formatted for the paper and lists QuASAr/backbone runtimes, memory usage,
+conversion counts and the dominant conversion primitives.
 
 Each benchmark records separate timings for the preparation and execution
 phases as well as their sum:
@@ -46,8 +62,22 @@ phases as well as their sum:
 Statevector simulations are skipped when the circuit width exceeds the
 available memory. A default budget of 64 GiB (about 32 qubits) is assumed but
 can be adjusted via the ``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` environment
-variable or by passing ``memory_bytes`` to
-``BenchmarkRunner.run_quasar``/``run_quasar_multiple``.
+variable, the global ``--memory-bytes`` flag on `run_benchmarks.py`, or by
+passing ``memory_bytes`` to ``BenchmarkRunner.run_quasar``/``run_quasar_multiple``.
+
+To regenerate the partitioning sweeps used in the paper, execute the three
+scenarios with identical parameters so that QuASAr and the baseline backends
+share the same 256 MiB budget and single-shot timing window:
+
+```bash
+python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
+python benchmarks/run_benchmarks.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
+python benchmarks/run_benchmarks.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
+```
+
+Each invocation writes CSV/JSON pairs plus a Markdown summary directly under
+`benchmarks/results/`.  The tables are deterministic because the circuit
+generators fix their random seeds.
 
 ### Timing semantics
 

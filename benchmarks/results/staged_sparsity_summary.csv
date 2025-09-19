@@ -1,0 +1,4 @@
+scenario,variant,circuit,qubits,cross_layers,suffix_sparsity,prefix_core_boundary,core_suffix_boundary,clifford_qubits,core_qubits,suffix_qubits,total_qubits,baseline_runtime_mean,baseline_backend,baseline_peak_memory_mean,quasar_runtime_mean,quasar_peak_memory_mean,quasar_backend,quasar_conversions,quasar_boundary_mean,quasar_rank_mean,quasar_frontier_mean,quasar_conversion_primitives,runtime_speedup
+staged_sparsity,staged_sparsity_1,staged_partition_circuit,10.0,2.0,0.2,2.0,2.0,5.0,3.0,2.0,10.0,0.005698471999949106,dd,22468.0,0.013572233999639138,56874.0,mps,0.0,,,,,0.4198624927996834
+staged_sparsity,staged_sparsity_2,staged_partition_circuit,10.0,2.0,0.5,2.0,2.0,5.0,3.0,2.0,10.0,0.0038907560001462116,dd,16204.0,0.015783537000061187,56753.0,mps,0.0,,,,,0.24650723092872837
+staged_sparsity,staged_sparsity_3,staged_partition_circuit,10.0,2.0,0.8,2.0,2.0,5.0,3.0,2.0,10.0,0.003563966999990953,dd,16380.0,0.01360555499968541,53309.0,mps,0.0,,,,,0.26194940228997343
