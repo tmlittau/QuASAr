@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
+from matplotlib.legend import Legend
 import pandas as pd
 
 try:  # seaborn provides the high level styling requested by the paper.
@@ -83,7 +84,28 @@ def _normalise_backend(value: object) -> str | None:
     return None
 
 
-def setup_benchmark_style(context: str = "talk", font_scale: float = 0.9) -> None:
+def _as_seaborn_palette(
+    palette: Mapping[object, str] | Sequence[str] | str | None,
+) -> Sequence[str] | str | None:
+    """Convert mapping palettes to the sequence format expected by Seaborn."""
+
+    if palette is None:
+        return None
+    if isinstance(palette, Mapping):
+        return list(palette.values())
+    if isinstance(palette, str):
+        return palette
+    return list(palette)
+
+
+def setup_benchmark_style(
+    context: str = "talk",
+    font_scale: float = 0.9,
+    *,
+    palette: Mapping[object, str] | Sequence[str] | str | None = None,
+    legend_fontsize: float | str = "medium",
+    legend_title_fontsize: float | str = "medium",
+) -> None:
     """Apply the shared matplotlib/Seaborn styling used in the paper plots.
 
     Parameters
@@ -96,12 +118,65 @@ def setup_benchmark_style(context: str = "talk", font_scale: float = 0.9) -> Non
         Scale factor applied to tick and label fonts.
     """
 
+    rc = {
+        "axes.titlesize": 16,
+        "axes.labelsize": 14,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": legend_fontsize,
+        "legend.title_fontsize": legend_title_fontsize,
+    }
+    resolved_palette = _as_seaborn_palette(palette)
     if sns is not None:  # pragma: no branch - optional dependency
-        sns.set_theme(context=context, style="whitegrid", font_scale=font_scale)
+        sns.set_theme(
+            context=context,
+            style="whitegrid",
+            font_scale=font_scale,
+            palette=resolved_palette,
+            rc=rc,
+        )
+    else:
+        for key, value in rc.items():
+            plt.rcParams.setdefault(key, value)
     plt.rcParams.setdefault("axes.spines.top", False)
     plt.rcParams.setdefault("axes.spines.right", False)
     plt.rcParams.setdefault("figure.dpi", 110)
     plt.rcParams.setdefault("figure.autolayout", True)
+    plt.rcParams.setdefault("legend.frameon", False)
+
+
+def _apply_legend_style(
+    legend: Legend | None,
+    *,
+    loc: str = "upper center",
+    bbox_to_anchor: tuple[float, float] | None = (0.5, 1.02),
+    ncol: int = 1,
+    frameon: bool | None = None,
+    title: str | None = None,
+) -> None:
+    """Apply consistent styling to matplotlib legends."""
+
+    if legend is None:
+        return
+    legend.set_loc(loc)
+    if hasattr(legend, "set_ncols"):
+        legend.set_ncols(max(1, ncol))
+    else:  # pragma: no cover - compatibility with older matplotlib
+        legend._ncols = max(1, ncol)  # type: ignore[attr-defined]
+    if bbox_to_anchor is not None:
+        legend.set_bbox_to_anchor(bbox_to_anchor)
+    if frameon is not None:
+        legend.set_frame_on(frameon)
+    else:
+        legend.set_frame_on(bool(plt.rcParams.get("legend.frameon", False)))
+    if title is not None:
+        legend.set_title(title)
+    fontsize = plt.rcParams.get("legend.fontsize", "medium")
+    for text in legend.get_texts():
+        text.set_fontsize(fontsize)
+    legend_title = legend.get_title()
+    if legend_title is not None and legend_title.get_text():
+        legend_title.set_fontsize(plt.rcParams.get("legend.title_fontsize", "medium"))
 
 
 def _style_for_backend(value: object) -> BackendStyle | None:
@@ -309,19 +384,18 @@ def plot_backend_timeseries(
     backend while automatic runs appear as highlighted markers.
     """
 
-    setup_benchmark_style()
     if sns is None:  # pragma: no cover - seaborn optional
         raise RuntimeError("seaborn is required for plot_backend_timeseries")
 
     order = list(dict.fromkeys(forced[hue].tolist() + auto[hue].tolist()))
+    palette = backend_palette(order)
+    setup_benchmark_style(palette=palette)
+
     if log_scale:
         forced = forced.copy()
         auto = auto.copy()
         forced[metric] = forced[metric].clip(lower=1e-9)
         auto[metric] = auto[metric].clip(lower=1e-9)
-    palette = backend_palette(order)
-
-    markers = backend_markers(order)
     grid = sns.relplot(
         data=forced,
         x=x,
@@ -361,6 +435,12 @@ def plot_backend_timeseries(
     grid.fig.subplots_adjust(top=0.9)
     title = _metric_label(metric)
     grid.fig.suptitle(f"Forced (lines) vs auto (markers): {title}")
+    _apply_legend_style(
+        getattr(grid, "_legend", None),
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.03),
+        ncol=max(1, min(len(order), 4)),
+    )
     return grid
 
 
@@ -546,7 +626,11 @@ def plot_quasar_vs_baseline_best(
         The axes containing the plot.
     """
 
-    setup_benchmark_style()
+    default_order = ["baseline_best", "quasar"]
+    palette = palette or backend_palette(default_order)
+    markers = markers or backend_markers(default_order)
+    setup_benchmark_style(palette=palette)
+
     if show_speedup_table and table_ax is None and ax is not None:
         raise ValueError("table_ax must be provided when show_speedup_table=True and ax is pre-supplied")
     if show_speedup_table and table_ax is None and ax is None:
@@ -570,8 +654,6 @@ def plot_quasar_vs_baseline_best(
     x_col = "qubits" if "qubits" in df.columns else "circuit"
     std_col = metric.replace("_mean", "_std")
 
-    palette = palette or backend_palette(["baseline_best", "quasar"])
-    markers = markers or backend_markers(["baseline_best", "quasar"])
     base_color = palette.get("baseline_best", "#264653")
     base_marker = markers.get("baseline_best", "s")
     quasar_color = palette.get("quasar", "#1b9e77")
@@ -652,7 +734,13 @@ def plot_quasar_vs_baseline_best(
     else:
         ax.set_ylim(bottom=0)
     ax.margins(x=0.02)
-    ax.legend()
+    legend = ax.legend()
+    _apply_legend_style(
+        legend,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.02),
+        ncol=max(1, len(palette)),
+    )
 
     speed_metric = speedup_metric or metric
     summary: pd.DataFrame | None = None
