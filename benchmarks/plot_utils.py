@@ -482,7 +482,11 @@ def compute_baseline_best(
     if baselines.empty:
         raise ValueError("no baseline entries in results")
 
-    group_cols = [c for c in ("circuit", "qubits") if c in df.columns]
+    group_cols = [
+        c
+        for c in ("circuit", "qubits", "scenario", "variant")
+        if c in df.columns
+    ]
     extra_cols = [c for c in ("repetitions",) if c in baselines.columns]
     rows: list[dict[str, object]] = []
     for keys, group in baselines.groupby(group_cols):

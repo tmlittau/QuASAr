@@ -10,17 +10,24 @@ determined via :func:`compute_baseline_best` and only this aggregated
 """
 
 import argparse
+import statistics
+import time
+import tracemalloc
+from collections import Counter
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Dict, Iterable, List
 
 import pandas as pd
 
 from benchmark_cli import parse_qubit_range, resolve_circuit
 from circuits import is_clifford
 from plot_utils import compute_baseline_best
+from partitioning_workloads import SCENARIOS, WorkloadInstance, iter_scenario
 from runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.cost import Backend
+from quasar.circuit import Circuit
+from memory_utils import max_qubits_statevector
 
 
 BASELINE_BACKENDS: tuple[Backend, ...] = (
@@ -37,6 +44,7 @@ def run_all(
     repetitions: int,
     *,
     use_classical_simplification: bool = True,
+    memory_bytes: int | None = None,
 ) -> pd.DataFrame:
     """Execute ``circuit_fn`` for each qubit count on all backends.
 
@@ -69,7 +77,8 @@ def run_all(
                     engine,
                     backend=backend,
                     repetitions=repetitions,
-                    quick=True,
+                    quick=False,
+                    memory_bytes=memory_bytes,
                 )
             except RuntimeError as exc:
                 records.append(
@@ -96,7 +105,11 @@ def run_all(
             records.append(rec)
 
         quasar_rec = runner.run_quasar_multiple(
-            circuit, engine, repetitions=repetitions, quick=True
+            circuit,
+            engine,
+            repetitions=repetitions,
+            quick=False,
+            memory_bytes=memory_bytes,
         )
         quasar_rec.pop("result", None)
         backend_name = quasar_rec.get("backend")
@@ -111,13 +124,186 @@ def run_all(
     if df.empty or "framework" not in df.columns:
         return df
     try:
-        baseline_best = compute_baseline_best(df)
+        baseline_best = compute_baseline_best(
+            df,
+            metrics=(
+                "run_time_mean",
+                "total_time_mean",
+                "run_peak_memory_mean",
+            ),
+        )
         quasar_df = df[df["framework"] == "quasar"]
         return pd.concat([baseline_best, quasar_df], ignore_index=True)
     except ValueError:
         # All baselines failed or are unsupported; return QuASAr data only.
         return df[df["framework"] == "quasar"].reset_index(drop=True)
 
+
+def run_scenarios(
+    instances: Iterable[WorkloadInstance],
+    repetitions: int,
+    *,
+    memory_bytes: int | None = None,
+) -> pd.DataFrame:
+    """Execute scenario workloads across all backends."""
+
+    engine = SimulationEngine()
+    runner = BenchmarkRunner()
+    scheduler = getattr(engine, "scheduler", engine)
+    planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
+    records: List[dict[str, object]] = []
+
+    def _conversion_summary(layers: List[Any]) -> Dict[str, Any]:
+        summary: Dict[str, Any] = {
+            "conversion_count": len(layers),
+            "conversion_boundary_mean": None,
+            "conversion_rank_mean": None,
+            "conversion_frontier_mean": None,
+            "conversion_primitive_summary": None,
+        }
+        if not layers:
+            return summary
+        boundaries = [len(getattr(layer, "boundary", ())) for layer in layers]
+        ranks = [getattr(layer, "rank", None) for layer in layers]
+        frontiers = [getattr(layer, "frontier", None) for layer in layers]
+        primitives = Counter(getattr(layer, "primitive", None) for layer in layers)
+        if any(boundaries):
+            summary["conversion_boundary_mean"] = statistics.fmean(boundaries)
+        if any(ranks):
+            summary["conversion_rank_mean"] = statistics.fmean(
+                [r for r in ranks if r is not None]
+            )
+        if any(frontiers):
+            summary["conversion_frontier_mean"] = statistics.fmean(
+                [f for f in frontiers if f is not None]
+            )
+        if primitives:
+            parts = [
+                f"{name}:{count}"
+                for name, count in sorted(primitives.items())
+                if name
+            ]
+            summary["conversion_primitive_summary"] = ", ".join(parts) if parts else None
+        return summary
+
+    for instance in instances:
+        metadata: Dict[str, object] = {}
+
+        def _build_circuit() -> Circuit:
+            circuit = instance.build()
+            meta = dict(getattr(circuit, "metadata", {}))
+            metadata.clear()
+            metadata.update(meta)
+            if instance.enable_classical_simplification:
+                enable = getattr(circuit, "enable_classical_simplification", None)
+                if callable(enable):
+                    enable()
+                else:
+                    circuit.use_classical_simplification = True
+            else:
+                circuit.use_classical_simplification = False
+            return circuit
+
+        def _execute_backend(backend: Backend | None) -> dict[str, object]:
+            circuit = _build_circuit()
+            total_qubits = metadata.get(
+                "total_qubits", getattr(circuit, "num_qubits", None)
+            )
+            if (
+                backend == Backend.STATEVECTOR
+                and total_qubits is not None
+                and total_qubits > max_qubits_statevector(memory_bytes)
+            ):
+                limit = max_qubits_statevector(memory_bytes)
+                return {
+                    "framework": backend.value if backend else "quasar",
+                    "backend": backend.value if backend else Backend.STATEVECTOR.value,
+                    "unsupported": True,
+                    "comment": (
+                        f"circuit width {total_qubits} exceeds statevector limit {limit}"
+                    ),
+                }
+
+            tracemalloc.start()
+            start_prepare = time.perf_counter()
+            try:
+                if planner is not None:
+                    plan = planner.plan(circuit, backend=backend)
+                    plan = scheduler.prepare_run(circuit, plan, backend=backend)
+                else:
+                    plan = scheduler.prepare_run(circuit, backend=backend)
+            except ValueError as exc:
+                tracemalloc.stop()
+                return {"framework": backend.value if backend else "quasar", "backend": backend.value if backend else str(backend), "unsupported": True, "error": str(exc)}
+            prepare_time = time.perf_counter() - start_prepare
+            _, prepare_peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+
+            conversion_layers = list(getattr(plan, "conversions", []))
+            try:
+                result, metrics = scheduler.run(circuit, plan, instrument=True)
+            except Exception as exc:
+                return {"framework": backend.value if backend else "quasar", "backend": backend.value if backend else str(backend), "failed": True, "error": str(exc)}
+            cost = getattr(metrics, "cost", metrics)
+            run_time = getattr(cost, "time", 0.0)
+            run_peak = int(getattr(cost, "memory", 0.0))
+            backend_choice = None
+            if backend is not None:
+                backend_choice = backend.value
+            elif hasattr(result, "partitions") and getattr(result, "partitions"):
+                backend_obj = result.partitions[0].backend
+                backend_choice = getattr(backend_obj, "value", str(backend_obj))
+            record = {
+                "framework": backend.value if backend is not None else "quasar",
+                "prepare_time_mean": prepare_time,
+                "prepare_time_std": 0.0,
+                "run_time_mean": run_time,
+                "run_time_std": 0.0,
+                "total_time_mean": prepare_time + run_time,
+                "total_time_std": 0.0,
+                "prepare_peak_memory_mean": int(prepare_peak),
+                "prepare_peak_memory_std": 0.0,
+                "run_peak_memory_mean": run_peak,
+                "run_peak_memory_std": 0.0,
+                "repetitions": 1,
+                "backend": backend_choice,
+                "result": result,
+                "failed": False,
+            }
+            record.update(_conversion_summary(conversion_layers))
+            if total_qubits is not None:
+                record["qubits"] = total_qubits
+            return record
+
+        for backend in BASELINE_BACKENDS:
+            record = _execute_backend(backend)
+            record.update({"circuit": instance.builder.__name__, "framework": backend.value})
+            record.update(metadata)
+            record.pop("result", None)
+            records.append(record)
+
+        quasar_record = _execute_backend(None)
+        quasar_record.update({"circuit": instance.builder.__name__, "framework": "quasar"})
+        quasar_record.update(metadata)
+        quasar_record.pop("result", None)
+        records.append(quasar_record)
+
+    df = pd.DataFrame(records)
+    if df.empty or "framework" not in df.columns:
+        return df
+    try:
+        baseline_best = compute_baseline_best(
+            df,
+            metrics=(
+                "run_time_mean",
+                "total_time_mean",
+                "run_peak_memory_mean",
+            ),
+        )
+        quasar_df = df[df["framework"] == "quasar"]
+        return pd.concat([baseline_best, quasar_df], ignore_index=True)
+    except ValueError:
+        return df[df["framework"] == "quasar"].reset_index(drop=True)
 
 def save_results(df: pd.DataFrame, output: Path) -> None:
     """Persist ``df`` as CSV and JSON using ``output`` as base path."""
@@ -130,18 +316,147 @@ def save_results(df: pd.DataFrame, output: Path) -> None:
     df.to_json(json_path, orient="records", indent=2)
 
 
+def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
+    """Return an aggregate table comparing QuASAr and baseline metrics."""
+
+    if df.empty:
+        return df
+
+    relevant = df[df["framework"].isin({"baseline_best", "quasar"})]
+    if relevant.empty:
+        return relevant
+
+    base_keys = [
+        col
+        for col in ("scenario", "variant", "circuit", "qubits")
+        if col in relevant.columns
+    ]
+    metadata_columns = [
+        col
+        for col in (
+            "boundary",
+            "schmidt_layers",
+            "cross_layers",
+            "suffix_sparsity",
+            "prefix_core_boundary",
+            "core_suffix_boundary",
+            "dense_qubits",
+            "clifford_qubits",
+            "core_qubits",
+            "suffix_qubits",
+            "total_qubits",
+        )
+        if col in relevant.columns
+    ]
+    rows: List[dict[str, object]] = []
+
+    baseline_frameworks = {backend.value for backend in BASELINE_BACKENDS}
+
+    for keys, group in relevant.groupby(base_keys, dropna=False):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        row = dict(zip(base_keys, keys))
+
+        quasar = group[group["framework"] == "quasar"]
+        meta_source = quasar if not quasar.empty else group
+        if not meta_source.empty:
+            head = meta_source.iloc[0]
+            for col in metadata_columns:
+                row.setdefault(col, head.get(col))
+
+        baseline = group[group["framework"] == "baseline_best"]
+        if not baseline.empty:
+            b = baseline.iloc[0]
+            row["baseline_runtime_mean"] = b.get("run_time_mean")
+            row["baseline_backend"] = b.get("backend")
+            peak_memory = b.get("run_peak_memory_mean")
+            if pd.isna(peak_memory):
+                mask = df["framework"].isin(baseline_frameworks)
+                for name, value in zip(base_keys, keys):
+                    mask &= df[name] == value
+                candidates = df[mask]
+                if (
+                    not candidates.empty
+                    and "run_time_mean" in candidates.columns
+                    and "run_peak_memory_mean" in candidates.columns
+                ):
+                    idx = candidates["run_time_mean"].idxmin()
+                    peak_memory = candidates.loc[idx, "run_peak_memory_mean"]
+            row["baseline_peak_memory_mean"] = peak_memory
+        else:
+            row["baseline_runtime_mean"] = None
+            row["baseline_peak_memory_mean"] = None
+            row["baseline_backend"] = None
+
+        if not quasar.empty:
+            q = quasar.iloc[0]
+            row["quasar_runtime_mean"] = q.get("run_time_mean")
+            row["quasar_peak_memory_mean"] = q.get("run_peak_memory_mean")
+            row["quasar_backend"] = q.get("backend")
+            row["quasar_conversions"] = q.get("conversion_count")
+            row["quasar_boundary_mean"] = q.get("conversion_boundary_mean")
+            row["quasar_rank_mean"] = q.get("conversion_rank_mean")
+            row["quasar_frontier_mean"] = q.get("conversion_frontier_mean")
+            row["quasar_conversion_primitives"] = q.get(
+                "conversion_primitive_summary"
+            )
+        else:
+            row["quasar_runtime_mean"] = None
+            row["quasar_peak_memory_mean"] = None
+            row["quasar_backend"] = None
+            row["quasar_conversions"] = None
+            row["quasar_boundary_mean"] = None
+            row["quasar_rank_mean"] = None
+            row["quasar_frontier_mean"] = None
+            row["quasar_conversion_primitives"] = None
+
+        try:
+            if row["baseline_runtime_mean"] and row["quasar_runtime_mean"]:
+                row["runtime_speedup"] = (
+                    row["baseline_runtime_mean"] / row["quasar_runtime_mean"]
+                )
+            else:
+                row["runtime_speedup"] = None
+        except ZeroDivisionError:
+            row["runtime_speedup"] = None
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def write_partitioning_tables(df: pd.DataFrame, output: Path) -> None:
+    """Create CSV and Markdown summaries for partitioning benchmarks."""
+
+    summary = summarise_partitioning(df)
+    if summary.empty:
+        return
+    base = output.with_suffix("")
+    summary_base = base.with_name(base.name + "_summary")
+    summary_csv = summary_base.with_suffix(".csv")
+    summary_md = summary_base.with_suffix(".md")
+    summary_csv.parent.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(summary_csv, index=False)
+    try:
+        summary.to_markdown(summary_md, index=False)
+    except ImportError:
+        summary.to_string(buf=summary_md.open('w'))
+
+
 def main() -> None:  # pragma: no cover - CLI entry point
     parser = argparse.ArgumentParser(
         description="Execute benchmark circuits and record baseline-best results"
     )
+    parser.add_argument("--circuit", help="Circuit family name (e.g. ghz, qft)")
     parser.add_argument(
-        "--circuit", required=True, help="Circuit family name (e.g. ghz, qft)"
+        "--scenario",
+        choices=sorted(SCENARIOS.keys()),
+        help="Named partitioning scenario defined in partitioning_workloads",
     )
     parser.add_argument(
         "--qubits",
-        required=True,
         type=parse_qubit_range,
-        help="Qubit range as start:end[:step]",
+        help="Qubit range as start:end[:step] (for --circuit runs)",
     )
     parser.add_argument(
         "--repetitions",
@@ -157,16 +472,33 @@ def main() -> None:  # pragma: no cover - CLI entry point
         action="store_true",
         help="Disable classical control simplification",
     )
+    parser.add_argument(
+        "--memory-bytes",
+        type=int,
+        help="Approximate peak memory budget per backend (bytes)",
+    )
     args = parser.parse_args()
 
-    circuit_fn = resolve_circuit(args.circuit)
-    df = run_all(
-        circuit_fn,
-        args.qubits,
-        args.repetitions,
-        use_classical_simplification=not args.disable_classical_simplify,
-    )
-    save_results(df, args.output)
+    if bool(args.circuit) == bool(args.scenario):
+        parser.error("exactly one of --circuit or --scenario must be provided")
+
+    if args.circuit:
+        if args.qubits is None:
+            parser.error("--qubits is required when --circuit is used")
+        circuit_fn = resolve_circuit(args.circuit)
+        df = run_all(
+            circuit_fn,
+            args.qubits,
+            args.repetitions,
+            use_classical_simplification=not args.disable_classical_simplify,
+            memory_bytes=args.memory_bytes,
+        )
+        save_results(df, args.output)
+    else:
+        instances = iter_scenario(args.scenario)
+        df = run_scenarios(instances, args.repetitions, memory_bytes=args.memory_bytes)
+        save_results(df, args.output)
+        write_partitioning_tables(df, args.output)
 
 
 # Import surface-code protected circuits so the CLI can discover them.
