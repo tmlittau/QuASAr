@@ -158,6 +158,10 @@ Benchmark results can be explored with the Jupyter notebooks in
 jupyter notebook benchmarks/notebooks/comparison.ipynb
 ```
 
+- `partitioning_workloads_results.ipynb` regenerates the deterministic
+  partitioning sweeps, persists the CSV/JSON artefacts, and produces the paper
+  figures inline for quick inspection.
+
 ## Adding circuit families
 
 New circuit generators are added to

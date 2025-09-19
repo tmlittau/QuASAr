@@ -438,9 +438,12 @@ def write_partitioning_tables(df: pd.DataFrame, output: Path) -> None:
     summary_csv.parent.mkdir(parents=True, exist_ok=True)
     summary.to_csv(summary_csv, index=False)
     try:
-        summary.to_markdown(summary_md, index=False)
+        with summary_md.open("w", encoding="utf-8") as handle:
+            summary.to_markdown(handle, index=False)
     except ImportError:
-        summary.to_string(buf=summary_md.open('w'))
+        with summary_md.open("w", encoding="utf-8") as handle:
+            handle.write(summary.to_string(index=False))
+            handle.write("\n")
 
 
 def main() -> None:  # pragma: no cover - CLI entry point
