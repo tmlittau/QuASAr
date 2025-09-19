@@ -16,6 +16,7 @@ Two entry points are exposed:
     contributes to the recorded runtime.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 from contextlib import contextmanager
@@ -228,6 +229,76 @@ class BenchmarkRunner:
         ]
         records: List[Dict[str, Any]] = []
         failures: List[str] = []
+
+        def _conversion_summary(layers: List[Any]) -> Dict[str, Any]:
+            summary: Dict[str, Any] = {
+                "conversion_count": len(layers),
+                "conversion_boundary_mean": None,
+                "conversion_rank_mean": None,
+                "conversion_frontier_mean": None,
+                "conversion_primitive_summary": None,
+            }
+            if not layers:
+                return summary
+            boundaries = [len(getattr(layer, "boundary", ())) for layer in layers]
+            ranks = [getattr(layer, "rank", None) for layer in layers]
+            frontiers = [getattr(layer, "frontier", None) for layer in layers]
+            primitives = Counter(getattr(layer, "primitive", None) for layer in layers)
+            if any(boundaries):
+                summary["conversion_boundary_mean"] = statistics.fmean(boundaries)
+            if any(ranks):
+                summary["conversion_rank_mean"] = statistics.fmean(
+                    [r for r in ranks if r is not None]
+                )
+            if any(frontiers):
+                summary["conversion_frontier_mean"] = statistics.fmean(
+                    [f for f in frontiers if f is not None]
+                )
+            if primitives:
+                parts = [
+                    f"{name}:{count}"
+                    for name, count in sorted(primitives.items())
+                    if name
+                ]
+                summary["conversion_primitive_summary"] = (
+                    ", ".join(parts) if parts else None
+                )
+            return summary
+
+        def _conversion_summary(layers: List[Any]) -> Dict[str, Any]:
+            summary: Dict[str, Any] = {
+                "conversion_count": len(layers),
+                "conversion_boundary_mean": None,
+                "conversion_rank_mean": None,
+                "conversion_frontier_mean": None,
+                "conversion_primitive_summary": None,
+            }
+            if not layers:
+                return summary
+            boundaries = [len(getattr(layer, "boundary", ())) for layer in layers]
+            ranks = [getattr(layer, "rank", None) for layer in layers]
+            frontiers = [getattr(layer, "frontier", None) for layer in layers]
+            primitives = Counter(getattr(layer, "primitive", None) for layer in layers)
+            if any(boundaries):
+                summary["conversion_boundary_mean"] = statistics.fmean(boundaries)
+            if any(ranks):
+                summary["conversion_rank_mean"] = statistics.fmean(
+                    [r for r in ranks if r is not None]
+                )
+            if any(frontiers):
+                summary["conversion_frontier_mean"] = statistics.fmean(
+                    [f for f in frontiers if f is not None]
+                )
+            if primitives:
+                parts = [
+                    f"{name}:{count}"
+                    for name, count in sorted(primitives.items())
+                    if name
+                ]
+                summary["conversion_primitive_summary"] = (
+                    ", ".join(parts) if parts else None
+                )
+            return summary
         unsupported_comment: str | None = None
 
         def _run_once() -> Dict[str, Any]:
@@ -421,8 +492,14 @@ class BenchmarkRunner:
                 tracemalloc.stop()
 
                 result, run_cost = scheduler.run(circuit, plan, instrument=True)
-                run_time = run_cost.time
-                run_peak_memory = int(run_cost.memory)
+                time_attr = getattr(run_cost, "time", None)
+                memory_attr = getattr(run_cost, "memory", None)
+                if time_attr is None and hasattr(run_cost, "cost"):
+                    time_attr = getattr(run_cost.cost, "time", 0.0)
+                if memory_attr is None and hasattr(run_cost, "cost"):
+                    memory_attr = getattr(run_cost.cost, "memory", 0.0)
+                run_time = time_attr if time_attr is not None else 0.0
+                run_peak_memory = int(memory_attr) if memory_attr is not None else 0
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
@@ -545,6 +622,41 @@ class BenchmarkRunner:
         records: List[Dict[str, Any]] = []
         failures: List[str] = []
 
+        def _conversion_summary(layers: List[Any]) -> Dict[str, Any]:
+            summary: Dict[str, Any] = {
+                "conversion_count": len(layers),
+                "conversion_boundary_mean": None,
+                "conversion_rank_mean": None,
+                "conversion_frontier_mean": None,
+                "conversion_primitive_summary": None,
+            }
+            if not layers:
+                return summary
+            boundaries = [len(getattr(layer, "boundary", ())) for layer in layers]
+            ranks = [getattr(layer, "rank", None) for layer in layers]
+            frontiers = [getattr(layer, "frontier", None) for layer in layers]
+            primitives = Counter(getattr(layer, "primitive", None) for layer in layers)
+            if any(boundaries):
+                summary["conversion_boundary_mean"] = statistics.fmean(boundaries)
+            if any(ranks):
+                summary["conversion_rank_mean"] = statistics.fmean(
+                    [r for r in ranks if r is not None]
+                )
+            if any(frontiers):
+                summary["conversion_frontier_mean"] = statistics.fmean(
+                    [f for f in frontiers if f is not None]
+                )
+            if primitives:
+                parts = [
+                    f"{name}:{count}"
+                    for name, count in sorted(primitives.items())
+                    if name
+                ]
+                summary["conversion_primitive_summary"] = (
+                    ", ".join(parts) if parts else None
+                )
+            return summary
+
         scheduler = getattr(engine, "scheduler", engine)
         planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
         use_quick = quick
@@ -580,6 +692,7 @@ class BenchmarkRunner:
             }
             self.results.append(summary)
             return summary
+        conversion_layers: List[Any] = []
         if use_quick:
             plan = None
             original_ssd = None
@@ -596,6 +709,7 @@ class BenchmarkRunner:
             coeff_backup = copy.deepcopy(getattr(est, "coeff", {})) if est else None
 
             conv_layers = list(getattr(plan, "conversions", []))
+            conversion_layers = list(conv_layers)
             parts = getattr(plan, "partitions", None)
             if parts is not None and len(parts) == 1 and not conv_layers:
                 backend_choice = parts[0].backend
@@ -615,6 +729,9 @@ class BenchmarkRunner:
             if circuit is not None and original_ssd is not None:
                 circuit.ssd = copy.deepcopy(original_ssd)
 
+        if use_quick:
+            conversion_layers = []
+
         if (
             simple_backend == Backend.STATEVECTOR
             and getattr(circuit, "num_qubits", 0) > max_q
@@ -631,6 +748,7 @@ class BenchmarkRunner:
                 "unsupported": True,
                 "comment": msg,
             }
+            summary.update(_conversion_summary(conversion_layers))
             self.results.append(summary)
             return summary
 
@@ -721,6 +839,7 @@ class BenchmarkRunner:
                     "unsupported": True,
                     "comment": rec.get("comment"),
                 }
+                summary.update(_conversion_summary(conversion_layers))
                 self.results.append(summary)
                 return summary
 
@@ -755,6 +874,7 @@ class BenchmarkRunner:
             )
 
         summary["result"] = records[-1].get("result") if records else None
+        summary.update(_conversion_summary(conversion_layers))
 
         self.results.append(summary)
         return summary
