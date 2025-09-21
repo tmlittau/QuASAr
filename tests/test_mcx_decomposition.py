@@ -15,6 +15,15 @@ def _matrix_from_gates(gates, num_qubits):
             qc.t(gate.qubits[0])
         elif name == "TDG":
             qc.tdg(gate.qubits[0])
+        elif name == "P":
+            params = gate.params or {}
+            if "param0" in params:
+                angle = float(params["param0"])
+            elif params:
+                angle = float(next(iter(params.values())))
+            else:
+                angle = 0.0
+            qc.p(angle, gate.qubits[0])
         elif name == "CX":
             qc.cx(gate.qubits[0], gate.qubits[1])
         else:  # pragma: no cover - unsupported gate in test
@@ -22,9 +31,13 @@ def _matrix_from_gates(gates, num_qubits):
     return Operator(qc).data
 
 
-def _expected_mcx(controls, target, ancillas, num_qubits):
+def _expected_mcx(controls, target, num_qubits):
     qc = QuantumCircuit(num_qubits)
-    qc.mcx(controls, target, ancillas, mode="v-chain")
+    ancillas = [q for q in range(num_qubits) if q not in controls + [target]]
+    if ancillas:
+        qc.mcx(controls, target, ancillas, mode="v-chain")
+    else:
+        qc.mcx(controls, target, mode="noancilla")
     return Operator(qc).data
 
 
@@ -38,9 +51,8 @@ def test_mcx_three_controls():
     circ = Circuit([Gate("MCX", controls + [target])], use_classical_simplification=False)
     assert all(g.gate.upper() not in {"MCX", "CCX"} for g in circ.gates)
     n = _max_index(circ.gates) + 1
-    ancillas = list(range(target + 1, n))
     decomp = _matrix_from_gates(circ.gates, n)
-    expected = _expected_mcx(controls, target, ancillas, n)
+    expected = _expected_mcx(controls, target, n)
     assert np.allclose(decomp, expected)
 
 
@@ -50,7 +62,6 @@ def test_mcx_four_controls():
     circ = Circuit([Gate("MCX", controls + [target])], use_classical_simplification=False)
     assert all(g.gate.upper() not in {"MCX", "CCX"} for g in circ.gates)
     n = _max_index(circ.gates) + 1
-    ancillas = list(range(target + 1, n))
     decomp = _matrix_from_gates(circ.gates, n)
-    expected = _expected_mcx(controls, target, ancillas, n)
+    expected = _expected_mcx(controls, target, n)
     assert np.allclose(decomp, expected)

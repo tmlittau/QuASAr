@@ -239,7 +239,12 @@ class Circuit:
         expanded: List[Gate] = []
         for gate in self.gates:
             name = gate.gate.upper()
-            if name in {"CCX", "MCX"}:
+            if name in {"CCX", "MCX"} or (
+                name.endswith("X")
+                and len(gate.qubits) >= 3
+                and name[:-1]
+                and set(name[:-1]) == {"C"}
+            ):
                 *controls, target = gate.qubits
                 expanded.extend(decompose_mcx(list(controls), target))
             elif name == "CCZ":
@@ -379,7 +384,7 @@ class Circuit:
         name = gate.gate.upper()
         state = self.classical_state[q]
 
-        phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ"}
+        phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ", "P"}
 
         if state is None:
             if name == "H":
@@ -421,7 +426,7 @@ class Circuit:
             return self.gates
 
         new_gates: List[Gate] = []
-        phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ"}
+        phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ", "P"}
 
         for gate in self.gates:
             name = gate.gate.upper()
