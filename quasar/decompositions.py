@@ -2,16 +2,25 @@
 
 This module provides helpers for expanding multi-controlled gates into
 sequences of supported elementary operations. Currently the Toffoli
-(``CCX``), controlled-controlled-Z (``CCZ``) and controlled-SWAP (``CSWAP``)
-gates are implemented.
+(``CCX``), multi-controlled X (``MCX``), controlled-controlled-Z (``CCZ``)
+and controlled-SWAP (``CSWAP``) gates are implemented.
 """
 
 from __future__ import annotations
 
+import math
 from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import for type checking only
     from .circuit import Gate
+
+
+def _phase_gate(qubit: int, theta: float) -> "Gate":
+    """Return a single-qubit phase rotation gate."""
+
+    from .circuit import Gate
+
+    return Gate("P", [qubit], {"param0": float(theta)})
 
 
 def decompose_ccx(control1: int, control2: int, target: int) -> List["Gate"]:
@@ -51,11 +60,12 @@ def decompose_ccx(control1: int, control2: int, target: int) -> List["Gate"]:
 def decompose_mcx(controls: List[int], target: int) -> List["Gate"]:
     """Return a decomposition of an n-controlled X gate.
 
-    The decomposition reduces an arbitrary multi-controlled X operation into a
-    sequence of Toffoli gates which are further expanded into single- and
-    two-qubit gates.  ``n``−2 ancillary qubits are introduced and uncomputed at
-    the end of the sequence.  Ancillas are allocated using increasing qubit
-    indices beyond the controls and target.
+    For up to three controls the decomposition follows the no-ancilla
+    construction used by Qiskit's ``MCXGate``.  Larger control registers fall
+    back to the standard "V-chain" ancilla strategy which recursively breaks
+    the operation into Toffoli gates.  Any ancillary qubits introduced by the
+    latter approach are appended after the largest qubit index referenced by
+    the controls or target.
 
     Parameters
     ----------
@@ -75,6 +85,8 @@ def decompose_mcx(controls: List[int], target: int) -> List["Gate"]:
         return [Gate("CX", [controls[0], target])]
     if num_controls == 2:
         return decompose_ccx(controls[0], controls[1], target)
+    if num_controls == 3:
+        return _decompose_c3x(controls, target)
 
     max_index = max(controls + [target])
     ancillas = [max_index + 1 + i for i in range(num_controls - 2)]
@@ -89,6 +101,51 @@ def decompose_mcx(controls: List[int], target: int) -> List["Gate"]:
         gates.extend(decompose_ccx(ancillas[i - 2], controls[i], ancillas[i - 1]))
     gates.extend(decompose_ccx(c1, c2, ancillas[0]))
     return gates
+
+
+def _decompose_c3x(controls: List[int], target: int) -> List["Gate"]:
+    """Return a no-ancilla decomposition for a triple-controlled X gate."""
+
+    if len(controls) != 3:
+        raise ValueError("_decompose_c3x expects exactly three controls")
+
+    from .circuit import Gate
+
+    a, b, c = controls
+    theta = math.pi / 8
+    return [
+        _phase_gate(a, theta),
+        _phase_gate(b, theta),
+        Gate("CX", [a, b]),
+        _phase_gate(b, -theta),
+        Gate("CX", [a, b]),
+        _phase_gate(c, theta),
+        Gate("CX", [b, c]),
+        _phase_gate(c, -theta),
+        Gate("CX", [a, c]),
+        _phase_gate(c, theta),
+        Gate("CX", [b, c]),
+        _phase_gate(c, -theta),
+        Gate("CX", [a, c]),
+        Gate("H", [target]),
+        _phase_gate(target, theta),
+        Gate("CX", [c, target]),
+        _phase_gate(target, -theta),
+        Gate("CX", [b, target]),
+        _phase_gate(target, theta),
+        Gate("CX", [c, target]),
+        _phase_gate(target, -theta),
+        Gate("CX", [a, target]),
+        _phase_gate(target, theta),
+        Gate("CX", [c, target]),
+        _phase_gate(target, -theta),
+        Gate("CX", [b, target]),
+        _phase_gate(target, theta),
+        Gate("CX", [c, target]),
+        _phase_gate(target, -theta),
+        Gate("CX", [a, target]),
+        Gate("H", [target]),
+    ]
 
 
 def decompose_ccz(control1: int, control2: int, target: int) -> List["Gate"]:

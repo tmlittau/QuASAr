@@ -226,6 +226,19 @@ def _large_grover_circuit(n_qubits: int, *, iterations: int = 2):
     return circuit_lib.grover_circuit(n_qubits, n_iterations=iterations)
 
 
+def _supports_backend(circuit: object, backend: Backend) -> bool:
+    """Return ``True`` when ``circuit`` can run on ``backend``."""
+
+    if backend == Backend.TABLEAU:
+        if circuit is None:
+            return False
+        try:
+            return circuit_lib.is_clifford(circuit)
+        except AttributeError:  # pragma: no cover - defensive
+            return False
+    return True
+
+
 _BASE_CIRCUITS: Sequence[CircuitSpec] = (
     CircuitSpec("qft", circuit_lib.qft_circuit, (3, 4)),
     CircuitSpec("grover", circuit_lib.grover_circuit, (3, 4), {"n_iterations": 1}),
@@ -323,6 +336,26 @@ def collect_backend_data(
                 continue
 
             for backend in backends:
+                if not _supports_backend(circuit_forced, backend):
+                    reason = "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
+                    forced_records.append(
+                        {
+                            "circuit": spec.name,
+                            "qubits": n,
+                            "framework": backend.name,
+                            "backend": backend.name,
+                            "unsupported": True,
+                            "error": f"circuit uses {reason} unsupported by {backend.name}",
+                        }
+                    )
+                    LOGGER.info(
+                        "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
+                        spec.name,
+                        n,
+                        backend.name,
+                        reason,
+                    )
+                    continue
                 runner = BenchmarkRunner()
                 LOGGER.info(
                     "Executing forced run: circuit=%s qubits=%s backend=%s",
