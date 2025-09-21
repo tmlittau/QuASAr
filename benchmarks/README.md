@@ -194,7 +194,9 @@ python benchmarks/paper_figures.py
 ```
 
 Use ``--repetitions`` to change the number of samples per circuit/backend pair,
-``--run-timeout`` to cap the runtime of individual simulations, and
+``--run-timeout`` to cap the runtime of individual simulations (default: 600
+seconds per run, configurable via ``RUN_TIMEOUT_DEFAULT_SECONDS`` in
+``paper_figures.py``; pass ``0`` to disable), and
 ``--reuse-existing`` to filter previously recorded CSVs when the raw data does
 not need to be regenerated.  The script writes publication-ready PNG/PDF pairs
 to [`benchmarks/figures/`](figures/) and stores the tabular data, including
@@ -204,6 +206,21 @@ available the corresponding artefacts are skipped with a warning. Generated
 figures are ignored by Git so that repositories do not accumulate large binary
 artefacts; rerun the script whenever you need fresh images. The CSV outputs
 remain versioned to provide reproducible numeric references for the paper.
+
+``paper_figures.py`` exercises every backend on large, non-Clifford circuits and
+can take *days* when dense statevector simulations are forced (e.g., Grover at
+24 qubits). Use [`estimate_paper_figures.py`](estimate_paper_figures.py) to
+approximate the runtime and memory footprint before launching the full sweep:
+
+```bash
+python benchmarks/estimate_paper_figures.py --ops-per-second 5e8
+```
+
+The estimator reuses the cost model from the planner to report per-run operation
+counts, approximate wall-clock time (based on the supplied throughput) and peak
+memory for every circuit/backend combination.  It highlights unsupported pairs
+and gives a rough upper bound for the automatic QuASAr schedule so you can spot
+unreasonable workloads ahead of time.
 
 ### High-qubit workloads derived from the partitioning notebooks
 

@@ -140,6 +140,10 @@ STATEVECTOR_MAX_QUBITS = max_qubits_statevector(STATEVECTOR_SAFE_MEMORY_BYTES)
 """Largest supported dense statevector width under the configured budget."""
 
 
+RUN_TIMEOUT_DEFAULT_SECONDS = 10 * 60
+"""Maximum duration allowed for a single backend run (adjustable)."""
+
+
 def _filter_qubits(qubits: Sequence[int], *, name: str) -> tuple[int, ...]:
     """Return qubit widths that fit inside the statevector budget."""
 
@@ -305,11 +309,12 @@ def collect_backend_data(
     backends: Sequence[Backend],
     *,
     repetitions: int = 3,
-    run_timeout: float | None = None,
+    run_timeout: float | None = RUN_TIMEOUT_DEFAULT_SECONDS,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return forced and automatic scheduler results for ``specs``."""
 
     spec_list = list(specs)
+    effective_timeout = run_timeout if run_timeout and run_timeout > 0 else None
     LOGGER.info(
         "Collecting backend data for %d circuit family(ies)", len(spec_list)
     )
@@ -371,7 +376,7 @@ def collect_backend_data(
                         repetitions=repetitions,
                         quick=True,
                         memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
-                        run_timeout=run_timeout,
+                        run_timeout=effective_timeout,
                     )
                 except Exception as exc:  # pragma: no cover - backend limitations
                     forced_records.append(
@@ -424,7 +429,7 @@ def collect_backend_data(
                     repetitions=repetitions,
                     quick=False,
                     memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
-                    run_timeout=run_timeout,
+                    run_timeout=effective_timeout,
                 )
             except Exception as exc:  # pragma: no cover - skip unsupported mixes
                 LOGGER.warning(
@@ -456,7 +461,7 @@ def collect_backend_data(
 def generate_backend_comparison(
     *,
     repetitions: int = 3,
-    run_timeout: float | None = None,
+    run_timeout: float | None = RUN_TIMEOUT_DEFAULT_SECONDS,
     reuse_existing: bool = False,
 ) -> None:
     LOGGER.info("Generating backend comparison figures")
@@ -655,8 +660,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "-t",
         "--run-timeout",
         type=float,
-        default=None,
-        help="Abort individual backend runs after this many seconds (default: no timeout).",
+        default=RUN_TIMEOUT_DEFAULT_SECONDS,
+        help=(
+            "Abort individual backend runs after this many seconds "
+            f"(default: {RUN_TIMEOUT_DEFAULT_SECONDS}; set to <= 0 to disable)."
+        ),
     )
     parser.add_argument(
         "--reuse-existing",
@@ -669,9 +677,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     setup_benchmark_style()
     if args.repetitions < 1:
         parser.error("--repetitions must be at least 1")
+    run_timeout = args.run_timeout if args.run_timeout and args.run_timeout > 0 else None
     generate_backend_comparison(
         repetitions=args.repetitions,
-        run_timeout=args.run_timeout,
+        run_timeout=run_timeout,
         reuse_existing=args.reuse_existing,
     )
     generate_heatmap()
