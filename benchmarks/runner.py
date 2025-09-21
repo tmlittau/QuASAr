@@ -480,13 +480,26 @@ class BenchmarkRunner:
                 tracemalloc.start()
                 if planner is not None:
                     start_prepare = time.perf_counter()
-                    plan = planner.plan(circuit, backend=backend)
-                    plan = scheduler.prepare_run(circuit, plan, backend=backend)
+                    plan = planner.plan(
+                        circuit,
+                        backend=backend,
+                        max_memory=memory_bytes,
+                    )
+                    plan = scheduler.prepare_run(
+                        circuit,
+                        plan,
+                        backend=backend,
+                        max_memory=memory_bytes,
+                    )
                     prepare_time = time.perf_counter() - start_prepare
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 else:
                     start_prepare = time.perf_counter()
-                    plan = scheduler.prepare_run(circuit, backend=backend)
+                    plan = scheduler.prepare_run(
+                        circuit,
+                        backend=backend,
+                        max_memory=memory_bytes,
+                    )
                     prepare_time = time.perf_counter() - start_prepare
                     _, prepare_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
@@ -698,10 +711,23 @@ class BenchmarkRunner:
             original_ssd = None
         else:
             if planner is not None:
-                plan = planner.plan(circuit, backend=backend)
-                plan = scheduler.prepare_run(circuit, plan, backend=backend)
+                plan = planner.plan(
+                    circuit,
+                    backend=backend,
+                    max_memory=memory_bytes,
+                )
+                plan = scheduler.prepare_run(
+                    circuit,
+                    plan,
+                    backend=backend,
+                    max_memory=memory_bytes,
+                )
             else:
-                plan = scheduler.prepare_run(circuit, backend=backend)
+                plan = scheduler.prepare_run(
+                    circuit,
+                    backend=backend,
+                    max_memory=memory_bytes,
+                )
             original_ssd = (
                 copy.deepcopy(getattr(circuit, "ssd", None)) if circuit is not None else None
             )

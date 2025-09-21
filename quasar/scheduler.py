@@ -473,6 +473,7 @@ class Scheduler:
         target_accuracy: float | None = None,
         max_time: float | None = None,
         optimization_level: int | None = None,
+        max_memory: float | None = None,
         explain: bool = False,
     ) -> PlanResult:
         """Prepare an execution plan for ``circuit``.
@@ -494,6 +495,10 @@ class Scheduler:
             Desired lower bound on simulation fidelity.
         max_time:
             Upper bound on estimated runtime in seconds.
+        max_memory:
+            Optional memory ceiling in bytes. Forwarded to the planner when a
+            cached plan is not available so that backend selection respects the
+            configured limit.
         optimization_level:
             Heuristic tuning knob influencing planner behaviour.
         explain:
@@ -567,6 +572,7 @@ class Scheduler:
                     backend=backend,
                     target_accuracy=target_accuracy,
                     max_time=max_time,
+                    max_memory=max_memory,
                     optimization_level=optimization_level,
                     explain=explain,
                 )
