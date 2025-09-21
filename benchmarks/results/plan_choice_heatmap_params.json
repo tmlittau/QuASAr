@@ -1,4 +1,16 @@
 {
-  "alphas": [0.5, 1, 2, 5],
-  "circuits": ["GHZ_6", "Grover_3"]
+  "alphas": [
+    0.01,
+    0.1,
+    0.5,
+    2,
+    8
+  ],
+  "circuits": [
+    "GHZ_6",
+    "WState_6",
+    "RandomHybrid_6",
+    "MixedSubsystems",
+    "HybridDenseToMPS"
+  ]
 }
