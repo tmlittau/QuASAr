@@ -7,9 +7,13 @@ simulation backends provided by :class:`quasar.cost.Backend` and QuASAr's
 automatic scheduler.  For each configuration the fastest non-QuASAr backend is
 determined via :func:`compute_baseline_best` and only this aggregated
 "baseline_best" entry is stored alongside the QuASAr measurement.
+
+Use the ``--verbose`` flag (repeat it for debug logging) to monitor progress
+while the CLI iterates over qubit widths, backends and scenario instances.
 """
 
 import argparse
+import logging
 import statistics
 import time
 import tracemalloc
@@ -38,6 +42,20 @@ BASELINE_BACKENDS: tuple[Backend, ...] = (
 )
 
 
+LOGGER = logging.getLogger(__name__)
+
+
+def _configure_logging(verbosity: int) -> None:
+    """Initialise logging for CLI usage."""
+
+    level = logging.WARNING
+    if verbosity >= 2:
+        level = logging.DEBUG
+    elif verbosity == 1:
+        level = logging.INFO
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+
+
 def run_all(
     circuit_fn,
     qubits: Iterable[int],
@@ -52,11 +70,19 @@ def run_all(
     configuration for QuASAr and the aggregated baseline best.
     """
 
+    LOGGER.info(
+        "Running %s across %d repetition(s) with %s classical simplification",
+        getattr(circuit_fn, "__name__", circuit_fn),
+        repetitions,
+        "enabled" if use_classical_simplification else "disabled",
+    )
+
     engine = SimulationEngine()
     runner = BenchmarkRunner()
     records: list[dict[str, object]] = []
 
     for n in qubits:
+        LOGGER.info("Starting benchmarks for circuit width %s", n)
         circuit = circuit_fn(n)
         if use_classical_simplification:
             enable = getattr(circuit, "enable_classical_simplification", None)
@@ -68,9 +94,14 @@ def run_all(
             circuit.use_classical_simplification = False
 
         if is_clifford(circuit):
+            LOGGER.info("Skipping width %s because the circuit is Clifford-only", n)
+            LOGGER.info("Finished benchmarks for circuit width %s", n)
             continue
 
         for backend in BASELINE_BACKENDS:
+            LOGGER.info(
+                "Running backend %s for width %s", backend.value, n
+            )
             try:
                 rec = runner.run_quasar_multiple(
                     circuit,
@@ -80,7 +111,7 @@ def run_all(
                     quick=False,
                     memory_bytes=memory_bytes,
                 )
-            except RuntimeError as exc:
+            except (RuntimeError, ValueError) as exc:
                 records.append(
                     {
                         "circuit": circuit_fn.__name__,
@@ -90,6 +121,12 @@ def run_all(
                         "unsupported": True,
                         "error": str(exc),
                     }
+                )
+                LOGGER.warning(
+                    "Backend %s failed for width %s: %s",
+                    backend.value,
+                    n,
+                    exc,
                 )
                 continue
 
@@ -103,7 +140,11 @@ def run_all(
                 }
             )
             records.append(rec)
+            LOGGER.info(
+                "Completed backend %s for width %s", backend.value, n
+            )
 
+        LOGGER.info("Running QuASAr scheduler for width %s", n)
         quasar_rec = runner.run_quasar_multiple(
             circuit,
             engine,
@@ -119,6 +160,8 @@ def run_all(
             {"circuit": circuit_fn.__name__, "qubits": n, "framework": "quasar"}
         )
         records.append(quasar_rec)
+        LOGGER.info("Completed QuASAr run for width %s", n)
+        LOGGER.info("Finished benchmarks for circuit width %s", n)
 
     df = pd.DataFrame(records)
     if df.empty or "framework" not in df.columns:
@@ -146,6 +189,10 @@ def run_scenarios(
     memory_bytes: int | None = None,
 ) -> pd.DataFrame:
     """Execute scenario workloads across all backends."""
+
+    LOGGER.info(
+        "Running partitioning scenarios for %d repetition(s)", repetitions
+    )
 
     engine = SimulationEngine()
     runner = BenchmarkRunner()
@@ -187,6 +234,8 @@ def run_scenarios(
         return summary
 
     for instance in instances:
+        instance_label = f"{instance.scenario}:{instance.variant}"
+        LOGGER.info("Starting scenario instance %s", instance_label)
         metadata: Dict[str, object] = {}
 
         def _build_circuit() -> Circuit:
@@ -215,6 +264,13 @@ def run_scenarios(
                 and total_qubits > max_qubits_statevector(memory_bytes)
             ):
                 limit = max_qubits_statevector(memory_bytes)
+                LOGGER.info(
+                    "Skipping backend %s for %s: width %s exceeds statevector limit %s",
+                    backend.value if backend else Backend.STATEVECTOR.value,
+                    instance_label,
+                    total_qubits,
+                    limit,
+                )
                 return {
                     "framework": backend.value if backend else "quasar",
                     "backend": backend.value if backend else Backend.STATEVECTOR.value,
@@ -228,22 +284,59 @@ def run_scenarios(
             start_prepare = time.perf_counter()
             try:
                 if planner is not None:
+                    LOGGER.debug(
+                        "Preparing plan for %s using backend %s",
+                        instance_label,
+                        backend.value if backend else "auto",
+                    )
                     plan = planner.plan(circuit, backend=backend)
                     plan = scheduler.prepare_run(circuit, plan, backend=backend)
                 else:
+                    LOGGER.debug(
+                        "Preparing scheduler run for %s using backend %s",
+                        instance_label,
+                        backend.value if backend else "auto",
+                    )
                     plan = scheduler.prepare_run(circuit, backend=backend)
             except ValueError as exc:
                 tracemalloc.stop()
-                return {"framework": backend.value if backend else "quasar", "backend": backend.value if backend else str(backend), "unsupported": True, "error": str(exc)}
+                LOGGER.warning(
+                    "Preparation failed for %s on backend %s: %s",
+                    instance_label,
+                    backend.value if backend else "auto",
+                    exc,
+                )
+                return {
+                    "framework": backend.value if backend else "quasar",
+                    "backend": backend.value if backend else str(backend),
+                    "unsupported": True,
+                    "error": str(exc),
+                }
             prepare_time = time.perf_counter() - start_prepare
             _, prepare_peak = tracemalloc.get_traced_memory()
             tracemalloc.stop()
 
             conversion_layers = list(getattr(plan, "conversions", []))
             try:
+                LOGGER.info(
+                    "Executing scheduler for %s on backend %s",
+                    instance_label,
+                    backend.value if backend else "auto",
+                )
                 result, metrics = scheduler.run(circuit, plan, instrument=True)
             except Exception as exc:
-                return {"framework": backend.value if backend else "quasar", "backend": backend.value if backend else str(backend), "failed": True, "error": str(exc)}
+                LOGGER.warning(
+                    "Execution failed for %s on backend %s: %s",
+                    instance_label,
+                    backend.value if backend else "auto",
+                    exc,
+                )
+                return {
+                    "framework": backend.value if backend else "quasar",
+                    "backend": backend.value if backend else str(backend),
+                    "failed": True,
+                    "error": str(exc),
+                }
             cost = getattr(metrics, "cost", metrics)
             run_time = getattr(cost, "time", 0.0)
             run_peak = int(getattr(cost, "memory", 0.0))
@@ -276,17 +369,30 @@ def run_scenarios(
             return record
 
         for backend in BASELINE_BACKENDS:
+            LOGGER.info(
+                "Benchmarking backend %s for scenario %s",
+                backend.value,
+                instance_label,
+            )
             record = _execute_backend(backend)
             record.update({"circuit": instance.builder.__name__, "framework": backend.value})
             record.update(metadata)
             record.pop("result", None)
             records.append(record)
+            LOGGER.info(
+                "Completed backend %s for scenario %s",
+                backend.value,
+                instance_label,
+            )
 
+        LOGGER.info("Benchmarking QuASAr for scenario %s", instance_label)
         quasar_record = _execute_backend(None)
         quasar_record.update({"circuit": instance.builder.__name__, "framework": "quasar"})
         quasar_record.update(metadata)
         quasar_record.pop("result", None)
         records.append(quasar_record)
+        LOGGER.info("Completed QuASAr run for scenario %s", instance_label)
+        LOGGER.info("Completed scenario %s", instance_label)
 
     df = pd.DataFrame(records)
     if df.empty or "framework" not in df.columns:
@@ -480,7 +586,18 @@ def main() -> None:  # pragma: no cover - CLI entry point
         type=int,
         help="Approximate peak memory budget per backend (bytes)",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help=(
+            "Increase logging verbosity (use -vv for debug output)."
+        ),
+    )
     args = parser.parse_args()
+
+    _configure_logging(args.verbose)
 
     if bool(args.circuit) == bool(args.scenario):
         parser.error("exactly one of --circuit or --scenario must be provided")
