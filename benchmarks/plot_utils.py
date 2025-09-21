@@ -7,6 +7,7 @@ from typing import Iterable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
 from matplotlib.legend import Legend
+import numpy as np
 import pandas as pd
 
 try:  # seaborn provides the high level styling requested by the paper.
@@ -562,19 +563,52 @@ def compute_baseline_best(
     if baselines.empty:
         raise ValueError("no baseline entries in results")
 
+    metrics = list(metrics)
+    if not metrics:
+        raise ValueError("no metrics provided for baseline comparison")
+
+    missing_metrics = [metric for metric in metrics if metric not in baselines.columns]
+    if missing_metrics:
+        raise ValueError(
+            "results DataFrame lacks required metric columns: " + ", ".join(missing_metrics)
+        )
+
+    numeric_metrics = baselines[metrics].apply(pd.to_numeric, errors="coerce")
+    finite_mask = np.isfinite(numeric_metrics)
+    if isinstance(finite_mask, pd.DataFrame):
+        valid_rows = finite_mask.all(axis=1)
+    else:  # pragma: no cover - ``metrics`` contains a single column producing a Series
+        valid_rows = finite_mask
+    baselines = baselines[valid_rows.to_numpy(dtype=bool)]
+
     group_cols = [
         c
         for c in ("circuit", "qubits", "scenario", "variant")
         if c in df.columns
     ]
     extra_cols = [c for c in ("repetitions",) if c in baselines.columns]
+    std_columns = []
+    for metric in metrics:
+        std_col = metric.replace("_mean", "_std")
+        if std_col in baselines.columns and std_col not in std_columns:
+            std_columns.append(std_col)
+
+    if group_cols:
+        try:
+            groups = baselines.groupby(group_cols, dropna=False)
+        except TypeError:  # pragma: no cover - older pandas without ``dropna`` argument
+            groups = baselines.groupby(group_cols)
+    else:
+        groups = [((), baselines)]
     rows: list[dict[str, object]] = []
-    for keys, group in baselines.groupby(group_cols):
+    for keys, group in groups:
         if not isinstance(keys, tuple):
             keys = (keys,)
         row = dict(zip(group_cols, keys))
         for col in extra_cols:
             row[col] = group[col].iloc[0]
+        if group.empty:
+            continue
         for metric in metrics:
             idx = group[metric].idxmin()
             row[metric] = group.loc[idx, metric]
@@ -585,7 +619,8 @@ def compute_baseline_best(
                 row["backend"] = group.loc[idx, "framework"]
         rows.append(row)
 
-    mins = pd.DataFrame(rows)
+    base_columns = list(dict.fromkeys([*group_cols, *extra_cols, *metrics, *std_columns, "backend"]))
+    mins = pd.DataFrame(rows, columns=base_columns)
     mins["framework"] = "baseline_best"
     return mins
 
