@@ -65,19 +65,64 @@ can be adjusted via the ``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` environment
 variable, the global ``--memory-bytes`` flag on `run_benchmarks.py`, or by
 passing ``memory_bytes`` to ``BenchmarkRunner.run_quasar``/``run_quasar_multiple``.
 
-To regenerate the partitioning sweeps used in the paper, execute the three
-scenarios with identical parameters so that QuASAr and the baseline backends
-share the same 256 MiB budget and single-shot timing window:
+### Reproducing paper figures
 
-```bash
-python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
-python benchmarks/run_benchmarks.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
-python benchmarks/run_benchmarks.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
-```
+Execute the commands below in order to rebuild every artefact used by
+[`paper_figures.py`](paper_figures.py). Check that each step produces the
+described files before moving to the next command.
 
-Each invocation writes CSV/JSON pairs plus a Markdown summary directly under
-`benchmarks/results/`.  The tables are deterministic because the circuit
-generators fix their random seeds.
+1. **Partitioning sweeps** – regenerate the benchmark tables that back the
+   mainline runtime and memory figures:
+
+   ```bash
+   python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
+   python benchmarks/run_benchmarks.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
+   python benchmarks/run_benchmarks.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
+   ```
+
+   Each run emits `<scenario>.csv`, `<scenario>.json`, and
+   `<scenario>_summary.{csv,md}` under `benchmarks/results/`. These files are
+   deterministic because the generators fix their random seeds.
+
+2. **Quick-analysis benchmarking** – measure planner speedups for the relative
+   speedup bar chart:
+
+   ```bash
+   python benchmarks/quick_analysis_benchmark.py
+   ```
+
+   This script saves `benchmarks/quick_analysis_results.csv` and displays a
+   diagnostic plot. Without this CSV the final stage skips the
+   `relative_speedups.{png,pdf,csv}` outputs.
+
+3. **Optional planner heatmap** – capture the plan-choice sweep used for the
+   heatmap figure by executing the
+   [`notebooks/plan_choice_heatmap.ipynb`](notebooks/plan_choice_heatmap.ipynb)
+   notebook. One way to run it non-interactively is:
+
+   ```bash
+   jupyter nbconvert --to notebook --execute benchmarks/notebooks/plan_choice_heatmap.ipynb --output plan_choice_heatmap_executed.ipynb
+   ```
+
+   The notebook writes `benchmarks/results/plan_choice_heatmap_results.json`
+   and `plan_choice_heatmap_params.json`. If these artefacts are absent the
+   heatmap (`plan_choice_heatmap.{png,pdf}` plus `plan_choice_heatmap_table.csv`)
+   will be omitted from the final outputs.
+
+4. **Generate paper figures** – once all required data are present, produce the
+   publication graphics and tables:
+
+   ```bash
+   python benchmarks/paper_figures.py
+   ```
+
+   The script collects the benchmark summaries into
+   `benchmarks/results/backend_{forced,auto}.csv`, saves derived tables such as
+   `backend_vs_baseline_speedups.csv`, and exports publication-ready
+   `*.png`/`*.pdf` files to `benchmarks/figures/`. Figures that rely on missing
+   prerequisites—such as the planner heatmap or quick-analysis speedup bars—are
+   skipped automatically so you can rerun the earlier steps and execute this
+   command again.
 
 ### Timing semantics
 
