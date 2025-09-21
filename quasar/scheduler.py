@@ -16,9 +16,10 @@ except ImportError:  # pragma: no cover - backend optional
     mqt_dd = None
 
 from .planner import Planner, PlanStep, PlanResult, PlanDiagnostics, _add_cost
+from .method_selector import NoFeasibleBackendError
 from .analyzer import AnalysisResult
 from .partitioner import CLIFFORD_GATES
-from .cost import Backend, Cost
+from .cost import Backend, Cost, CostEstimator
 from . import config
 from .circuit import Circuit, Gate
 from .ssd import SSD, ConversionLayer, SSDPartition, SSDCache
@@ -514,39 +515,46 @@ class Scheduler:
             optimization_level=optimization_level,
         )
         if plan is None and backend_choice is not None:
-            # Quick path – execute the entire circuit on a single backend
-            plan = PlanResult(
-                table=[],
-                final_backend=backend_choice,
-                gates=gates,
-                explicit_steps=[PlanStep(0, len(gates), backend_choice)],
-                analysis=analysis,
-            )
-            plan.explicit_conversions = []
             if self.planner is not None:
-                plan.step_costs = [self._estimate_cost(backend_choice, gates)]
+                quick_cost = self._estimate_cost(backend_choice, gates)
             else:
-                plan.step_costs = [Cost(time=0.0, memory=0.0)]
-            if explain:
-                plan.diagnostics = PlanDiagnostics(
-                    single_backend=backend_choice,
-                    single_cost=plan.step_costs[0],
-                    strategy="quick",
+                estimator = CostEstimator()
+                quick_cost = self._cost_from_estimator(
+                    estimator, backend_choice, gates
                 )
-            circuit.ssd.conversions = []
-            qubits = tuple(range(circuit.num_qubits))
-            history = tuple(g.gate for g in gates)
-            circuit.ssd.partitions = [
-                SSDPartition(
-                    subsystems=(qubits,),
-                    history=history,
-                    backend=backend_choice,
-                    cost=plan.step_costs[0],
+            if max_memory is not None and quick_cost.memory > max_memory:
+                backend_choice = None
+            else:
+                # Quick path – execute the entire circuit on a single backend
+                plan = PlanResult(
+                    table=[],
+                    final_backend=backend_choice,
+                    gates=gates,
+                    explicit_steps=[PlanStep(0, len(gates), backend_choice)],
+                    analysis=analysis,
                 )
-            ]
-            if max_time is not None and plan.step_costs[0].time > max_time:
-                raise ValueError("Estimated runtime exceeds max_time")
-            return plan
+                plan.explicit_conversions = []
+                plan.step_costs = [quick_cost]
+                if explain:
+                    plan.diagnostics = PlanDiagnostics(
+                        single_backend=backend_choice,
+                        single_cost=quick_cost,
+                        strategy="quick",
+                    )
+                circuit.ssd.conversions = []
+                qubits = tuple(range(circuit.num_qubits))
+                history = tuple(g.gate for g in gates)
+                circuit.ssd.partitions = [
+                    SSDPartition(
+                        subsystems=(qubits,),
+                        history=history,
+                        backend=backend_choice,
+                        cost=quick_cost,
+                    )
+                ]
+                if max_time is not None and quick_cost.time > max_time:
+                    raise ValueError("Estimated runtime exceeds max_time")
+                return plan
 
         if self.conversion_engine is None:
             self.conversion_engine = ConversionEngine()
@@ -566,16 +574,24 @@ class Scheduler:
             if not explain:
                 cached_plan = self.planner.cache_lookup(gates, backend)
             if cached_plan is None:
-                plan = self.planner.plan(
-                    circuit,
-                    analysis=analysis,
-                    backend=backend,
-                    target_accuracy=target_accuracy,
-                    max_time=max_time,
-                    max_memory=max_memory,
-                    optimization_level=optimization_level,
-                    explain=explain,
-                )
+                try:
+                    plan = self.planner.plan(
+                        circuit,
+                        analysis=analysis,
+                        backend=backend,
+                        target_accuracy=target_accuracy,
+                        max_time=max_time,
+                        max_memory=max_memory,
+                        optimization_level=optimization_level,
+                        explain=explain,
+                    )
+                except NoFeasibleBackendError as exc:
+                    if max_memory is not None:
+                        raise NoFeasibleBackendError(
+                            "Planner could not satisfy memory limit "
+                            f"{max_memory:.3e}B: {exc}"
+                        ) from exc
+                    raise
             else:
                 plan = cached_plan
 
@@ -1561,8 +1577,9 @@ class Scheduler:
         return ssd_res
 
     # ------------------------------------------------------------------
-    def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:
-        est = self.planner.estimator
+    def _cost_from_estimator(
+        self, estimator: CostEstimator, backend: Backend, gates: List[Gate]
+    ) -> Cost:
         n = len({q for g in gates for q in g.qubits})
         m = len(gates)
         num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
@@ -1573,10 +1590,10 @@ class Scheduler:
         )
         num_2q = m - num_1q - num_meas
         if backend == Backend.TABLEAU:
-            return est.tableau(n, m)
+            return estimator.tableau(n, m)
         if backend == Backend.MPS:
-            chi = getattr(est, "chi_max", None) or 4
-            return est.mps(
+            chi = getattr(estimator, "chi_max", None) or 4
+            return estimator.mps(
                 n,
                 num_1q + num_meas,
                 num_2q,
@@ -1584,5 +1601,8 @@ class Scheduler:
                 svd=True,
             )
         if backend == Backend.DECISION_DIAGRAM:
-            return est.decision_diagram(num_gates=m, frontier=n)
-        return est.statevector(n, num_1q, num_2q, num_meas)
+            return estimator.decision_diagram(num_gates=m, frontier=n)
+        return estimator.statevector(n, num_1q, num_2q, num_meas)
+
+    def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:
+        return self._cost_from_estimator(self.planner.estimator, backend, gates)
