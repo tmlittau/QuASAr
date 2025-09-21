@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 try:  # Optional dependency used for memory discovery when available
     import psutil  # type: ignore
@@ -318,6 +318,68 @@ def _circuit_qubit_width(circuit: object | None) -> int | None:
         return None
 
 
+def _statevector_memory_estimate(circuit: object | None) -> int | None:
+    """Return the planner's dense memory estimate for ``circuit`` when known."""
+
+    if circuit is None:
+        return None
+    estimates = getattr(circuit, "cost_estimates", None)
+    if not isinstance(estimates, Mapping):
+        return None
+    cost = estimates.get("statevector")
+    memory = getattr(cost, "memory", None)
+    if memory is None:
+        return None
+    try:
+        return int(memory)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+
+
+def _mps_skip_reason(
+    circuit: object | None,
+    requested_qubits: int,
+    *,
+    forced_width: int | None,
+) -> str | None:
+    """Return a human-readable reason for skipping MPS runs when applicable."""
+
+    if forced_width is None or requested_qubits <= 0:
+        return None
+    if forced_width <= requested_qubits:
+        return None
+
+    extra = forced_width - requested_qubits
+    ancilla_threshold = max(4, requested_qubits // 2)
+    exceeds_limit = forced_width > STATEVECTOR_MAX_QUBITS
+    ancilla_heavy = extra >= ancilla_threshold
+    if not (ancilla_heavy or exceeds_limit):
+        return None
+
+    message_parts = [
+        (
+            "ancilla expansion increases width to "
+            f"{forced_width} qubits (requested {requested_qubits})"
+        )
+    ]
+    if exceeds_limit:
+        message_parts.append(
+            f"exceeds statevector limit of {STATEVECTOR_MAX_QUBITS}"
+        )
+
+    memory_estimate = _statevector_memory_estimate(circuit)
+    if (
+        memory_estimate is not None
+        and memory_estimate > STATEVECTOR_SAFE_MEMORY_BYTES
+    ):
+        message_parts.append(
+            "est. dense memory "
+            f"{memory_estimate:,} B > budget {STATEVECTOR_SAFE_MEMORY_BYTES:,} B"
+        )
+
+    return "; ".join(message_parts)
+
+
 def collect_backend_data(
     specs: Iterable[CircuitSpec],
     backends: Sequence[Backend],
@@ -388,6 +450,34 @@ def collect_backend_data(
                         message,
                     )
                     continue
+                if backend == Backend.MPS:
+                    reason = _mps_skip_reason(
+                        circuit_forced,
+                        n,
+                        forced_width=forced_width,
+                    )
+                    if reason:
+                        forced_records.append(
+                            {
+                                "circuit": spec.name,
+                                "qubits": n,
+                                "actual_qubits": forced_width,
+                                "framework": backend.name,
+                                "backend": backend.name,
+                                "unsupported": True,
+                                "failed": False,
+                                "error": reason,
+                                "comment": reason,
+                            }
+                        )
+                        LOGGER.info(
+                            "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
+                            spec.name,
+                            n,
+                            backend.name,
+                            reason,
+                        )
+                        continue
                 if not _supports_backend(circuit_forced, backend):
                     reason = "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
                     forced_records.append(

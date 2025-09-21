@@ -76,3 +76,61 @@ def test_collect_backend_data_marks_statevector_unsupported(monkeypatch, recwarn
 
     assert not recwarn.list
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_collect_backend_data_marks_mps_ancilla_unsupported(monkeypatch, recwarn, caplog):
+    """Ancilla-heavy circuits should not invoke Aer MPS during benchmarks."""
+
+    monkeypatch.setattr(paper_figures, "STATEVECTOR_MAX_QUBITS", 30)
+
+    calls: list[Backend | None] = []
+
+    def fake_run(self, circuit, engine, *, backend=None, **kwargs):
+        calls.append(backend)
+        backend_name = getattr(backend, "name", backend)
+        return {
+            "prepare_time": 0.0,
+            "run_time": 0.0,
+            "total_time": 0.0,
+            "prepare_peak_memory": 0,
+            "run_peak_memory": 0,
+            "result": None,
+            "failed": False,
+            "backend": backend_name,
+        }
+
+    monkeypatch.setattr(paper_figures.BenchmarkRunner, "run_quasar_multiple", fake_run)
+
+    spec = paper_figures.CircuitSpec(
+        "grover_large",
+        lambda n, *, iterations=2: paper_figures._large_grover_circuit(
+            n, iterations=iterations
+        ),
+        (20,),
+        {"iterations": 2},
+    )
+
+    caplog.set_level(logging.INFO)
+
+    forced, auto = paper_figures.collect_backend_data(
+        [spec],
+        [Backend.MPS],
+        repetitions=1,
+    )
+
+    assert len(forced) == 1
+    row = forced.iloc[0]
+    assert bool(row["unsupported"])
+    assert row["framework"] == Backend.MPS.name
+    assert row["backend"] == Backend.MPS.name
+    assert "ancilla expansion" in row["error"]
+    assert "exceeds statevector limit" in row["comment"]
+    assert "dense memory" in row["comment"]
+    assert Backend.MPS not in calls
+    assert calls == [None]
+
+    assert auto.shape[0] == 1
+    assert auto.iloc[0]["mode"] == "auto"
+
+    assert not recwarn.list
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
