@@ -304,6 +304,20 @@ def _build_circuit(spec: CircuitSpec, n_qubits: int, *, use_classical_simplifica
     return circuit
 
 
+def _circuit_qubit_width(circuit: object | None) -> int | None:
+    """Return the number of qubits spanned by ``circuit`` when known."""
+
+    if circuit is None:
+        return None
+    width = getattr(circuit, "num_qubits", None)
+    if width is None:
+        return None
+    try:
+        return int(width)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None
+
+
 def collect_backend_data(
     specs: Iterable[CircuitSpec],
     backends: Sequence[Backend],
@@ -340,16 +354,51 @@ def collect_backend_data(
                 )
                 continue
 
+            forced_width = _circuit_qubit_width(circuit_forced)
+            auto_width = _circuit_qubit_width(circuit_auto)
+
             for backend in backends:
+                if (
+                    backend == Backend.STATEVECTOR
+                    and forced_width is not None
+                    and forced_width > STATEVECTOR_MAX_QUBITS
+                ):
+                    message = (
+                        f"circuit uses {forced_width} qubits exceeding "
+                        f"statevector limit of {STATEVECTOR_MAX_QUBITS}"
+                    )
+                    forced_records.append(
+                        {
+                            "circuit": spec.name,
+                            "qubits": n,
+                            "actual_qubits": forced_width,
+                            "framework": backend.name,
+                            "backend": backend.name,
+                            "unsupported": True,
+                            "failed": False,
+                            "error": message,
+                            "comment": message,
+                        }
+                    )
+                    LOGGER.info(
+                        "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
+                        spec.name,
+                        n,
+                        backend.name,
+                        message,
+                    )
+                    continue
                 if not _supports_backend(circuit_forced, backend):
                     reason = "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
                     forced_records.append(
                         {
                             "circuit": spec.name,
                             "qubits": n,
+                            "actual_qubits": forced_width,
                             "framework": backend.name,
                             "backend": backend.name,
                             "unsupported": True,
+                            "failed": False,
                             "error": f"circuit uses {reason} unsupported by {backend.name}",
                         }
                     )
@@ -383,9 +432,11 @@ def collect_backend_data(
                         {
                             "circuit": spec.name,
                             "qubits": n,
+                            "actual_qubits": forced_width,
                             "framework": backend.name,
                             "backend": backend.name,
                             "unsupported": True,
+                            "failed": False,
                             "error": str(exc),
                         }
                     )
@@ -403,9 +454,11 @@ def collect_backend_data(
                     {
                         "circuit": spec.name,
                         "qubits": n,
+                        "actual_qubits": forced_width,
                         "framework": backend.name,
                         "backend": backend.name,
                         "mode": "forced",
+                        "unsupported": bool(rec.get("unsupported", False)),
                     }
                 )
                 forced_records.append(rec)
@@ -444,8 +497,10 @@ def collect_backend_data(
                 {
                     "circuit": spec.name,
                     "qubits": n,
+                    "actual_qubits": auto_width,
                     "framework": "quasar",
                     "mode": "auto",
+                    "unsupported": bool(rec.get("unsupported", False)),
                 }
             )
             auto_records.append(rec)
@@ -477,16 +532,81 @@ def generate_backend_comparison(
         forced = pd.read_csv(forced_path)
         auto = pd.read_csv(auto_path)
 
+        spec_lookup = {spec.name: spec for spec in CIRCUITS}
+        width_cache: dict[tuple[str, int], int | None] = {}
+        drop_counts = {"out_of_range": 0, "ancilla": 0}
+
+        def _effective_width(row: pd.Series) -> int | None:
+            actual = row.get("actual_qubits")
+            if pd.notna(actual):
+                try:
+                    return int(actual)
+                except (TypeError, ValueError):  # pragma: no cover - defensive
+                    return None
+
+            circuit_name = row.get("circuit")
+            try:
+                requested = int(row.get("qubits"))
+            except (TypeError, ValueError):
+                return None
+
+            if circuit_name is None:
+                return None
+
+            key = (circuit_name, requested)
+            if key in width_cache:
+                return width_cache[key]
+
+            spec = spec_lookup.get(circuit_name)
+            if spec is None:
+                width_cache[key] = None
+                return None
+
+            circuit = _build_circuit(spec, requested, use_classical_simplification=False)
+            width = getattr(circuit, "num_qubits", None) if circuit is not None else None
+            try:
+                width_cache[key] = int(width) if width is not None else None
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                width_cache[key] = None
+            return width_cache[key]
+
         def _filter(df: pd.DataFrame) -> pd.DataFrame:
             if df.empty:
                 return df
-            mask = df.apply(
-                lambda row: row.get("qubits") in allowed_qubits.get(row.get("circuit"), set()),
-                axis=1,
-            )
+
+            def _row_allowed(row: pd.Series) -> bool:
+                circuit_name = row.get("circuit")
+                allowed = allowed_qubits.get(circuit_name, set())
+                if allowed and row.get("qubits") not in allowed:
+                    drop_counts["out_of_range"] += 1
+                    return False
+
+                width = _effective_width(row)
+                framework = str(row.get("framework", ""))
+                if (
+                    width is not None
+                    and width > STATEVECTOR_MAX_QUBITS
+                    and framework.upper() == Backend.STATEVECTOR.name
+                    and not bool(row.get("unsupported"))
+                ):
+                    drop_counts["ancilla"] += 1
+                    return False
+
+                return True
+
+            mask = df.apply(_row_allowed, axis=1)
             dropped = int((~mask).sum())
             if dropped:
-                LOGGER.info("Dropping %d row(s) outside the statevector limit", dropped)
+                if drop_counts["ancilla"]:
+                    LOGGER.info(
+                        "Dropping %d row(s) outside the statevector limit (%d due to ancillary width)",
+                        dropped,
+                        drop_counts["ancilla"],
+                    )
+                else:
+                    LOGGER.info(
+                        "Dropping %d row(s) outside the statevector limit", dropped
+                    )
             return df.loc[mask].copy()
 
         forced = _filter(forced)
