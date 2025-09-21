@@ -138,6 +138,105 @@ def mixed_backend_subsystems(
     return Circuit(gates, use_classical_simplification=False)
 
 
+def hybrid_dense_to_mps_circuit(
+    *,
+    ghz_width: int = 4,
+    random_width: int = 5,
+    qaoa_width: int = 5,
+    qaoa_layers: int = 3,
+    seed: int = 5,
+) -> Circuit:
+    """Dense random prefix followed by an MPS-friendly suffix.
+
+    The circuit prepares a Clifford GHZ register, entangles it with a dense
+    random block and finally executes a linear-chain QAOA routine that favours
+    the matrix product state backend.  Cross-register entangling gates ensure
+    that switching to the QAOA suffix requires an explicit conversion when
+    ``conversion_cost_multiplier`` is small.  Larger multipliers make the
+    planner keep the dense backend for the entire circuit, providing a compact
+    example where the final method choice changes with ``alpha``.
+
+    Parameters
+    ----------
+    ghz_width:
+        Number of qubits in the initial Clifford GHZ prefix.  Must be at least
+        three to expose an entanglement boundary.
+    random_width:
+        Width of the dense random block in the middle section.  Requires at
+        least four qubits to generate a non-trivial dense region.
+    qaoa_width:
+        Number of qubits evolved by the linear-chain QAOA suffix.  A minimum of
+        three qubits is required to form a non-trivial chain.
+    qaoa_layers:
+        Number of QAOA layers applied to the suffix.  Must be positive.
+    seed:
+        Seed controlling the random parameters of the dense and QAOA blocks to
+        keep the benchmark deterministic.
+
+    Returns
+    -------
+    Circuit
+        Combined circuit whose final backend toggles between MPS and
+        statevector depending on the conversion penalty.
+    """
+
+    if ghz_width < 3:
+        raise ValueError("ghz_width must be at least three to expose entanglement boundaries")
+    if random_width < 4:
+        raise ValueError("random_width must be at least four to create a dense region")
+    if qaoa_width < 3:
+        raise ValueError("qaoa_width must be at least three for a linear chain")
+    if qaoa_layers <= 0:
+        raise ValueError("qaoa_layers must be positive")
+
+    rng = Random(seed)
+
+    gates: List[Gate] = []
+
+    ghz = ghz_circuit(ghz_width)
+    gates.extend(ghz.gates)
+
+    dense_offset = ghz_width
+    dense_first = dense_offset
+    dense_last = dense_offset + random_width - 1
+
+    # Couple the Clifford prefix to the dense random block to enforce a
+    # conversion once non-Clifford gates appear.
+    gates.append(Gate("CX", [ghz_width - 1, dense_first]))
+
+    dense = random_circuit(random_width, seed=seed + 1)
+    gates.extend(_shift_gates(dense.gates, dense_offset))
+
+    qaoa_offset = dense_offset + random_width
+    qaoa_first = qaoa_offset
+
+    # Connect the dense block with the QAOA suffix using Clifford entanglers so
+    # switching backends requires a conversion step.
+    gates.append(Gate("CZ", [dense_last, qaoa_first]))
+
+    for qubit in range(qaoa_width):
+        gates.append(Gate("H", [qaoa_offset + qubit]))
+    for _ in range(qaoa_layers):
+        for qubit in range(qaoa_width - 1):
+            theta = rng.uniform(0.2, 1.5)
+            gates.append(
+                Gate("RZZ", [qaoa_offset + qubit, qaoa_offset + qubit + 1], {"theta": theta})
+            )
+        bridge = rng.uniform(0.2, 1.5)
+        gates.append(Gate("RZZ", [dense_last, qaoa_first], {"theta": bridge}))
+        for qubit in range(qaoa_width):
+            rx_angle = rng.uniform(0.1, 2.5)
+            gates.append(Gate("RX", [qaoa_offset + qubit], {"theta": rx_angle}))
+
+    for qubit in range(qaoa_width):
+        ry_angle = rng.uniform(0.1, 1.2)
+        gates.append(Gate("RY", [qaoa_offset + qubit], {"theta": ry_angle}))
+        rz_angle = rng.uniform(0.1, 1.2)
+        gates.append(Gate("RZ", [qaoa_offset + qubit], {"phi": rz_angle}))
+
+    return Circuit(gates, use_classical_simplification=False)
+
+
 def stim_to_dd_circuit(
     *,
     num_groups: int = 3,
