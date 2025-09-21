@@ -60,10 +60,17 @@ phases as well as their sum:
   baseline entries, the backend that achieved the minimum runtime.
 
 Statevector simulations are skipped when the circuit width exceeds the
-available memory. A default budget of 64 GiB (about 32 qubits) is assumed but
-can be adjusted via the ``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` environment
-variable, the global ``--memory-bytes`` flag on `run_benchmarks.py`, or by
-passing ``memory_bytes`` to ``BenchmarkRunner.run_quasar``/``run_quasar_multiple``.
+available memory. QuASAr now derives this ceiling from the
+``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` environment variable and, when
+``psutil`` is installed, the system's currently available memory, falling back
+to 64 GiB (about 32 qubits). The resulting budget is cached by both the
+benchmark runner and the :class:`~quasar.simulation_engine.SimulationEngine`,
+ensuring the planner enforces the limit even when the quick path is bypassed.
+You can override the ceiling via the environment variable, the global
+``--memory-bytes`` flag on `run_benchmarks.py`, the ``memory_bytes`` keyword on
+``BenchmarkRunner.run_quasar``/``run_quasar_multiple``, or the
+``SimulationEngine(memory_threshold=...)`` and ``simulate(memory_threshold=...)``
+APIs. Supplying a non-positive threshold disables the guard for that call.
 
 ### Reproducing paper figures
 

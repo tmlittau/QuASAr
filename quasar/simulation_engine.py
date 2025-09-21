@@ -12,7 +12,14 @@ users that simply want to simulate a circuit and obtain both the final
 
 from dataclasses import dataclass, field
 from typing import Optional, List
+import math
+import os
 import time
+
+try:  # Optional dependency used for memory discovery when available
+    import psutil  # type: ignore
+except Exception:  # pragma: no cover - psutil is optional
+    psutil = None  # type: ignore
 
 from .circuit import Circuit
 from .analyzer import CircuitAnalyzer, AnalysisResult
@@ -21,6 +28,55 @@ from .scheduler import Scheduler
 from .ssd import SSD
 from .cost import CostEstimator, Backend
 from quasar_convert import ConversionEngine
+
+STATEVECTOR_MEMORY_ENV = "QUASAR_STATEVECTOR_MAX_MEMORY_BYTES"
+"""Environment variable overriding automatic statevector memory limits."""
+
+DEFAULT_MEMORY_BYTES = 64 * 1024 ** 3
+"""Fallback memory budget (64 GiB) used when detection fails."""
+
+
+def _autodetect_memory_ceiling() -> float:
+    """Return a best-effort memory ceiling for dense statevectors."""
+
+    env = os.getenv(STATEVECTOR_MEMORY_ENV)
+    if env:
+        try:
+            value = int(env)
+            if value > 0:
+                return float(value)
+        except ValueError:
+            pass
+
+    if psutil is not None:
+        try:
+            available = psutil.virtual_memory().available
+            if available > 0:
+                return float(available)
+        except Exception:
+            pass
+
+    return float(DEFAULT_MEMORY_BYTES)
+
+
+def _coerce_explicit_threshold(value: float | None) -> tuple[bool, float | None]:
+    """Normalize explicit thresholds and flag whether a user override exists."""
+
+    if value is None:
+        return False, None
+    if math.isinf(value) or value <= 0:
+        return True, None
+    return True, float(value)
+
+
+def _sanitize_threshold(value: float | None) -> float | None:
+    """Return ``value`` if it denotes a positive memory budget."""
+
+    if value is None:
+        return None
+    if math.isinf(value) or value <= 0:
+        return None
+    return float(value)
 
 
 @dataclass
@@ -60,7 +116,14 @@ class SimulationResult:
 
 
 class SimulationEngine:
-    """Compose analyzer, planner and scheduler into a single entry point."""
+    """Compose analyzer, planner and scheduler into a single entry point.
+
+    The engine captures a memory ceiling during construction using the
+    ``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` environment variable, the system's
+    available memory (when psutil is installed), or a 64 GiB fallback.  This
+    threshold is forwarded to the planner so that dense statevector execution
+    respects the configured resource limits by default.
+    """
 
     def __init__(
         self,
@@ -72,11 +135,32 @@ class SimulationEngine:
         memory_threshold: float | None = None,
     ) -> None:
         ce = conversion_engine or ConversionEngine()
-        self.planner = planner or Planner(estimator=estimator, max_memory=memory_threshold)
-        # Reuse the planner and conversion engine when creating the scheduler
-        self.scheduler = scheduler or Scheduler(planner=self.planner, conversion_engine=ce)
+        override_set, override_threshold = _coerce_explicit_threshold(memory_threshold)
+
+        if planner is None:
+            resolved_threshold = (
+                override_threshold if override_set else _autodetect_memory_ceiling()
+            )
+            self.planner = Planner(estimator=estimator, max_memory=resolved_threshold)
+        else:
+            self.planner = planner
+            if override_set:
+                self.planner.max_memory = override_threshold
+                resolved_threshold = override_threshold
+            else:
+                resolved_threshold = _sanitize_threshold(getattr(self.planner, "max_memory", None))
+
+        if scheduler is None:
+            self.scheduler = Scheduler(planner=self.planner, conversion_engine=ce)
+        else:
+            self.scheduler = scheduler
+            if getattr(self.scheduler, "planner", None) is not self.planner:
+                self.scheduler.planner = self.planner
+            if getattr(self.scheduler, "conversion_engine", None) is None:
+                self.scheduler.conversion_engine = ce
+
         self.conversion_engine = ce
-        self.memory_threshold = memory_threshold
+        self.memory_threshold = resolved_threshold
 
     # ------------------------------------------------------------------
     def simulate(
@@ -97,8 +181,10 @@ class SimulationEngine:
         circuit:
             Circuit to simulate.
         memory_threshold:
-            Optional memory ceiling in bytes for planning.  Overrides the value
-            supplied when constructing the engine.
+            Optional memory ceiling in bytes for planning. When ``None`` the
+            engine reuses the limit determined during initialisation.  Passing
+            a non-positive or infinite value disables the limit for this
+            invocation.
         backend:
             Optional backend hint used during planning and scheduling.
         target_accuracy:
@@ -119,12 +205,11 @@ class SimulationEngine:
         analysis_time = time.perf_counter() - start
 
         start = time.perf_counter()
-        threshold = (
-            memory_threshold if memory_threshold is not None else self.memory_threshold
-        )
+        override_set, override_threshold = _coerce_explicit_threshold(memory_threshold)
+        threshold = override_threshold if override_set else self.memory_threshold
         cache_hits_before = self.planner.cache_hits
         if (
-            memory_threshold is None
+            threshold is None
             and self.scheduler.should_use_quick_path(
                 circuit,
                 backend=backend,
@@ -139,6 +224,7 @@ class SimulationEngine:
                 target_accuracy=target_accuracy,
                 max_time=max_time,
                 optimization_level=optimization_level,
+                max_memory=threshold,
             )
         else:
             plan = self.planner.plan(
