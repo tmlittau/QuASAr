@@ -473,11 +473,6 @@ def _supported_backends(
     if max_memory is None or sv_cost.memory <= max_memory:
         costs[Backend.STATEVECTOR] = sv_cost
     candidates = list(costs.keys())
-    if not candidates:
-        # Always retain statevector as a fallback even if it exceeds memory.
-        costs[Backend.STATEVECTOR] = sv_cost
-        candidates = [Backend.STATEVECTOR]
-
     # Select backends by estimated memory then runtime to respect calibration.
     ranking = sorted(candidates, key=lambda b: (costs[b].memory, costs[b].time))
     ranking_str = ">".join(b.name for b in ranking)
@@ -878,6 +873,7 @@ class Planner:
         boundaries = [prefix_qubits[i] & future_qubits[i] for i in range(n + 1)]
 
         table: List[Dict[Optional[Backend], DPEntry]] = [dict() for _ in range(n + 1)]
+        infeasible_segments: List[Tuple[int, int, List[Tuple[Backend, Cost]]]] = []
         start_backend = initial_backend if initial_backend is not None else None
         table[0][start_backend] = DPEntry(
             cost=Cost(0.0, 0.0), prev_index=0, prev_backend=None
@@ -924,6 +920,7 @@ class Planner:
                         )
                     backends = [forced_backend]
                 candidates: List[Tuple[Backend, Cost]] = []
+                violations: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
                     cost = _simulation_cost(
                         self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
@@ -935,21 +932,41 @@ class Planner:
                         if _better(par_cost, cost, self.perf_prio, parallel=True):
                             cost = par_cost
                     if max_memory is not None and cost.memory > max_memory:
+                        violations.append((backend, cost))
                         continue
                     candidates.append((backend, cost))
                 if not candidates:
-                    candidates = []
-                    for backend in backends:
-                        cost = _simulation_cost(
-                            self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
-                        )
-                        if len(groups) > 1:
-                            par_cost = _parallel_simulation_cost(
-                                self.estimator, backend, groups
+                    if max_memory is not None:
+                        if not backends:
+                            retry_backends = _supported_backends(
+                                segment,
+                                sparsity=sparsity,
+                                phase_rotation_diversity=phase_rotation_diversity,
+                                amplitude_rotation_diversity=amplitude_rotation_diversity,
+                                allow_tableau=allow_tableau,
+                                estimator=self.estimator,
+                                max_memory=None,
                             )
-                            if _better(par_cost, cost, self.perf_prio, parallel=True):
-                                cost = par_cost
-                        candidates.append((backend, cost))
+                            for backend in retry_backends:
+                                retry_cost = _simulation_cost(
+                                    self.estimator,
+                                    backend,
+                                    num_qubits,
+                                    num_1q,
+                                    num_2q,
+                                    num_meas,
+                                )
+                                if len(groups) > 1:
+                                    par_retry = _parallel_simulation_cost(
+                                        self.estimator, backend, groups
+                                    )
+                                    if _better(
+                                        par_retry, retry_cost, self.perf_prio, parallel=True
+                                    ):
+                                        retry_cost = par_retry
+                                violations.append((backend, retry_cost))
+                        infeasible_segments.append((j, i, violations.copy()))
+                    continue
                 for backend, sim_cost in candidates:
                     for prev_backend, prev_entry in table[j].items():
                         if bound is not None and _dominates(bound, prev_entry.cost, eps):
@@ -1040,11 +1057,32 @@ class Planner:
                 table[i] = dict(best)
 
         final_entries = table[n]
+        if not final_entries:
+            if max_memory is not None:
+                detail = ""
+                best: Tuple[int, int, Backend, Cost] | None = None
+                for start, end, options in infeasible_segments:
+                    for backend, cost in options:
+                        if best is None or cost.memory < best[3].memory:
+                            best = (start, end, backend, cost)
+                if best is not None:
+                    start, end, backend, cost = best
+                    detail = (
+                        f" Smallest estimated requirement is {cost.memory:.3e}B "
+                        f"with {backend.name} for segment [{start}, {end})."
+                    )
+                raise NoFeasibleBackendError(
+                    "No backend combination satisfies the memory limit of "
+                    f"{max_memory:.3e}B." + detail
+                )
+            raise NoFeasibleBackendError(
+                "No feasible backend combination found for the provided circuit"
+            )
         backend: Optional[Backend] = None
         if target_backend is not None:
             if target_backend in final_entries:
                 backend = target_backend
-        elif final_entries:
+        else:
             def cost_key(cost: Cost) -> tuple[float, float]:
                 if self.perf_prio == "time":
                     return (cost.time, cost.memory)
@@ -1468,18 +1506,26 @@ class Planner:
             return finalize(result)
 
         # Perform a coarse plan using the configured batch size for refinement
-        coarse = self._dp(
-            gates,
-            batch_size=self.batch_size,
-            max_memory=threshold,
-            allow_tableau=allow_tableau,
-            sparsity=circuit.sparsity,
-            phase_rotation_diversity=circuit.phase_rotation_diversity,
-            amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
-            horizon=self.horizon,
-            stage="coarse",
-            diagnostics=diagnostics,
-        )
+        try:
+            coarse = self._dp(
+                gates,
+                batch_size=self.batch_size,
+                max_memory=threshold,
+                allow_tableau=allow_tableau,
+                sparsity=circuit.sparsity,
+                phase_rotation_diversity=circuit.phase_rotation_diversity,
+                amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+                horizon=self.horizon,
+                stage="coarse",
+                diagnostics=diagnostics,
+            )
+        except NoFeasibleBackendError as exc:
+            if threshold is not None:
+                raise NoFeasibleBackendError(
+                    "Unable to plan circuit under memory limit "
+                    f"{threshold:.3e}B: {exc}"
+                ) from exc
+            raise
 
         dp_cost = (
             coarse.table[-1][coarse.final_backend].cost
@@ -1542,20 +1588,29 @@ class Planner:
         part = Partitioner()
         for step in coarse.steps:
             segment = gates[step.start : step.end]
-            sub = self._dp(
-                segment,
-                initial_backend=prev_backend,
-                target_backend=step.backend,
-                batch_size=1,
-                max_memory=threshold,
-                allow_tableau=allow_tableau,
-                sparsity=circuit.sparsity,
-                phase_rotation_diversity=circuit.phase_rotation_diversity,
-                amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
-                horizon=self.horizon,
-                stage="refine",
-                diagnostics=diagnostics,
-            )
+            try:
+                sub = self._dp(
+                    segment,
+                    initial_backend=prev_backend,
+                    target_backend=step.backend,
+                    batch_size=1,
+                    max_memory=threshold,
+                    allow_tableau=allow_tableau,
+                    sparsity=circuit.sparsity,
+                    phase_rotation_diversity=circuit.phase_rotation_diversity,
+                    amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+                    horizon=self.horizon,
+                    stage="refine",
+                    diagnostics=diagnostics,
+                )
+            except NoFeasibleBackendError as exc:
+                if threshold is not None:
+                    raise NoFeasibleBackendError(
+                        "Unable to refine segment "
+                        f"[{step.start}, {step.end}) under memory limit "
+                        f"{threshold:.3e}B: {exc}"
+                    ) from exc
+                raise
             for sub_step in sub.steps:
                 refined_steps.append(
                     PlanStep(
