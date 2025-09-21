@@ -66,3 +66,27 @@ def test_plot_quasar_vs_baseline_best_returns_speedup_table():
         assert "speedup" in summary.columns
     finally:
         plt.close(ax.figure)
+
+
+def test_compute_baseline_best_handles_all_nan_metrics():
+    df = pd.DataFrame(
+        [
+            {
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "circuit": "qft",
+                "qubits": 3,
+                "run_time_mean": float("nan"),
+                "run_time_std": float("nan"),
+            }
+        ]
+    )
+
+    result = compute_baseline_best(df, metrics=["run_time_mean"])
+
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty
+    assert isinstance(result.index, pd.RangeIndex)
+    assert "run_time_mean" in result.columns
+    assert "framework" in result.columns
+    assert "backend" in result.columns
