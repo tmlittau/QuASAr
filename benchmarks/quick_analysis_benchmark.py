@@ -2,7 +2,9 @@
 
 This script compares scheduler runtime with the quick-analysis path
 enabled and disabled for randomly generated circuits.  Results are
-written to ``benchmarks/quick_analysis_results.csv`` and the timings plot is displayed for inspection.
+written to ``benchmarks/quick_analysis_results.csv`` and the timings plot
+is displayed for inspection.  Pass ``--verbose`` to see per-configuration
+progress messages while the benchmark executes.
 
 Running this script can guide selection of suitable default thresholds
 for the quick path based on observed speedups.
@@ -10,9 +12,12 @@ for the quick path based on observed speedups.
 
 from __future__ import annotations
 
+import argparse
+import logging
 import time
 from pathlib import Path
 import sys
+from typing import Sequence
 
 import pandas as pd
 import seaborn as sns
@@ -24,6 +29,20 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from quasar.circuit import Circuit
 from quasar.planner import Planner
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _configure_logging(verbosity: int) -> None:
+    """Initialise logging for CLI usage."""
+
+    level = logging.WARNING
+    if verbosity >= 2:
+        level = logging.DEBUG
+    elif verbosity == 1:
+        level = logging.INFO
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
 def _build_circuit(num_qubits: int, depth: int) -> Circuit:
@@ -57,7 +76,20 @@ def _time_planning(circuit: Circuit, *, quick: bool) -> float:
     return end - start
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Benchmark the quick-analysis planner thresholds",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase logging verbosity (use -vv for debug output).",
+    )
+    args = parser.parse_args(argv)
+
+    _configure_logging(args.verbose)
     results = []
 
     qubit_sizes = [4, 8, 12]
@@ -65,6 +97,7 @@ def main() -> None:
 
     for q in qubit_sizes:
         for d in depths:
+            LOGGER.info("Benchmarking configuration qubits=%s depth=%s", q, d)
             circ = _build_circuit(q, d)
             quick_time = _time_planning(circ, quick=True)
             slow_time = _time_planning(circ, quick=False)
@@ -79,9 +112,11 @@ def main() -> None:
             )
 
     df = pd.DataFrame(results)
+    LOGGER.info("Completed benchmarking %d configuration(s)", len(df))
     df["speedup"] = df["full_time"] / df["quick_time"]
 
     out_csv = Path(__file__).with_name("quick_analysis_results.csv")
+    LOGGER.info("Writing quick-analysis results to %s", out_csv)
     df.to_csv(out_csv, index=False)
     sns.set_theme()
     melted = df.melt(
@@ -106,13 +141,14 @@ def main() -> None:
     # Provide a simple recommendation for thresholds based on observed speedup
     faster = df[df["speedup"] > 1.0]
     if not faster.empty:
-        print("Suggested quick-path thresholds based on measured speedups:")
-        print(
+        LOGGER.info("Suggested quick-path thresholds based on measured speedups:")
+        LOGGER.info(
+            "%s",
             {
                 "qubits": int(faster["qubits"].max()),
                 "gates": int(faster["gates"].max()),
                 "depth": int(faster["depth"].max()),
-            }
+            },
         )
 
 
