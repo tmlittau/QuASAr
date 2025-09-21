@@ -350,7 +350,32 @@ class BenchmarkRunner:
             self.results.append(summary)
             return summary
         if not records:
-            raise RuntimeError("no runs executed")
+            summary: Dict[str, Any] = {
+                "framework": backend_name,
+                "backend": backend_name,
+                "repetitions": 0,
+                "result": None,
+            }
+            if failures:
+                summary["failed_runs"] = failures
+                timeout_failures = [
+                    msg for msg in failures if "timed out" in msg.lower()
+                ]
+                if timeout_failures:
+                    summary["timeout"] = True
+                    summary["comment"] = "timeout"
+                    if len(timeout_failures) != len(failures):
+                        summary["comment"] += "; " + (
+                            f"{len(failures)} run(s) failed and were excluded from statistics"
+                        )
+                else:
+                    summary["comment"] = (
+                        f"all {len(failures)} run(s) failed; see failed_runs for details"
+                    )
+            else:
+                summary["comment"] = "no runs executed"
+            self.results.append(summary)
+            return summary
 
         summary: Dict[str, Any] = {
             "framework": backend_name,
@@ -359,9 +384,18 @@ class BenchmarkRunner:
         }
         if failures:
             summary["failed_runs"] = failures
-            summary["comment"] = (
-                f"{len(failures)} run(s) failed and were excluded from statistics"
-            )
+            timeout_failures = [
+                msg for msg in failures if "timed out" in msg.lower()
+            ]
+            if timeout_failures:
+                summary["timeout"] = True
+                summary["comment"] = "timeout; " + (
+                    f"{len(failures)} run(s) failed and were excluded from statistics"
+                )
+            else:
+                summary["comment"] = (
+                    f"{len(failures)} run(s) failed and were excluded from statistics"
+                )
         for m in metrics:
             values = [r[m] for r in records]
             summary[f"{m}_mean"] = statistics.fmean(values)
@@ -880,7 +914,33 @@ class BenchmarkRunner:
                 break
 
         if not records:
-            raise RuntimeError(f"no runs executed: {failures}")
+            summary: Dict[str, Any] = {
+                "framework": "quasar",
+                "repetitions": 0,
+                "backend": None,
+                "result": None,
+            }
+            if failures:
+                summary["failed_runs"] = failures
+                timeout_failures = [
+                    msg for msg in failures if "timed out" in msg.lower()
+                ]
+                if timeout_failures:
+                    summary["timeout"] = True
+                    summary["comment"] = "timeout"
+                    if len(timeout_failures) != len(failures):
+                        summary["comment"] += "; " + (
+                            f"all {len(failures)} run(s) failed; see failed_runs for details"
+                        )
+                else:
+                    summary["comment"] = (
+                        f"all {len(failures)} run(s) failed; see failed_runs for details"
+                    )
+            else:
+                summary["comment"] = "no runs executed"
+            summary.update(_conversion_summary(conversion_layers))
+            self.results.append(summary)
+            return summary
 
         summary: Dict[str, Any] = {
             "framework": "quasar",
@@ -889,9 +949,18 @@ class BenchmarkRunner:
         }
         if failures:
             summary["failed_runs"] = failures
-            summary["comment"] = (
-                f"{len(failures)} run(s) failed and were excluded from statistics"
-            )
+            timeout_failures = [
+                msg for msg in failures if "timed out" in msg.lower()
+            ]
+            if timeout_failures:
+                summary["timeout"] = True
+                summary["comment"] = "timeout; " + (
+                    f"{len(failures)} run(s) failed and were excluded from statistics"
+                )
+            else:
+                summary["comment"] = (
+                    f"{len(failures)} run(s) failed and were excluded from statistics"
+                )
         for m in metrics:
             values = [r[m] for r in records]
             summary[f"{m}_mean"] = statistics.fmean(values)
