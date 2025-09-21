@@ -9,10 +9,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import sys
 from typing import Iterable, Sequence
+
+try:  # Optional dependency used for memory discovery when available
+    import psutil  # type: ignore
+except Exception:  # pragma: no cover - psutil is optional
+    psutil = None  # type: ignore
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -36,6 +42,11 @@ if __package__ in {None, ""}:
     from runner import BenchmarkRunner  # type: ignore[no-redef]
     import circuits as circuit_lib  # type: ignore[no-redef]
     from parallel_circuits import many_ghz_subsystems  # type: ignore[no-redef]
+    from memory_utils import (  # type: ignore[no-redef]
+        DEFAULT_MEMORY_BYTES as DEFAULT_STATEVECTOR_MEMORY_BYTES,
+        ENV_VAR as STATEVECTOR_MEMORY_ENV_VAR,
+        max_qubits_statevector,
+    )
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import (
         backend_labels,
@@ -48,6 +59,11 @@ else:  # pragma: no cover - exercised via runtime execution
     from .runner import BenchmarkRunner
     from . import circuits as circuit_lib
     from .parallel_circuits import many_ghz_subsystems
+    from .memory_utils import (
+        DEFAULT_MEMORY_BYTES as DEFAULT_STATEVECTOR_MEMORY_BYTES,
+        ENV_VAR as STATEVECTOR_MEMORY_ENV_VAR,
+        max_qubits_statevector,
+    )
 
 from quasar import SimulationEngine
 from quasar.cost import Backend
@@ -60,6 +76,88 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+STATEVECTOR_MEMORY_HEADROOM_FRACTION = 0.25
+"""Portion of detected memory made available to dense statevectors."""
+
+
+def _statevector_memory_budget_bytes() -> int:
+    """Return the configured memory budget for dense statevectors."""
+
+    env_value = os.getenv(STATEVECTOR_MEMORY_ENV_VAR)
+    if env_value is not None:
+        try:
+            budget = int(env_value)
+        except ValueError:
+            LOGGER.warning(
+                "Ignoring invalid %s override: %r",
+                STATEVECTOR_MEMORY_ENV_VAR,
+                env_value,
+            )
+        else:
+            if budget < 0:
+                LOGGER.warning(
+                    "Ignoring negative %s override: %r",
+                    STATEVECTOR_MEMORY_ENV_VAR,
+                    env_value,
+                )
+            else:
+                return budget
+
+    if psutil is not None:
+        try:
+            available = psutil.virtual_memory().available
+        except Exception as exc:  # pragma: no cover - psutil failures are rare
+            LOGGER.debug("Failed to query psutil for memory availability: %s", exc)
+        else:
+            if available > 0:
+                headroom = int(available * STATEVECTOR_MEMORY_HEADROOM_FRACTION)
+                return headroom if headroom > 0 else int(available)
+
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+    except (ValueError, OSError, AttributeError):
+        page_size = -1
+        phys_pages = -1
+    if page_size > 0 and phys_pages > 0:
+        total = int(page_size) * int(phys_pages)
+        if total > 0:
+            headroom = int(total * STATEVECTOR_MEMORY_HEADROOM_FRACTION)
+            return headroom if headroom > 0 else total
+
+    return DEFAULT_STATEVECTOR_MEMORY_BYTES
+
+
+STATEVECTOR_MEMORY_BYTES = _statevector_memory_budget_bytes()
+"""Memory budget used when forcing statevector backends."""
+
+STATEVECTOR_SAFE_MEMORY_BYTES = max(0, STATEVECTOR_MEMORY_BYTES - 1)
+"""Budget tightened by one byte to ensure runs stay below the hard limit."""
+
+STATEVECTOR_MAX_QUBITS = max_qubits_statevector(STATEVECTOR_SAFE_MEMORY_BYTES)
+"""Largest supported dense statevector width under the configured budget."""
+
+
+def _filter_qubits(qubits: Sequence[int], *, name: str) -> tuple[int, ...]:
+    """Return qubit widths that fit inside the statevector budget."""
+
+    allowed = tuple(q for q in qubits if q <= STATEVECTOR_MAX_QUBITS)
+    if not allowed:
+        LOGGER.warning(
+            "Skipping circuit family '%s'; all widths exceed %s qubits",
+            name,
+            STATEVECTOR_MAX_QUBITS,
+        )
+    elif len(allowed) != len(qubits):
+        LOGGER.info(
+            "Circuit family '%s' trimmed to qubits=%s (limit=%s)",
+            name,
+            allowed,
+            STATEVECTOR_MAX_QUBITS,
+        )
+    return allowed
 
 
 def _configure_logging(verbosity: int) -> None:
@@ -128,7 +226,7 @@ def _large_grover_circuit(n_qubits: int, *, iterations: int = 2):
     return circuit_lib.grover_circuit(n_qubits, n_iterations=iterations)
 
 
-CIRCUITS: Sequence[CircuitSpec] = (
+_BASE_CIRCUITS: Sequence[CircuitSpec] = (
     CircuitSpec("qft", circuit_lib.qft_circuit, (3, 4)),
     CircuitSpec("grover", circuit_lib.grover_circuit, (3, 4), {"n_iterations": 1}),
     CircuitSpec(
@@ -152,6 +250,18 @@ CIRCUITS: Sequence[CircuitSpec] = (
         {"iterations": 2},
     ),
 )
+
+
+_FILTERED_CIRCUITS: list[CircuitSpec] = []
+for spec in _BASE_CIRCUITS:
+    qubits = _filter_qubits(spec.qubits, name=spec.name)
+    if not qubits:
+        continue
+    _FILTERED_CIRCUITS.append(
+        CircuitSpec(spec.name, spec.builder, qubits, spec.kwargs)
+    )
+
+CIRCUITS: Sequence[CircuitSpec] = tuple(_FILTERED_CIRCUITS)
 
 
 def _build_circuit(spec: CircuitSpec, n_qubits: int, *, use_classical_simplification: bool) -> object | None:
@@ -182,6 +292,7 @@ def collect_backend_data(
     backends: Sequence[Backend],
     *,
     repetitions: int = 3,
+    run_timeout: float | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return forced and automatic scheduler results for ``specs``."""
 
@@ -226,6 +337,8 @@ def collect_backend_data(
                         backend=backend,
                         repetitions=repetitions,
                         quick=True,
+                        memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
+                        run_timeout=run_timeout,
                     )
                 except Exception as exc:  # pragma: no cover - backend limitations
                     forced_records.append(
@@ -277,6 +390,8 @@ def collect_backend_data(
                     engine,
                     repetitions=repetitions,
                     quick=False,
+                    memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
+                    run_timeout=run_timeout,
                 )
             except Exception as exc:  # pragma: no cover - skip unsupported mixes
                 LOGGER.warning(
@@ -305,9 +420,46 @@ def collect_backend_data(
     return pd.DataFrame(forced_records), pd.DataFrame(auto_records)
 
 
-def generate_backend_comparison() -> None:
+def generate_backend_comparison(
+    *,
+    repetitions: int = 3,
+    run_timeout: float | None = None,
+    reuse_existing: bool = False,
+) -> None:
     LOGGER.info("Generating backend comparison figures")
-    forced, auto = collect_backend_data(CIRCUITS, BACKENDS, repetitions=3)
+    forced_path = RESULTS_DIR / "backend_forced.csv"
+    auto_path = RESULTS_DIR / "backend_auto.csv"
+    allowed_qubits = {spec.name: set(spec.qubits) for spec in CIRCUITS}
+
+    forced: pd.DataFrame
+    auto: pd.DataFrame
+
+    if reuse_existing and forced_path.exists() and auto_path.exists():
+        LOGGER.info("Reusing existing backend CSVs from %s and %s", forced_path, auto_path)
+        forced = pd.read_csv(forced_path)
+        auto = pd.read_csv(auto_path)
+
+        def _filter(df: pd.DataFrame) -> pd.DataFrame:
+            if df.empty:
+                return df
+            mask = df.apply(
+                lambda row: row.get("qubits") in allowed_qubits.get(row.get("circuit"), set()),
+                axis=1,
+            )
+            dropped = int((~mask).sum())
+            if dropped:
+                LOGGER.info("Dropping %d row(s) outside the statevector limit", dropped)
+            return df.loc[mask].copy()
+
+        forced = _filter(forced)
+        auto = _filter(auto)
+    else:
+        forced, auto = collect_backend_data(
+            CIRCUITS,
+            BACKENDS,
+            repetitions=repetitions,
+            run_timeout=run_timeout,
+        )
     forced_path = RESULTS_DIR / "backend_forced.csv"
     auto_path = RESULTS_DIR / "backend_auto.csv"
     forced.to_csv(forced_path, index=False)
@@ -337,31 +489,35 @@ def generate_backend_comparison() -> None:
     plt.close(ax.figure)
 
     if not forced.empty and not auto.empty:
-        grid = plot_backend_timeseries(forced, auto, metric="run_time_mean")
-        runtime_png = FIGURES_DIR / "backend_timeseries_runtime.png"
-        runtime_pdf = FIGURES_DIR / "backend_timeseries_runtime.pdf"
-        grid.savefig(runtime_png)
-        grid.savefig(runtime_pdf)
-        _log_written(runtime_png)
-        _log_written(runtime_pdf)
-        plt.close(grid.fig)
+        try:
+            grid = plot_backend_timeseries(forced, auto, metric="run_time_mean")
+        except RuntimeError as exc:
+            LOGGER.warning("Skipping backend timeseries plots: %s", exc)
+        else:
+            runtime_png = FIGURES_DIR / "backend_timeseries_runtime.png"
+            runtime_pdf = FIGURES_DIR / "backend_timeseries_runtime.pdf"
+            grid.savefig(runtime_png)
+            grid.savefig(runtime_pdf)
+            _log_written(runtime_png)
+            _log_written(runtime_pdf)
+            plt.close(grid.fig)
 
-        for frame in (forced, auto):
-            frame["run_peak_memory_mib"] = frame.get("run_peak_memory_mean", 0) / (1024**2)
+            for frame in (forced, auto):
+                frame["run_peak_memory_mib"] = frame.get("run_peak_memory_mean", 0) / (1024**2)
 
-        grid_mem = plot_backend_timeseries(
-            forced.assign(run_peak_memory_mean=forced["run_peak_memory_mib"]),
-            auto.assign(run_peak_memory_mean=auto["run_peak_memory_mib"]),
-            metric="run_peak_memory_mean",
-            annotate_auto=False,
-        )
-        mem_png = FIGURES_DIR / "backend_timeseries_memory.png"
-        mem_pdf = FIGURES_DIR / "backend_timeseries_memory.pdf"
-        grid_mem.savefig(mem_png)
-        grid_mem.savefig(mem_pdf)
-        _log_written(mem_png)
-        _log_written(mem_pdf)
-        plt.close(grid_mem.fig)
+            grid_mem = plot_backend_timeseries(
+                forced.assign(run_peak_memory_mean=forced["run_peak_memory_mib"]),
+                auto.assign(run_peak_memory_mean=auto["run_peak_memory_mib"]),
+                metric="run_peak_memory_mean",
+                annotate_auto=False,
+            )
+            mem_png = FIGURES_DIR / "backend_timeseries_memory.png"
+            mem_pdf = FIGURES_DIR / "backend_timeseries_memory.pdf"
+            grid_mem.savefig(mem_png)
+            grid_mem.savefig(mem_pdf)
+            _log_written(mem_png)
+            _log_written(mem_pdf)
+            plt.close(grid_mem.fig)
     else:
         LOGGER.info(
             "Skipping backend timeseries plots because one of the result tables is empty"
@@ -397,7 +553,12 @@ def generate_heatmap() -> None:
         lambda col: pd.Categorical(col, categories=order).codes
     )
 
-    ax = plot_heatmap(pivot_numeric, annot=annot, fmt="")
+    try:
+        ax = plot_heatmap(pivot_numeric, annot=annot, fmt="")
+    except RuntimeError as exc:
+        LOGGER.warning("Skipping plan-choice heatmap: %s", exc)
+        return
+
     heatmap_png = FIGURES_DIR / "plan_choice_heatmap.png"
     heatmap_pdf = FIGURES_DIR / "plan_choice_heatmap.pdf"
     table_csv = RESULTS_DIR / "plan_choice_heatmap_table.csv"
@@ -450,11 +611,36 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=0,
         help="Increase logging verbosity (use -vv for debug output).",
     )
+    parser.add_argument(
+        "-r",
+        "--repetitions",
+        type=int,
+        default=3,
+        help="Number of repetitions per circuit/backend combination (default: 3).",
+    )
+    parser.add_argument(
+        "-t",
+        "--run-timeout",
+        type=float,
+        default=None,
+        help="Abort individual backend runs after this many seconds (default: no timeout).",
+    )
+    parser.add_argument(
+        "--reuse-existing",
+        action="store_true",
+        help="Load and filter cached backend CSVs instead of running new simulations.",
+    )
     args = parser.parse_args(argv)
 
     _configure_logging(args.verbose)
     setup_benchmark_style()
-    generate_backend_comparison()
+    if args.repetitions < 1:
+        parser.error("--repetitions must be at least 1")
+    generate_backend_comparison(
+        repetitions=args.repetitions,
+        run_timeout=args.run_timeout,
+        reuse_existing=args.reuse_existing,
+    )
     generate_heatmap()
     generate_speedup_bars()
 
