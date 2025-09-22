@@ -13,6 +13,7 @@ try:  # Allow execution via `python benchmarks/run_benchmarks.py`
         dense_to_clifford_partition_circuit,
         dual_magic_injection_circuit,
         staged_partition_circuit,
+        w_state_phase_oracle_circuit,
     )
 except ImportError:  # pragma: no cover - fallback for script execution
     from large_scale_circuits import (  # type: ignore
@@ -20,6 +21,7 @@ except ImportError:  # pragma: no cover - fallback for script execution
         dense_to_clifford_partition_circuit,
         dual_magic_injection_circuit,
         staged_partition_circuit,
+        w_state_phase_oracle_circuit,
     )
 
 
@@ -258,12 +260,105 @@ def _ladder_dense_gadgets_sweep() -> List[WorkloadInstance]:
     return instances
 
 
+def _w_state_oracle_sweep() -> List[WorkloadInstance]:
+    width = 18
+    oracle_depths = [1, 2, 4]
+    rotation_choices = [
+        ("rz",),
+        ("rz", "ry"),
+        ("rz", "ry", "rx", "t"),
+    ]
+
+    instances: List[WorkloadInstance] = []
+    variant = 1
+    for oracle_layers in oracle_depths:
+        for rotation_set in rotation_choices:
+            params = {
+                "width": width,
+                "oracle_layers": oracle_layers,
+                "rotation_set": rotation_set,
+                "seed": variant,
+            }
+            preview = w_state_phase_oracle_circuit(**params)
+            base = w_state_phase_oracle_circuit(
+                width=width, oracle_layers=0, rotation_set=rotation_set, seed=variant
+            )
+            prefix_len = len(base.gates)
+            oracle_gates = list(preview.gates[prefix_len:])
+            rotation_names = {
+                "RZ",
+                "RY",
+                "RX",
+                "P",
+                "PHASE",
+                "T",
+                "S",
+                "SDG",
+            }
+            rotation_gate_count = sum(
+                1
+                for gate in oracle_gates
+                if len(gate.qubits) == 1 and gate.gate in rotation_names
+            )
+            parameterised_rotations = sum(1 for gate in oracle_gates if gate.params)
+            entangling_gates = [
+                gate
+                for gate in oracle_gates
+                if len(gate.qubits) > 1 and gate.gate in {"CZ", "CRZ"}
+            ]
+            entangling_count = len(entangling_gates)
+            rotation_per_layer = (
+                rotation_gate_count / oracle_layers if oracle_layers > 0 else 0.0
+            )
+            entangling_per_layer = (
+                entangling_count / oracle_layers if oracle_layers > 0 else 0.0
+            )
+            rotation_density = (
+                rotation_per_layer / width if width > 0 else 0.0
+            )
+            oracle_sparsity = max(0.0, 1.0 - min(1.0, rotation_density))
+            rotation_unique = sorted(
+                {
+                    gate.gate
+                    for gate in oracle_gates
+                    if len(gate.qubits) == 1 and gate.gate in rotation_names
+                }
+            )
+            metadata = {
+                "total_qubits": width,
+                "w_state_width": width,
+                "oracle_layers": oracle_layers,
+                "oracle_rotation_gate_count": rotation_gate_count,
+                "oracle_rotation_unique": ",".join(rotation_unique),
+                "oracle_rotation_density": rotation_density,
+                "oracle_sparsity": oracle_sparsity,
+                "oracle_entangling_count": entangling_count,
+                "oracle_entangling_per_layer": entangling_per_layer,
+                "oracle_rotation_per_layer": rotation_per_layer,
+                "oracle_parameterised_rotations": parameterised_rotations,
+                "rotation_set": ",".join(rotation_set),
+            }
+            instances.append(
+                WorkloadInstance(
+                    scenario="w_state_oracle",
+                    variant=f"w_state_oracle_{variant}",
+                    builder=w_state_phase_oracle_circuit,
+                    parameters=params,
+                    metadata=metadata,
+                    enable_classical_simplification=False,
+                )
+            )
+            variant += 1
+    return instances
+
+
 SCENARIOS: Dict[str, Callable[[], List[WorkloadInstance]]] = {
     "tableau_boundary": _tableau_boundary_sweep,
     "staged_rank": _staged_rank_sweep,
     "staged_sparsity": _staged_sparsity_sweep,
     "dual_magic_injection": _dual_magic_injection_sweep,
     "ladder_dense_gadgets": _ladder_dense_gadgets_sweep,
+    "w_state_oracle": _w_state_oracle_sweep,
 }
 
 

@@ -16,9 +16,19 @@ from typing import Iterable, List, Tuple
 from quasar.circuit import Circuit, Gate
 
 try:  # Allow execution when the module is imported as a script
-    from .circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates
+    from .circuits import (
+        _cdkm_adder_gates,
+        _vbe_adder_gates,
+        _iqft_gates,
+        _w_state_spec,
+    )
 except ImportError:  # pragma: no cover - fallback for script execution
-    from circuits import _cdkm_adder_gates, _vbe_adder_gates, _iqft_gates  # type: ignore
+    from circuits import (  # type: ignore
+        _cdkm_adder_gates,
+        _vbe_adder_gates,
+        _iqft_gates,
+        _w_state_spec,
+    )
 
 # Names of gates forming the Clifford group used in benchmark filtering.
 CLIFFORD_GATES = {
@@ -142,6 +152,22 @@ def _shift_gates(gates: Iterable[Gate], offset: int) -> List[Gate]:
     """Return ``gates`` with all qubits shifted by ``offset``."""
 
     return [Gate(g.gate, [q + offset for q in g.qubits], g.params) for g in gates]
+
+
+def _normalise_rotation_set(rotation_set: Iterable[str] | None) -> List[str]:
+    """Return a deduplicated, upper-case list of allowed rotation names."""
+
+    if rotation_set is None:
+        return ["RZ", "RY", "T"]
+    seen: set[str] = set()
+    result: List[str] = []
+    for entry in rotation_set:
+        name = str(entry).strip().upper()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        result.append(name)
+    return result if result else ["RZ"]
 
 
 def alternating_ladder_circuit(
@@ -460,6 +486,137 @@ def dual_magic_injection_circuit(
             gates.append(Gate("T", [anc]))
         gates.append(Gate("S", [left]))
         gates.append(Gate("S", [right]))
+
+    return Circuit(gates)
+
+
+def w_state_phase_oracle_circuit(
+    *,
+    width: int,
+    oracle_layers: int,
+    rotation_set: Iterable[str] | None = None,
+    seed: int = 0,
+) -> Circuit:
+    """Prepare a W state followed by configurable phase-oracle layers.
+
+    The generator first prepares an ``width``-qubit W state using the standard
+    cascade of ``CRY`` and ``CX`` gates from :mod:`benchmarks.circuits`.  It then
+    appends ``oracle_layers`` of sparse, diagonal-style operations composed of
+    single-qubit rotations drawn from ``rotation_set`` interleaved with
+    controlled phase rotations.  Increasing the variety of rotation operators
+    increases the number of qubits touched per layer which in turn reduces the
+    circuit's sparsity.  The ``seed`` ensures reproducible sampling of the
+    affected qubits and rotation angles.
+
+    Parameters
+    ----------
+    width:
+        Number of qubits in the register.  A value of ``0`` returns an empty
+        circuit.
+    oracle_layers:
+        Number of phase-oracle layers appended after the W-state preparation.
+        Each layer selects a subset of qubits and applies rotations from
+        ``rotation_set`` followed by controlled phase couplings.
+    rotation_set:
+        Iterable of gate names describing the allowed single-qubit rotations.
+        Names are case-insensitive and defaults to ``("RZ", "RY", "T")``.  The
+        number of unique entries determines how many qubits are rotated per
+        layer which acts as a knob for sparsity.
+    seed:
+        Random seed controlling the subset selection and rotation parameters.
+
+    Returns
+    -------
+    Circuit
+        Gate-level circuit implementing the W state preparation and the
+        requested oracle layers.
+    """
+
+    if width <= 0:
+        return Circuit([])
+
+    gates: List[Gate] = list(_w_state_spec(width))
+    if oracle_layers <= 0:
+        return Circuit(gates)
+
+    rotations = _normalise_rotation_set(rotation_set)
+    rng = Random(seed)
+
+    single_qubit_ops = [
+        name for name in rotations if name not in {"CRZ", "CZ", "CPHASE", "CP"}
+    ]
+    pair_ops = [
+        name for name in rotations if name in {"CRZ", "CZ", "CPHASE", "CP"}
+    ]
+
+    if not single_qubit_ops and pair_ops:
+        # Ensure at least one single-qubit rotation to avoid a purely Clifford
+        # oracle when the caller only requests controlled phases.
+        single_qubit_ops.append("RZ")
+
+    def _build_single(name: str, qubit: int) -> Gate | None:
+        if name == "RZ":
+            return Gate("RZ", [qubit], {"phi": rng.uniform(0.05, 1.5)})
+        if name == "RY":
+            return Gate("RY", [qubit], {"theta": rng.uniform(0.05, 1.5)})
+        if name == "RX":
+            return Gate("RX", [qubit], {"theta": rng.uniform(0.05, 1.5)})
+        if name in {"P", "PHASE"}:
+            return Gate("P", [qubit], {"phi": rng.uniform(0.05, 1.5)})
+        if name == "T":
+            return Gate("T", [qubit])
+        if name == "S":
+            return Gate("S", [qubit])
+        if name == "SDG":
+            return Gate("SDG", [qubit])
+        return None
+
+    def _build_pair(name: str, control: int, target: int) -> Gate | None:
+        if name in {"CRZ", "CP", "CPHASE"}:
+            return Gate("CRZ", [control, target], {"phi": rng.uniform(0.1, 1.2)})
+        if name == "CZ":
+            return Gate("CZ", [control, target])
+        return None
+
+    for layer in range(oracle_layers):
+        active_count = max(1, min(width, len(single_qubit_ops)))
+        if active_count == width:
+            active = list(range(width))
+            rng.shuffle(active)
+        else:
+            active = sorted(rng.sample(range(width), active_count))
+
+        for idx, qubit in enumerate(active):
+            op_name = single_qubit_ops[idx % len(single_qubit_ops)]
+            gate = _build_single(op_name, qubit)
+            if gate is not None:
+                gates.append(gate)
+
+        # Controlled phases couple consecutive active qubits to keep the oracle
+        # sparse yet entangling.
+        if len(active) == 1:
+            neighbour = (active[0] + layer + 1) % width
+            if neighbour != active[0]:
+                gate = _build_pair(pair_ops[0] if pair_ops else "CRZ", active[0], neighbour)
+                if gate is not None:
+                    gates.append(gate)
+        else:
+            pair_names = pair_ops or ["CRZ"]
+            for idx in range(len(active) - 1):
+                control = active[idx]
+                target = active[idx + 1]
+                op_name = pair_names[idx % len(pair_names)]
+                gate = _build_pair(op_name, control, target)
+                if gate is not None:
+                    gates.append(gate)
+
+        # Close the layer with a ring CZ to distribute the phase oracle across
+        # the W state's support.  The additional CZ preserves sparsity but
+        # injects decision-diagram friendly structure when ``width`` is large.
+        control = layer % width
+        target = (control + 1) % width
+        if control != target:
+            gates.append(Gate("CZ", [control, target]))
 
     return Circuit(gates)
 
