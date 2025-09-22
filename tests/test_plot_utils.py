@@ -1,8 +1,11 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 
 from benchmarks.plot_utils import (
+    _annotate_backends,
+    backend_tags,
     compute_baseline_best,
     plot_quasar_vs_baseline_best,
     summarise_speedups,
@@ -90,3 +93,96 @@ def test_compute_baseline_best_handles_all_nan_metrics():
     assert "run_time_mean" in result.columns
     assert "framework" in result.columns
     assert "backend" in result.columns
+
+
+def test_backend_annotations_collapse_per_circuit():
+    df = pd.DataFrame(
+        [
+            {
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "circuit": "qft",
+                "qubits": 3,
+                "run_time_mean": 1.2,
+            },
+            {
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "circuit": "qft",
+                "qubits": 5,
+                "run_time_mean": 0.9,
+            },
+            {
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "circuit": "grover",
+                "qubits": 4,
+                "run_time_mean": 0.7,
+            },
+            {
+                "framework": "TABLEAU",
+                "backend": "TABLEAU",
+                "circuit": "qft",
+                "qubits": 3,
+                "run_time_mean": 0.6,
+            },
+            {
+                "framework": "TABLEAU",
+                "backend": "TABLEAU",
+                "circuit": "grover",
+                "qubits": 4,
+                "run_time_mean": 0.4,
+            },
+            {
+                "framework": "TABLEAU",
+                "backend": "TABLEAU",
+                "circuit": "grover",
+                "qubits": 5,
+                "run_time_mean": 0.35,
+            },
+            {
+                "framework": "quasar",
+                "backend": "TABLEAU",
+                "circuit": "qft",
+                "qubits": 5,
+                "run_time_mean": 0.5,
+            },
+        ]
+    )
+
+    fig, ax = plt.subplots()
+    try:
+        _annotate_backends(
+            ax,
+            df,
+            x_col="qubits",
+            y_col="run_time_mean",
+            backend_col="backend",
+        )
+        tags = backend_tags(df["backend"])
+        inverse_tags = {tag: backend for backend, tag in tags.items()}
+        expected_pairs = {
+            (backend, circuit)
+            for (backend, circuit), group in df.groupby(["backend", "circuit"], sort=False)
+            if not group["run_time_mean"].isna().all()
+        }
+        observed_pairs: set[tuple[str, str]] = set()
+        for annotation in ax.texts:
+            backend = inverse_tags.get(annotation.get_text())
+            if backend is None:
+                continue
+            x_value, y_value = annotation.xy
+            mask = (
+                (df["backend"] == backend)
+                & np.isclose(df["qubits"], x_value)
+                & np.isclose(df["run_time_mean"], y_value)
+            )
+            if not mask.any():
+                continue
+            circuits = df.loc[mask, "circuit"].unique()
+            assert len(circuits) == 1
+            observed_pairs.add((backend, circuits[0]))
+
+        assert observed_pairs == expected_pairs
+    finally:
+        plt.close(fig)

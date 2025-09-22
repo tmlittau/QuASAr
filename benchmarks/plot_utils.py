@@ -3,7 +3,7 @@ from __future__ import annotations
 """Utilities for visualising benchmark results."""
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping, Sequence, Literal, overload
 
 import matplotlib.pyplot as plt
 from matplotlib.legend import Legend
@@ -253,13 +253,44 @@ def _annotate_backends(
     offset: tuple[float, float] = (0.0, 6.0),
     min_pixel_distance: float = 18.0,
 ) -> None:
-    """Annotate each point in ``data`` with a short backend label."""
+    """Annotate each backend once per circuit (or ``x_col``) using compact labels."""
+
+    required = {x_col, y_col, backend_col}
+    if not required.issubset(data.columns):
+        return
+
+    group_columns: list[str] = [backend_col]
+    optional_group = "circuit"
+    if optional_group in data.columns:
+        group_columns.append(optional_group)
+    elif x_col not in group_columns:
+        group_columns.append(x_col)
+
+    subset_cols = list(dict.fromkeys([x_col, y_col, *group_columns]))
+    annotations = data[subset_cols].dropna(subset=[x_col, y_col])
+    if annotations.empty:
+        return
+
+    try:
+        grouped = annotations.groupby(group_columns, dropna=False, sort=False)
+    except TypeError:  # pragma: no cover - older pandas without ``dropna`` keyword
+        grouped = annotations.groupby(group_columns, sort=False)
+
+    candidates: list[pd.Series] = []
+    for _, group in grouped:
+        if group.empty:
+            continue
+        idx = group[y_col].idxmin()
+        candidates.append(group.loc[idx])
+
+    if not candidates:
+        return
 
     if min_pixel_distance <= 0:
         min_pixel_distance = 0.0
-    labels = backend_tags(data[backend_col])
+    labels = backend_tags(annotations[backend_col])
     used_positions: list[tuple[float, float]] = []
-    for _, row in data.iterrows():
+    for row in candidates:
         backend = row.get(backend_col)
         label = labels.get(backend)
         if not label:
@@ -270,7 +301,10 @@ def _annotate_backends(
             continue
         position = ax.transData.transform((x_value, y_value))
         if used_positions and min_pixel_distance > 0:
-            if any(np.hypot(position[0] - px, position[1] - py) < min_pixel_distance for px, py in used_positions):
+            if any(
+                np.hypot(position[0] - px, position[1] - py) < min_pixel_distance
+                for px, py in used_positions
+            ):
                 continue
         used_positions.append(tuple(position))
         ax.annotate(
@@ -689,6 +723,82 @@ def compute_baseline_best(
     return mins
 
 
+@overload
+def plot_quasar_vs_baseline_best(
+    df: pd.DataFrame,
+    *,
+    metric: str = "run_time_mean",
+    annotate_backend: bool = False,
+    ax: plt.Axes | None = None,
+    log_scale: bool = True,
+    show_speedup_table: bool = False,
+    table_ax: plt.Axes | None = None,
+    return_table: Literal[False] = False,
+    return_figure: Literal[False] = False,
+    speedup_metric: str | None = None,
+    palette: Mapping[object, str] | None = None,
+    markers: Mapping[object, str] | None = None,
+) -> plt.Axes:
+    ...
+
+
+@overload
+def plot_quasar_vs_baseline_best(
+    df: pd.DataFrame,
+    *,
+    metric: str = "run_time_mean",
+    annotate_backend: bool = False,
+    ax: plt.Axes | None = None,
+    log_scale: bool = True,
+    show_speedup_table: bool = False,
+    table_ax: plt.Axes | None = None,
+    return_table: Literal[True],
+    return_figure: Literal[False] = False,
+    speedup_metric: str | None = None,
+    palette: Mapping[object, str] | None = None,
+    markers: Mapping[object, str] | None = None,
+) -> tuple[plt.Axes, pd.DataFrame]:
+    ...
+
+
+@overload
+def plot_quasar_vs_baseline_best(
+    df: pd.DataFrame,
+    *,
+    metric: str = "run_time_mean",
+    annotate_backend: bool = False,
+    ax: plt.Axes | None = None,
+    log_scale: bool = True,
+    show_speedup_table: bool = False,
+    table_ax: plt.Axes | None = None,
+    return_table: Literal[False] = False,
+    return_figure: Literal[True],
+    speedup_metric: str | None = None,
+    palette: Mapping[object, str] | None = None,
+    markers: Mapping[object, str] | None = None,
+) -> tuple[plt.Axes, plt.Figure]:
+    ...
+
+
+@overload
+def plot_quasar_vs_baseline_best(
+    df: pd.DataFrame,
+    *,
+    metric: str = "run_time_mean",
+    annotate_backend: bool = False,
+    ax: plt.Axes | None = None,
+    log_scale: bool = True,
+    show_speedup_table: bool = False,
+    table_ax: plt.Axes | None = None,
+    return_table: Literal[True],
+    return_figure: Literal[True],
+    speedup_metric: str | None = None,
+    palette: Mapping[object, str] | None = None,
+    markers: Mapping[object, str] | None = None,
+) -> tuple[plt.Axes, pd.DataFrame, plt.Figure]:
+    ...
+
+
 def plot_quasar_vs_baseline_best(
     df: pd.DataFrame,
     *,
@@ -699,10 +809,11 @@ def plot_quasar_vs_baseline_best(
     show_speedup_table: bool = False,
     table_ax: plt.Axes | None = None,
     return_table: bool = False,
+    return_figure: bool = False,
     speedup_metric: str | None = None,
     palette: Mapping[object, str] | None = None,
     markers: Mapping[object, str] | None = None,
-) -> plt.Axes | tuple[plt.Axes, pd.DataFrame]:
+) -> plt.Axes | tuple[object, ...]:
     """Plot QuASAr against the best baseline backend for ``metric``.
 
     Parameters
@@ -718,11 +829,20 @@ def plot_quasar_vs_baseline_best(
         baseline points.
     ax:
         Optional matplotlib axes to draw on. A new axes is created when omitted.
+    return_table:
+        When ``True`` the helper also returns a dataframe summarising speedups
+        between baseline best and QuASAr for the selected metric.
+    return_figure:
+        When ``True`` include the matplotlib figure in the return value.  This
+        is helpful when the helper created the plot/table stack internally and
+        the caller wishes to adjust layout or persist the figure.
 
     Returns
     -------
-    matplotlib.axes.Axes
-        The axes containing the plot.
+    matplotlib.axes.Axes or tuple of matplotlib objects
+        Returns the plot axes by default.  When ``return_table`` and/or
+        ``return_figure`` are enabled the return value expands to include the
+        requested objects while preserving backward compatible ordering.
     """
 
     default_order = ["baseline_best", "quasar"]
@@ -730,17 +850,22 @@ def plot_quasar_vs_baseline_best(
     markers = markers or backend_markers(default_order)
     setup_benchmark_style(palette=palette)
 
+    figure: plt.Figure | None = None
     if show_speedup_table and table_ax is None and ax is not None:
         raise ValueError("table_ax must be provided when show_speedup_table=True and ax is pre-supplied")
     if show_speedup_table and table_ax is None and ax is None:
-        _, (ax, table_ax) = plt.subplots(
+        figure, (ax, table_ax) = plt.subplots(
             2,
             1,
             gridspec_kw={"height_ratios": [3, 1]},
             sharex=True,
         )
+        figure.set_size_inches(10.5, 6.5)
+        figure.subplots_adjust(hspace=0.35)
     if ax is None:
         ax = plt.gca()
+    if figure is None:
+        figure = ax.figure
 
     baseline_best = compute_baseline_best(df, metrics=[metric])
     quasar = df[df["framework"] == "quasar"]
@@ -852,10 +977,16 @@ def plot_quasar_vs_baseline_best(
         _draw_speedup_table(table_ax, summary, metric=speed_metric)
 
     if summary is not None:
-        ax.figure._quasar_speedup_table = summary  # type: ignore[attr-defined]
+        figure._quasar_speedup_table = summary  # type: ignore[attr-defined]
+
+    outputs: list[object] = [ax]
     if return_table:
-        return ax, (summary if summary is not None else pd.DataFrame())
-    return ax
+        outputs.append(summary if summary is not None else pd.DataFrame())
+    if return_figure:
+        outputs.append(figure)
+    if len(outputs) == 1:
+        return ax
+    return tuple(outputs)
 
 
 __all__ = [
