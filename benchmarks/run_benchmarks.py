@@ -422,8 +422,21 @@ def run_scenarios(
     if df.empty or "framework" not in df.columns:
         return df
     try:
+        baseline_df = df
+        if "scenario" in df.columns:
+            w_mask = df["scenario"] == "w_state_oracle"
+            if w_mask.any():
+                allowed = {
+                    Backend.STATEVECTOR.value,
+                    Backend.DECISION_DIAGRAM.value,
+                    "quasar",
+                }
+                baseline_df = df[
+                    (~w_mask)
+                    | df["framework"].isin(allowed)
+                ].reset_index(drop=True)
         baseline_best = compute_baseline_best(
-            df,
+            baseline_df,
             metrics=(
                 "run_time_mean",
                 "total_time_mean",
@@ -488,6 +501,17 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             "gadget_spacing",
             "ladder_layers",
             "chain_length",
+            "w_state_width",
+            "oracle_layers",
+            "oracle_rotation_gate_count",
+            "oracle_rotation_unique",
+            "oracle_rotation_density",
+            "oracle_rotation_per_layer",
+            "oracle_parameterised_rotations",
+            "oracle_entangling_count",
+            "oracle_entangling_per_layer",
+            "oracle_sparsity",
+            "rotation_set",
         )
         if col in relevant.columns
     ]
