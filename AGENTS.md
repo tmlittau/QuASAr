@@ -13,6 +13,7 @@
 - Avoid placeholders, dummy implementations, or simplified stubs; target production-ready code even if it takes longer.
 - Unsupported gates should be implemented natively without decomposing into other operations.
 - Backend `run` methods should return native representations; only convert to a statevector (or other format) when explicitly required by a conversion layer.
+- Do not commit binary assets (e.g., `.png`, `.pdf`) because Codex cannot process them.
 
 ## Testing
 - Run the full test suite with:
