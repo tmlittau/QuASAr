@@ -716,25 +716,25 @@ def generate_backend_comparison(
     _log_written(auto_path)
 
     combined = pd.concat([forced, auto], ignore_index=True)
-    ax, summary = plot_quasar_vs_baseline_best(
+    ax, summary, fig = plot_quasar_vs_baseline_best(
         combined,
         metric="run_time_mean",
         annotate_backend=True,
         return_table=True,
+        return_figure=True,
         show_speedup_table=True,
     )
     ax.set_title("Runtime comparison versus baseline best")
-    ax.figure.tight_layout()
     png_path = FIGURES_DIR / "backend_vs_baseline.png"
     pdf_path = FIGURES_DIR / "backend_vs_baseline.pdf"
     csv_path = RESULTS_DIR / "backend_vs_baseline_speedups.csv"
-    ax.figure.savefig(png_path)
-    ax.figure.savefig(pdf_path)
+    fig.savefig(png_path)
+    fig.savefig(pdf_path)
     _log_written(png_path)
     _log_written(pdf_path)
     summary.to_csv(csv_path, index=False)
     _log_written(csv_path)
-    plt.close(ax.figure)
+    plt.close(fig)
 
     if not forced.empty and not auto.empty:
         try:
