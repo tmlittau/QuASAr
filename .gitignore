@@ -6,9 +6,5 @@ Pipfile
 Pipfile.lock
 .vscode/
 build/
-benchmark-results/
-benchmarks/figures/*
 !benchmarks/figures/.gitkeep
-!benchmarks/figures/partitioning/
-!benchmarks/figures/partitioning/**
-benchmarks/figures/partitioning/*.png
+benchmarks/results/large_scale_circuits_results.json

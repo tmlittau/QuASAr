@@ -1,7 +1,7 @@
 circuit,qubits,scenario,variant,repetitions,run_time_mean,run_time_std,backend,total_time_mean,total_time_std,run_peak_memory_mean,run_peak_memory_std,framework,prepare_time_mean,prepare_time_std,prepare_peak_memory_mean,prepare_peak_memory_std,failed,conversion_count,conversion_boundary_mean,conversion_rank_mean,conversion_frontier_mean,conversion_primitive_summary,clifford_qubits,core_qubits,suffix_qubits,prefix_core_boundary,core_suffix_boundary,cross_layers,suffix_sparsity,total_qubits,unsupported,error
-staged_partition_circuit,9.0,staged_rank,staged_rank_1,1.0,0.0022893440000189003,0.0,dd,0.019093048999820894,0.0,13737.0,0.0,baseline_best,,,,,,,,,,,,,,,,,,,,
-staged_partition_circuit,9.0,staged_rank,staged_rank_2,1.0,0.002343151999866677,0.0,dd,0.0199235499999304,0.0,10393.0,0.0,baseline_best,,,,,,,,,,,,,,,,,,,,
-staged_partition_circuit,9.0,staged_rank,staged_rank_3,1.0,0.002702538999983517,0.0,dd,0.02561694699988948,0.0,12038.0,0.0,baseline_best,,,,,,,,,,,,,,,,,,,,
-staged_partition_circuit,9.0,staged_rank,staged_rank_1,1.0,0.00664060300005076,0.0,mps,2.3824565169998095,0.0,41858.0,0.0,quasar,2.3758159139997588,0.0,328195.0,0.0,False,0.0,,,,,4.0,3.0,2.0,2.0,1.0,1.0,0.6,9.0,,
-staged_partition_circuit,9.0,staged_rank,staged_rank_2,1.0,0.007440154999585502,0.0,mps,2.9591289889995096,0.0,39095.0,0.0,quasar,2.951688833999924,0.0,383113.0,0.0,False,0.0,,,,,4.0,3.0,2.0,2.0,1.0,2.0,0.6,9.0,,
-staged_partition_circuit,9.0,staged_rank,staged_rank_3,1.0,0.009446261999983108,0.0,mps,4.398854029999711,0.0,42125.0,0.0,quasar,4.389407767999728,0.0,440161.0,0.0,False,0.0,,,,,4.0,3.0,2.0,2.0,1.0,3.0,0.6,9.0,,
+staged_partition_circuit,9.0,staged_rank,staged_rank_1,1.0,0.0007420479996653739,0.0,dd,0.006211605999851599,0.0,14971.0,0.0,baseline_best,,,,,,,,,,,,,,,,,,,,
+staged_partition_circuit,9.0,staged_rank,staged_rank_2,1.0,0.000826063000204158,0.0,dd,0.005827766000948031,0.0,10786.0,0.0,baseline_best,,,,,,,,,,,,,,,,,,,,
+staged_partition_circuit,9.0,staged_rank,staged_rank_3,1.0,0.0009515609999652952,0.0,dd,0.0061067030001140665,0.0,11978.0,0.0,baseline_best,,,,,,,,,,,,,,,,,,,,
+staged_partition_circuit,9.0,staged_rank,staged_rank_1,1.0,0.0025761289998627035,0.0,mps,0.9114611380009592,0.0,38341.0,0.0,quasar,0.9088850090010965,0.0,328051.0,0.0,False,0.0,,,,,4.0,3.0,2.0,2.0,1.0,1.0,0.6,9.0,,
+staged_partition_circuit,9.0,staged_rank,staged_rank_2,1.0,0.003042626000024029,0.0,mps,1.1563628450003307,0.0,39567.0,0.0,quasar,1.1533202190003067,0.0,381745.0,0.0,False,0.0,,,,,4.0,3.0,2.0,2.0,1.0,2.0,0.6,9.0,,
+staged_partition_circuit,9.0,staged_rank,staged_rank_3,1.0,0.0036112819998379564,0.0,mps,1.4964995969985466,0.0,41701.0,0.0,quasar,1.4928883149987087,0.0,438737.0,0.0,False,0.0,,,,,4.0,3.0,2.0,2.0,1.0,3.0,0.6,9.0,,

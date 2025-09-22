@@ -6,11 +6,7904 @@
     2,
     8
   ],
-  "circuits": [
-    "GHZ_6",
-    "WState_6",
-    "RandomHybrid_6",
-    "MixedSubsystems",
-    "HybridDenseToMPS"
-  ]
+  "circuits": {
+    "GHZ_6": {
+      "use_classical_simplification": true,
+      "gates": [
+        {
+          "gate": "H",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            0,
+            1
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            1,
+            2
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            2,
+            3
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            3,
+            4
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            4,
+            5
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        }
+      ],
+      "num_qubits": 6,
+      "classical_state": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "num_gates": 6,
+      "depth": 6,
+      "sparsity": 0.96875,
+      "symmetry": 0.16666666666666666,
+      "phase_rotation_diversity": 0,
+      "amplitude_rotation_diversity": 0,
+      "rotation_diversity": 0,
+      "cost_estimates": {
+        "statevector": {
+          "time": 496.009,
+          "memory": 87280.0,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "tableau": {
+          "time": 1149.1200000000001,
+          "memory": 23.94,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "mps": {
+          "time": 4856.4175000000005,
+          "memory": 56149.2,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "decision_diagram": {
+          "time": 25.897242871556504,
+          "memory": 165.74235437796162,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        }
+      }
+    },
+    "WState_6": {
+      "use_classical_simplification": true,
+      "gates": [
+        {
+          "gate": "RY",
+          "qubits": [
+            0
+          ],
+          "params": {
+            "theta": 2.300523983021863
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "decision_diagram",
+            "statevector"
+          ],
+          "resource_estimates": {
+            "decision_diagram": {
+              "time": 0.0675,
+              "memory": 2.5920000000000005,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            },
+            "statevector": {
+              "time": 2.009,
+              "memory": 86040.0,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CRY",
+          "qubits": [
+            0,
+            1
+          ],
+          "params": {
+            "theta": 2.214297435588181
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "decision_diagram",
+            "statevector"
+          ],
+          "resource_estimates": {
+            "decision_diagram": {
+              "time": 0.15547368752524046,
+              "memory": 5.970189600969234,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            },
+            "statevector": {
+              "time": 5.409000000000001,
+              "memory": 86080.0,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CRY",
+          "qubits": [
+            1,
+            2
+          ],
+          "params": {
+            "theta": 2.0943951023931957
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "decision_diagram",
+            "statevector"
+          ],
+          "resource_estimates": {
+            "decision_diagram": {
+              "time": 0.4041654376838948,
+              "memory": 15.51995280706156,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            },
+            "statevector": {
+              "time": 10.809000000000001,
+              "memory": 86160.0,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CRY",
+          "qubits": [
+            2,
+            3
+          ],
+          "params": {
+            "theta": 1.9106332362490186
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "decision_diagram",
+            "statevector"
+          ],
+          "resource_estimates": {
+            "decision_diagram": {
+              "time": 0.7250699332842307,
+              "memory": 27.84268543811446,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            },
+            "statevector": {
+              "time": 21.609,
+              "memory": 86320.0,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CRY",
+          "qubits": [
+            3,
+            4
+          ],
+          "params": {
+            "theta": 1.5707963267948966
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "decision_diagram",
+            "statevector"
+          ],
+          "resource_estimates": {
+            "decision_diagram": {
+              "time": 1.1056655160041309,
+              "memory": 42.457555814558624,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            },
+            "statevector": {
+              "time": 43.209,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            4,
+            5
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            3,
+            4
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            2,
+            3
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            1,
+            2
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            0,
+            1
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "X",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        }
+      ],
+      "num_qubits": 6,
+      "classical_state": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "num_gates": 11,
+      "depth": 11,
+      "sparsity": 0.90625,
+      "symmetry": 0.09090909090909091,
+      "phase_rotation_diversity": 0,
+      "amplitude_rotation_diversity": 5,
+      "rotation_diversity": 0,
+      "cost_estimates": {
+        "statevector": {
+          "time": 905.609,
+          "memory": 87280.0,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "tableau": {
+          "time": 2542.32,
+          "memory": 28.89,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "mps": {
+          "time": 8758.5775,
+          "memory": 56149.2,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "decision_diagram": {
+          "time": 60.629258892333404,
+          "memory": 211.65123104232754,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        }
+      }
+    },
+    "RandomHybrid_6": {
+      "use_classical_simplification": true,
+      "gates": [
+        {
+          "gate": "H",
+          "qubits": [
+            1
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            2
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16.009,
+              "memory": 86320.0,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            1
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            2
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            3,
+            1
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16.009,
+              "memory": 86320.0,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            1
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            2
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            1,
+            3
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            1
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            2
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            2,
+            3
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            1
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            2
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            2,
+            4
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2.009,
+              "memory": 86040.0,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            1
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            2
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "S",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            2,
+            5
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            3
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16.009,
+              "memory": 86320.0,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        }
+      ],
+      "num_qubits": 6,
+      "classical_state": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "num_gates": 43,
+      "depth": 13,
+      "sparsity": 0.0,
+      "symmetry": 0.38461538461538464,
+      "phase_rotation_diversity": 0,
+      "amplitude_rotation_diversity": 0,
+      "rotation_diversity": 0,
+      "cost_estimates": {
+        "statevector": {
+          "time": 2864.009,
+          "memory": 87280.0,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "tableau": {
+          "time": 20836.08,
+          "memory": 60.57000000000001,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "mps": {
+          "time": 8008.8175,
+          "memory": 56149.2,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "decision_diagram": {
+          "time": 360.92822313977473,
+          "memory": 322.31729694342675,
+          "log_depth": 2.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        }
+      }
+    },
+    "MixedSubsystems": {
+      "use_classical_simplification": false,
+      "gates": [
+        {
+          "gate": "H",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            0,
+            1
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            1,
+            2
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            2,
+            3
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            3,
+            4
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            6
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 205.24,
+              "memory": 25.655,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            7
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            4,
+            5
+          ],
+          "params": {
+            "theta": 1.3761868391255283
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 86.409,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            5,
+            6
+          ],
+          "params": {
+            "theta": 1.6554082038092892
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 172.809,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            6,
+            7
+          ],
+          "params": {
+            "theta": 2.602947518461696
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 345.60900000000004,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            3,
+            4
+          ],
+          "params": {
+            "theta": 0.7622150771097507
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 43.209,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 1.3696031826556778
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 1.5684620721247424
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 0.5616508596371915
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 1.3797715976045137
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            4,
+            5
+          ],
+          "params": {
+            "theta": 1.8376950725636847
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 86.409,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            5,
+            6
+          ],
+          "params": {
+            "theta": 2.2617398685518766
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 172.809,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            6,
+            7
+          ],
+          "params": {
+            "theta": 0.444720986195968
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 345.60900000000004,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            3,
+            4
+          ],
+          "params": {
+            "theta": 0.583741388886978
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 43.209,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 0.32667634372959853
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 2.1241113359179438
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 1.8335962063530977
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 0.20470084092461502
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 1.328632104958534
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "phi": 1.2094714482944018
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 0.9347070402406087
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "phi": 0.8078971102653563
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 0.33899291416819494
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "phi": 0.11725084749204565
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 0.7840575194045746
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "phi": 0.1684837709441832
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            6,
+            7
+          ],
+          "params": {
+            "theta": 0.39020826279792914
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 345.60900000000004,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            7,
+            8
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            7,
+            8
+          ],
+          "params": {
+            "theta": 0.5661373150317361
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 5.948624180103371
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            9
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 413.2,
+              "memory": 51.65,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            10
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            10,
+            8
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            8
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 0.7230650829173504
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 5.631677887548586
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            8,
+            10
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            9,
+            8
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 413.2,
+              "memory": 51.65,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            11,
+            9
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 5.827759307084684
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 1.6259067069801105
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 4.212941558889255
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            10,
+            9
+          ],
+          "params": {
+            "theta": 0.4043587630605736
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            10,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            9,
+            8
+          ],
+          "params": {
+            "theta": 1.3784676130458824
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1382.409,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 4.9823779361778024
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 4.893596622835481
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 1.2650860475349124
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 4.797997943405111
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            10
+          ],
+          "params": {
+            "theta": 0.8487820728965132
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 2.632698927670348
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 2.035092632636993
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 4.903289751060482
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            10,
+            8
+          ],
+          "params": {
+            "theta": 4.470196504596145
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            9,
+            10
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 5.6930928599962325
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 1.39621110079262
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            10
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 5.925776844875171
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            9,
+            10
+          ],
+          "params": {
+            "theta": 4.669977324595263
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            11,
+            9
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            10,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 4.315041058026253
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 3.8734381098314867
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            10
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 1.829080158527745
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            10,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            8
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 4.7965972589329855
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 5.523292769931434
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 1.5124939549959957
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            10,
+            11
+          ],
+          "params": {
+            "theta": 0.4285332307834998
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 5529.609,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            8,
+            10
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            11,
+            8
+          ],
+          "params": {
+            "theta": 1.9486713533774285
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 5529.609,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            11
+          ],
+          "params": {
+            "theta": 0.3830908481472674
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 5529.609,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            10,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "TDG",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            8,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            10,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "TDG",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            8,
+            11
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            10
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            8,
+            10
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "T",
+          "qubits": [
+            8
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "TDG",
+          "qubits": [
+            10
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            8,
+            10
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CRZ",
+          "qubits": [
+            9,
+            10
+          ],
+          "params": {
+            "phi": 0.6175410151009562
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        }
+      ],
+      "num_qubits": 12,
+      "classical_state": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "num_gates": 102,
+      "depth": 55,
+      "sparsity": 0.0,
+      "symmetry": 0.09090909090909091,
+      "phase_rotation_diversity": 5,
+      "amplitude_rotation_diversity": 34,
+      "rotation_diversity": 5,
+      "cost_estimates": {
+        "statevector": {
+          "time": 475136.009,
+          "memory": 167920.0,
+          "log_depth": 3.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "tableau": {
+          "time": 223551.36000000002,
+          "memory": 273.96000000000004,
+          "log_depth": 3.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "mps": {
+          "time": 98259.54477272728,
+          "memory": 56247.4,
+          "log_depth": 3.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "decision_diagram": {
+          "time": 3367.0280544775583,
+          "memory": 1267.5870322739042,
+          "log_depth": 3.584962500721156,
+          "conversion": 0.0,
+          "replay": 0.0
+        }
+      }
+    },
+    "HybridDenseToMPS": {
+      "use_classical_simplification": false,
+      "gates": [
+        {
+          "gate": "H",
+          "qubits": [
+            0
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 5.32,
+              "memory": 0.665,
+              "log_depth": 0.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            0,
+            1
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 18.64,
+              "memory": 2.33,
+              "log_depth": 1.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            1,
+            2
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 39.959999999999994,
+              "memory": 4.994999999999999,
+              "log_depth": 1.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            2,
+            3
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 69.28,
+              "memory": 8.66,
+              "log_depth": 2.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            3,
+            4
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 2.1568344855939245
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 2.318917858443646
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 6.204299853987697
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 3.975724915070941
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 2.073221534784119
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            7,
+            6
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            6,
+            4
+          ],
+          "params": {
+            "theta": 0.05589399463576999
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 172.809,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            7,
+            8
+          ],
+          "params": {
+            "theta": 4.933625962675845
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            6
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 205.24,
+              "memory": 25.655,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            7
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 2.717445046022292
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            6,
+            7
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            7,
+            4
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            8,
+            7
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            4
+          ],
+          "params": {
+            "theta": 0.8775028086530158
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 3.6872839890723323
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 2.0052754642507913
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 5.572962256751853
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 2.853418767671647
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 6.097763181508315
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            4,
+            5
+          ],
+          "params": {
+            "theta": 2.273605295563023
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 86.409,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            5,
+            7
+          ],
+          "params": {
+            "theta": 0.4115282057725273
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 345.60900000000004,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            6,
+            8
+          ],
+          "params": {
+            "theta": 5.6216591437185075
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            4
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 106.60000000000001,
+              "memory": 13.325000000000001,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 4.870433805894126
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            7
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 0.03338356022383187
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            7
+          ],
+          "params": {
+            "theta": 6.117465919179023
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            4,
+            5
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 0.5768537366517928
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 1.7232928050497958
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 2.6285255284302966
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 3.410097850821501
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            8
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            6,
+            7
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            6,
+            5
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 205.24,
+              "memory": 25.655,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            7,
+            4
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 3.3532207966394583
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 3.9639514423950937
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 2.498001371487911
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            7
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 1.24773705530899
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            7,
+            6
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            7,
+            4
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 5.246290830667461
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            5
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 151.92000000000002,
+              "memory": 18.990000000000002,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            6
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 205.24,
+              "memory": 25.655,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 5.077941578374623
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 5.480459507178002
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            7,
+            5
+          ],
+          "params": {
+            "theta": 0.9734744948960137
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 345.60900000000004,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 6.012727923258294
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 1.6523715808677104
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 6.015120373277499
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 0.5324605290788273
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            8
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            6,
+            8
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 335.88,
+              "memory": 41.985,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            4,
+            7
+          ],
+          "params": {
+            "theta": 1.167843694303719
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 345.60900000000004,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            5
+          ],
+          "params": {
+            "theta": 4.849493835001156
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            4
+          ],
+          "params": {
+            "theta": 2.8959458201721846
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 0.785228723107959
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 6.076942557893527
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 1.1615756356340807
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            7
+          ],
+          "params": {
+            "theta": 0.741858202246989
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 256.009,
+              "memory": 91120.0,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 3.6218010636269025
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            4,
+            8
+          ],
+          "params": {
+            "theta": 5.477190451127123
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 691.2090000000001,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            4
+          ],
+          "params": {
+            "theta": 4.445375859489027
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 32.009,
+              "memory": 86640.0,
+              "log_depth": 2.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            5
+          ],
+          "params": {
+            "theta": 1.631192712143706
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 64.009,
+              "memory": 87280.0,
+              "log_depth": 2.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            6
+          ],
+          "params": {
+            "theta": 5.479594069873989
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 128.009,
+              "memory": 88560.0,
+              "log_depth": 2.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            7
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            8
+          ],
+          "params": {
+            "theta": 4.926227438909661
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 512.009,
+              "memory": 96240.0,
+              "log_depth": 3.169925001442312,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CX",
+          "qubits": [
+            4,
+            7
+          ],
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 266.56,
+              "memory": 33.32,
+              "log_depth": 3.0,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "CZ",
+          "qubits": [
+            8,
+            9
+          ],
+          "entanglement": "creates",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 413.2,
+              "memory": 51.65,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            9
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 413.2,
+              "memory": 51.65,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            10
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 498.52000000000004,
+              "memory": 62.315000000000005,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            11
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 591.8399999999999,
+              "memory": 73.97999999999999,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            12
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 693.16,
+              "memory": 86.645,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "H",
+          "qubits": [
+            13
+          ],
+          "entanglement": "none",
+          "compatible_methods": [
+            "tableau"
+          ],
+          "resource_estimates": {
+            "tableau": {
+              "time": 802.48,
+              "memory": 100.31,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            9,
+            10
+          ],
+          "params": {
+            "theta": 1.0097722033566126
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            10,
+            11
+          ],
+          "params": {
+            "theta": 1.1643230860389482
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 5529.609,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            11,
+            12
+          ],
+          "params": {
+            "theta": 1.2337516352354057
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 11059.209,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            12,
+            13
+          ],
+          "params": {
+            "theta": 1.4251853689101655
+          },
+          "entanglement": "creates",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 22118.409,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            9
+          ],
+          "params": {
+            "theta": 1.16186814716191
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1382.409,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 2.313579991997001
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 0.16961254788067537
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 1.2174943705074528
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            12
+          ],
+          "params": {
+            "theta": 2.364056120795953
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 8192.009,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            13
+          ],
+          "params": {
+            "theta": 1.657538927528618
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16384.009,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            9,
+            10
+          ],
+          "params": {
+            "theta": 1.3711706392758094
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            10,
+            11
+          ],
+          "params": {
+            "theta": 0.34716775404908773
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 5529.609,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            11,
+            12
+          ],
+          "params": {
+            "theta": 0.8097897621168129
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 11059.209,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            12,
+            13
+          ],
+          "params": {
+            "theta": 0.5205446824057794
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 22118.409,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            9
+          ],
+          "params": {
+            "theta": 0.9068891170067095
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1382.409,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 1.477458851027442
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 0.1314740550133653
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 0.6201515211132356
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            12
+          ],
+          "params": {
+            "theta": 0.7707576784266648
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 8192.009,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            13
+          ],
+          "params": {
+            "theta": 2.2992288923405244
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16384.009,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            9,
+            10
+          ],
+          "params": {
+            "theta": 1.1954430871178843
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2764.809,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            10,
+            11
+          ],
+          "params": {
+            "theta": 0.4074854760654497
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 5529.609,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            11,
+            12
+          ],
+          "params": {
+            "theta": 1.2362910888605658
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 11059.209,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            12,
+            13
+          ],
+          "params": {
+            "theta": 0.3803976439185741
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 22118.409,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZZ",
+          "qubits": [
+            8,
+            9
+          ],
+          "params": {
+            "theta": 1.0026882766059517
+          },
+          "entanglement": "modifies",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1382.409,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 0.4040781581206473
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 0.10425966928608316
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 2.191371387338277
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            12
+          ],
+          "params": {
+            "theta": 0.6026953179882829
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 8192.009,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RX",
+          "qubits": [
+            13
+          ],
+          "params": {
+            "theta": 0.6171548061393574
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16384.009,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "theta": 1.1806632197085178
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            9
+          ],
+          "params": {
+            "phi": 1.059648541980482
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 1024.009,
+              "memory": 106480.0,
+              "log_depth": 3.321928094887362,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "theta": 0.4182356845216191
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            10
+          ],
+          "params": {
+            "phi": 1.1576257878450917
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 2048.009,
+              "memory": 126960.0,
+              "log_depth": 3.4594316186372973,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "theta": 0.6931458157578916
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            11
+          ],
+          "params": {
+            "phi": 0.8456135249756515
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 4096.009,
+              "memory": 167920.0,
+              "log_depth": 3.584962500721156,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            12
+          ],
+          "params": {
+            "theta": 0.3252574659871721
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 8192.009,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            12
+          ],
+          "params": {
+            "phi": 1.135073601196799
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 8192.009,
+              "memory": 249840.0,
+              "log_depth": 3.700439718141092,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RY",
+          "qubits": [
+            13
+          ],
+          "params": {
+            "theta": 0.859706135217599
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16384.009,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        },
+        {
+          "gate": "RZ",
+          "qubits": [
+            13
+          ],
+          "params": {
+            "phi": 1.163220743548915
+          },
+          "entanglement": "none",
+          "compatible_methods": [
+            "statevector"
+          ],
+          "resource_estimates": {
+            "statevector": {
+              "time": 16384.009,
+              "memory": 413680.0,
+              "log_depth": 3.807354922057604,
+              "conversion": 0.0,
+              "replay": 0.0
+            }
+          }
+        }
+      ],
+      "num_qubits": 14,
+      "classical_state": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "num_gates": 125,
+      "depth": 46,
+      "sparsity": 0.0,
+      "symmetry": 0.06521739130434782,
+      "phase_rotation_diversity": 5,
+      "amplitude_rotation_diversity": 57,
+      "rotation_diversity": 5,
+      "cost_estimates": {
+        "statevector": {
+          "time": 2300313.609,
+          "memory": 413680.0,
+          "log_depth": 3.807354922057604,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "tableau": {
+          "time": 386750.0,
+          "memory": 386.75,
+          "log_depth": 3.807354922057604,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "mps": {
+          "time": 130318.65925824175,
+          "memory": 56279.71428571428,
+          "log_depth": 3.807354922057604,
+          "conversion": 0.0,
+          "replay": 0.0
+        },
+        "decision_diagram": {
+          "time": 5502.896629554665,
+          "memory": 1690.489844599193,
+          "log_depth": 3.807354922057604,
+          "conversion": 0.0,
+          "replay": 0.0
+        }
+      }
+    }
+  },
+  "records": [
+    {
+      "circuit": "GHZ_6",
+      "alpha": 0.01,
+      "backend": "TABLEAU",
+      "steps": [
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU"
+      ]
+    },
+    {
+      "circuit": "GHZ_6",
+      "alpha": 0.1,
+      "backend": "TABLEAU",
+      "steps": [
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU"
+      ]
+    },
+    {
+      "circuit": "GHZ_6",
+      "alpha": 0.5,
+      "backend": "TABLEAU",
+      "steps": [
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU"
+      ]
+    },
+    {
+      "circuit": "GHZ_6",
+      "alpha": 2,
+      "backend": "TABLEAU",
+      "steps": [
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU"
+      ]
+    },
+    {
+      "circuit": "GHZ_6",
+      "alpha": 8,
+      "backend": "TABLEAU",
+      "steps": [
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU",
+        "TABLEAU"
+      ]
+    },
+    {
+      "circuit": "WState_6",
+      "alpha": 0.01,
+      "backend": "DECISION_DIAGRAM",
+      "steps": [
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM"
+      ]
+    },
+    {
+      "circuit": "WState_6",
+      "alpha": 0.1,
+      "backend": "DECISION_DIAGRAM",
+      "steps": [
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM"
+      ]
+    },
+    {
+      "circuit": "WState_6",
+      "alpha": 0.5,
+      "backend": "DECISION_DIAGRAM",
+      "steps": [
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM"
+      ]
+    },
+    {
+      "circuit": "WState_6",
+      "alpha": 2,
+      "backend": "DECISION_DIAGRAM",
+      "steps": [
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM"
+      ]
+    },
+    {
+      "circuit": "WState_6",
+      "alpha": 8,
+      "backend": "DECISION_DIAGRAM",
+      "steps": [
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM",
+        "DECISION_DIAGRAM"
+      ]
+    },
+    {
+      "circuit": "RandomHybrid_6",
+      "alpha": 0.01,
+      "backend": "MPS",
+      "steps": [
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "RandomHybrid_6",
+      "alpha": 0.1,
+      "backend": "MPS",
+      "steps": [
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "RandomHybrid_6",
+      "alpha": 0.5,
+      "backend": "MPS",
+      "steps": [
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "RandomHybrid_6",
+      "alpha": 2,
+      "backend": "MPS",
+      "steps": [
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "RandomHybrid_6",
+      "alpha": 8,
+      "backend": "MPS",
+      "steps": [
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "MixedSubsystems",
+      "alpha": 0.01,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "MixedSubsystems",
+      "alpha": 0.1,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "MixedSubsystems",
+      "alpha": 0.5,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "MixedSubsystems",
+      "alpha": 2,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "MixedSubsystems",
+      "alpha": 8,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "HybridDenseToMPS",
+      "alpha": 0.01,
+      "backend": "MPS",
+      "steps": [
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "HybridDenseToMPS",
+      "alpha": 0.1,
+      "backend": "MPS",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "MPS",
+        "MPS"
+      ]
+    },
+    {
+      "circuit": "HybridDenseToMPS",
+      "alpha": 0.5,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "HybridDenseToMPS",
+      "alpha": 2,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    },
+    {
+      "circuit": "HybridDenseToMPS",
+      "alpha": 8,
+      "backend": "STATEVECTOR",
+      "steps": [
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR",
+        "STATEVECTOR"
+      ]
+    }
+  ],
+  "name": "HybridDenseToMPS",
+  "alpha": 8,
+  "backend_labels": [
+    "TABLEAU",
+    "DECISION_DIAGRAM",
+    "MPS",
+    "STATEVECTOR"
+  ],
+  "backend_to_code": {
+    "TABLEAU": 0,
+    "DECISION_DIAGRAM": 1,
+    "MPS": 2,
+    "STATEVECTOR": 3
+  },
+  "backend_label_map": {
+    "TABLEAU": "TAB",
+    "DECISION_DIAGRAM": "DD",
+    "MPS": "MPS",
+    "STATEVECTOR": "SV"
+  },
+  "backend_abbrev": {
+    "TABLEAU": "TAB",
+    "DECISION_DIAGRAM": "DD",
+    "MPS": "MPS",
+    "STATEVECTOR": "SV"
+  },
+  "backend_display_labels": [
+    "TAB",
+    "DD",
+    "MPS",
+    "SV"
+  ],
+  "nb_name": "plan_choice_heatmap"
 }

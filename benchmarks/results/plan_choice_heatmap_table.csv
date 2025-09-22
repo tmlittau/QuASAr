@@ -1,3 +1,6 @@
-circuit,0.5,1.0,2.0,5.0
-GHZ_6,Tableau,Tableau,Tableau,Tableau
-Grover_3,MPS,MPS,MPS,MPS
+circuit,0.01,0.1,0.5,2.0,8.0
+GHZ_6,Tableau,Tableau,Tableau,Tableau,Tableau
+HybridDenseToMPS,MPS,MPS,Statevector,Statevector,Statevector
+MixedSubsystems,Statevector,Statevector,Statevector,Statevector,Statevector
+RandomHybrid_6,MPS,MPS,MPS,MPS,MPS
+WState_6,DD,DD,DD,DD,DD
