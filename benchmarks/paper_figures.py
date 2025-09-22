@@ -805,8 +805,12 @@ def generate_heatmap() -> None:
     LOGGER.info("Generating plan-choice heatmap from %s", results_path)
     df = pd.DataFrame(data)
     df["selected_backend"] = df["steps"].apply(lambda steps: steps[-1] if steps else None)
-    labels = backend_labels(df["selected_backend"].dropna().unique())
-    df["label"] = df["selected_backend"].map(lambda name: labels.get(name, name))
+    unique_backends = df["selected_backend"].dropna().unique()
+    labels = backend_labels(unique_backends)
+    short_labels = backend_labels(unique_backends, abbreviated=True)
+    df["label"] = df["selected_backend"].map(
+        lambda name: short_labels.get(name, labels.get(name, name))
+    )
 
     pivot = df.pivot(index="circuit", columns="alpha", values="selected_backend")
     annot = df.pivot(index="circuit", columns="alpha", values="label")
