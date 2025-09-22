@@ -29,17 +29,28 @@ class BackendStyle:
     marker: str
     label: str
     tag: str | None = None
+    short_label: str | None = None
 
 
 _DEFAULT_BACKEND_STYLES: Mapping[str, BackendStyle] = {
-    "quasar": BackendStyle("#1b9e77", "o", "QuASAr", "QA"),
-    "baseline_best": BackendStyle("#264653", "s", "Baseline best", "BB"),
-    "sv": BackendStyle("#1f77b4", "o", "Statevector", "SV"),
-    "tab": BackendStyle("#ff7f0e", "^", "Tableau", "TB"),
-    "mps": BackendStyle("#2ca02c", "D", "MPS", "MPS"),
-    "dd": BackendStyle("#d62728", "s", "DD", "DD"),
-    "stim": BackendStyle("#9467bd", "P", "Stim", "ST"),
-    "mqt_dd": BackendStyle("#8c564b", "s", "MQT-DD", "MQ"),
+    "quasar": BackendStyle(
+        "#1b9e77", "o", "QuASAr", tag="QA", short_label="QuASAr"
+    ),
+    "baseline_best": BackendStyle(
+        "#264653", "s", "Baseline best", tag="BB", short_label="Baseline"
+    ),
+    "sv": BackendStyle(
+        "#1f77b4", "o", "Statevector", tag="SV", short_label="SV"
+    ),
+    "tab": BackendStyle(
+        "#ff7f0e", "^", "Tableau", tag="Tab", short_label="Tab"
+    ),
+    "mps": BackendStyle("#2ca02c", "D", "MPS", tag="MPS", short_label="MPS"),
+    "dd": BackendStyle("#d62728", "s", "DD", tag="DD", short_label="DD"),
+    "stim": BackendStyle("#9467bd", "P", "Stim", tag="ST", short_label="Stim"),
+    "mqt_dd": BackendStyle(
+        "#8c564b", "s", "MQT-DD", tag="MQ", short_label="MQT-DD"
+    ),
 }
 
 
@@ -214,16 +225,34 @@ def backend_markers(order: Iterable[object] | None = None) -> Mapping[object, st
     return markers
 
 
-def backend_labels(order: Iterable[object] | None = None) -> Mapping[object, str]:
-    """Return short, publication friendly labels for backends."""
+def backend_labels(
+    order: Iterable[object] | None = None,
+    *,
+    abbreviated: bool = False,
+) -> Mapping[object, str]:
+    """Return publication friendly labels for backends.
+
+    Parameters
+    ----------
+    order:
+        Optional iterable specifying the backends to include.  When omitted
+        the helper returns all known backends in their default ordering.
+    abbreviated:
+        When set, prefer compact identifiers such as ``"Tab"`` for Tableau in
+        place of the full backend names.  ``backend_labels`` falls back to the
+        full label if a backend does not define a short variant.
+    """
 
     if order is None:
         order = _DEFAULT_BACKEND_STYLES.keys()
     labels: dict[object, str] = {}
     for backend in order:
         style = _style_for_backend(backend)
-        if style is not None:
-            labels[backend] = style.label
+        if style is None:
+            continue
+        label = style.short_label if abbreviated and style.short_label else style.label
+        if label:
+            labels[backend] = label
     return labels
 
 
