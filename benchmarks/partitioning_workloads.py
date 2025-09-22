@@ -10,11 +10,13 @@ from quasar.circuit import Circuit
 try:  # Allow execution via `python benchmarks/run_benchmarks.py`
     from .large_scale_circuits import (
         dense_to_clifford_partition_circuit,
+        dual_magic_injection_circuit,
         staged_partition_circuit,
     )
 except ImportError:  # pragma: no cover - fallback for script execution
     from large_scale_circuits import (  # type: ignore
         dense_to_clifford_partition_circuit,
+        dual_magic_injection_circuit,
         staged_partition_circuit,
     )
 
@@ -159,10 +161,57 @@ def _staged_sparsity_sweep() -> List[WorkloadInstance]:
     return instances
 
 
+def _dual_magic_injection_sweep() -> List[WorkloadInstance]:
+    patch_distance = 8
+    gadget = "t_bridge"
+    scheme = "repetition"
+    boundary_widths = [6, 7, 8]
+    stabilizer_depths = [2, 4]
+    instances: List[WorkloadInstance] = []
+    variant = 1
+    for boundary_width in boundary_widths:
+        for stabilizer_rounds in stabilizer_depths:
+            params = {
+                "patch_distance": patch_distance,
+                "stabilizer_rounds": stabilizer_rounds,
+                "gadget_width": boundary_width,
+                "gadget": gadget,
+                "scheme": scheme,
+            }
+            preview = dual_magic_injection_circuit(**params)
+            total_qubits = getattr(preview, "num_qubits", None)
+            if total_qubits is None:
+                total_qubits = preview.num_qubits if hasattr(preview, "num_qubits") else 0
+            data_qubits = patch_distance if scheme == "repetition" else patch_distance * patch_distance
+            gadget_qubits = min(boundary_width, data_qubits)
+            metadata = {
+                "patch_distance": patch_distance,
+                "boundary_width": boundary_width,
+                "gadget_width": gadget_qubits,
+                "stabilizer_rounds": stabilizer_rounds,
+                "gadget": gadget,
+                "scheme": scheme,
+                "total_qubits": total_qubits,
+            }
+            instances.append(
+                WorkloadInstance(
+                    scenario="dual_magic_injection",
+                    variant=f"dual_magic_injection_{variant}",
+                    builder=dual_magic_injection_circuit,
+                    parameters=params,
+                    metadata=metadata,
+                    enable_classical_simplification=False,
+                )
+            )
+            variant += 1
+    return instances
+
+
 SCENARIOS: Dict[str, Callable[[], List[WorkloadInstance]]] = {
     "tableau_boundary": _tableau_boundary_sweep,
     "staged_rank": _staged_rank_sweep,
     "staged_sparsity": _staged_sparsity_sweep,
+    "dual_magic_injection": _dual_magic_injection_sweep,
 }
 
 

@@ -1,0 +1,8 @@
+scenario,variant,circuit,qubits,total_qubits,patch_distance,boundary_width,gadget_width,stabilizer_rounds,gadget,scheme,baseline_runtime_mean,baseline_backend,baseline_peak_memory_mean,quasar_runtime_mean,quasar_peak_memory_mean,quasar_backend,quasar_conversions,quasar_boundary_mean,quasar_rank_mean,quasar_frontier_mean,quasar_conversion_primitives,runtime_speedup
+dual_magic_injection,dual_magic_injection_1,dual_magic_injection_circuit,36.0,36.0,8.0,6.0,6.0,2.0,t_bridge,repetition,0.001157546998001635,dd,5350.0,0.0013184220006223768,5442.0,dd,0.0,,,,,0.8779791276656497
+dual_magic_injection,dual_magic_injection_2,dual_magic_injection_circuit,36.0,36.0,8.0,6.0,6.0,4.0,t_bridge,repetition,0.0011836500016215723,dd,5488.0,0.0011294530013401527,5396.0,dd,0.0,,,,,1.0479851753168234
+dual_magic_injection,dual_magic_injection_3,dual_magic_injection_circuit,37.0,37.0,8.0,7.0,7.0,2.0,t_bridge,repetition,0.0012009709971607663,mps,5982.0,0.001392458001646446,5890.0,dd,0.0,,,,,0.8624827432789606
+dual_magic_injection,dual_magic_injection_4,dual_magic_injection_circuit,37.0,37.0,8.0,7.0,7.0,4.0,t_bridge,repetition,0.0011376319998817053,mps,5894.0,0.0015740519993414637,5890.0,dd,0.0,,,,,0.7227410532546933
+dual_magic_injection,dual_magic_injection_5,dual_magic_injection_circuit,38.0,38.0,8.0,8.0,8.0,2.0,t_bridge,repetition,0.0014026870012457948,dd,6542.0,0.0014091809971432667,6316.0,dd,0.0,,,,,0.9953916523777735
+dual_magic_injection,dual_magic_injection_6,dual_magic_injection_circuit,38.0,38.0,8.0,8.0,8.0,4.0,t_bridge,repetition,0.0012243010023667011,mps,6500.0,0.001573576002556365,6408.0,dd,0.0,,,,,0.7780374131136681
+
