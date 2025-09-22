@@ -481,6 +481,13 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             "stabilizer_rounds",
             "gadget",
             "scheme",
+            "chi_target",
+            "gadget_size",
+            "gadget_layers",
+            "dense_gadgets",
+            "gadget_spacing",
+            "ladder_layers",
+            "chain_length",
         )
         if col in relevant.columns
     ]
