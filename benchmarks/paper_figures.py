@@ -738,7 +738,17 @@ def generate_backend_comparison(
 
     if not forced.empty and not auto.empty:
         try:
-            grid = plot_backend_timeseries(forced, auto, metric="run_time_mean")
+            grid = plot_backend_timeseries(
+                forced,
+                auto,
+                metric="run_time_mean",
+                col_wrap=2,
+                height=3.6,
+                aspect=1.1,
+                facet_kws={"sharey": False},
+                annotate_offset=(0.0, 8.0),
+                annotation_min_distance=24.0,
+            )
         except RuntimeError as exc:
             LOGGER.warning("Skipping backend timeseries plots: %s", exc)
         else:
@@ -758,6 +768,10 @@ def generate_backend_comparison(
                 auto.assign(run_peak_memory_mean=auto["run_peak_memory_mib"]),
                 metric="run_peak_memory_mean",
                 annotate_auto=False,
+                col_wrap=2,
+                height=3.6,
+                aspect=1.1,
+                facet_kws={"sharey": False},
             )
             mem_png = FIGURES_DIR / "backend_timeseries_memory.png"
             mem_pdf = FIGURES_DIR / "backend_timeseries_memory.pdf"
