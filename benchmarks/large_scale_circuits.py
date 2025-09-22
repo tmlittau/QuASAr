@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import networkx as nx
 from random import Random
-from typing import List
+from typing import Iterable, List, Tuple
 
 from quasar.circuit import Circuit, Gate
 
@@ -122,6 +122,28 @@ def ripple_carry_modular_circuit(
     return Circuit(gates)
 
 
+def _surface_patch_layout(distance: int, scheme: str = "surface") -> Tuple[int, int]:
+    """Return the number of data and ancilla qubits for a stabiliser patch."""
+
+    if distance <= 0:
+        return 0, 0
+
+    scheme = scheme.lower()
+    if scheme == "repetition":
+        data = distance
+        ancilla = max(0, distance - 1)
+    else:
+        data = distance * distance
+        ancilla = 2 * distance * (distance - 1)
+    return data, ancilla
+
+
+def _shift_gates(gates: Iterable[Gate], offset: int) -> List[Gate]:
+    """Return ``gates`` with all qubits shifted by ``offset``."""
+
+    return [Gate(g.gate, [q + offset for q in g.qubits], g.params) for g in gates]
+
+
 def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") -> Circuit:
     """Construct repeated stabiliser cycles for simple error-correction codes.
 
@@ -183,6 +205,110 @@ def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") 
                     gates.append(Gate("CZ", [anc, q1]))
                     gates.append(Gate("CZ", [anc, q2]))
                     gates.append(Gate("H", [anc]))
+
+    return Circuit(gates)
+
+
+def dual_magic_injection_circuit(
+    *,
+    patch_distance: int,
+    stabilizer_rounds: int,
+    gadget_width: int,
+    gadget: str = "ccz_bridge",
+    scheme: str = "surface",
+) -> Circuit:
+    """Combine two stabiliser patches with a configurable non-Clifford gadget.
+
+    The generator constructs two disjoint surface-code patches each executing
+    ``stabilizer_rounds`` of :func:`surface_code_cycle`.  After the stabiliser
+    evolution, a non-Clifford gadget acting on ``gadget_width`` data qubits from
+    each patch is appended.  The gadget type is selected via ``gadget`` and is
+    intended to model a magic-state injection interface between protected
+    patches.
+
+    Parameters
+    ----------
+    patch_distance:
+        Distance of each surface-code patch; determines the number of data and
+        ancilla qubits per patch.
+    stabilizer_rounds:
+        Number of stabiliser measurement rounds to execute on each patch before
+        performing the injection gadget.
+    gadget_width:
+        Number of data qubit pairs (one per patch) involved in the gadget.
+    gadget:
+        Identifier for the non-Clifford gadget.  Supported values are
+        ``"ccz_bridge"`` which applies a chain of ``CCZ`` operations across
+        matched data qubits with dedicated magic ancillae, ``"tof_bridge"``
+        which realises a Toffoli-based bridge with injected ``T`` rotations and
+        ``"t_bridge"`` which couples the patches through controlled-NOT bridges
+        and single-qubit ``T`` gates only.
+    scheme:
+        Layout of the stabiliser patch.  ``"surface"`` builds a square-lattice
+        patch while ``"repetition"`` produces a linear chain with fewer
+        ancillae for lighter-weight experiments.
+
+    Returns
+    -------
+    Circuit
+        The assembled benchmark circuit capturing stabiliser dynamics followed
+        by a non-Clifford coupling gadget.
+    """
+
+    if patch_distance <= 0 or stabilizer_rounds <= 0 or gadget_width <= 0:
+        return Circuit([])
+
+    data_qubits, ancilla_qubits = _surface_patch_layout(patch_distance, scheme)
+    patch_qubits = data_qubits + ancilla_qubits
+    if patch_qubits == 0:
+        return Circuit([])
+
+    base_cycle = surface_code_cycle(patch_distance, stabilizer_rounds, scheme=scheme)
+    left_patch = list(base_cycle.gates)
+    right_patch = _shift_gates(base_cycle.gates, patch_qubits)
+
+    width = min(gadget_width, data_qubits)
+    if width == 0:
+        return Circuit(left_patch + right_patch)
+
+    left_data = list(range(width))
+    right_data = [q + patch_qubits for q in range(width)]
+    ancilla_start = patch_qubits * 2
+    ancilla = list(range(ancilla_start, ancilla_start + width))
+
+    gadget = gadget.lower()
+    if gadget not in {"ccz_bridge", "tof_bridge", "t_bridge"}:
+        raise ValueError(f"unsupported gadget '{gadget}'")
+
+    gates: List[Gate] = []
+    gates.extend(left_patch)
+    gates.extend(right_patch)
+
+    for left, right, anc in zip(left_data, right_data, ancilla):
+        if gadget == "ccz_bridge":
+            gates.append(Gate("H", [anc]))
+            gates.append(Gate("T", [anc]))
+            gates.append(Gate("CCZ", [left, right, anc]))
+            gates.append(Gate("T", [left]))
+            gates.append(Gate("T", [right]))
+            gates.append(Gate("S", [left]))
+            gates.append(Gate("S", [right]))
+        elif gadget == "tof_bridge":
+            gates.append(Gate("H", [anc]))
+            gates.append(Gate("T", [anc]))
+            gates.append(Gate("H", [anc]))
+            gates.append(Gate("CCX", [left, right, anc]))
+            gates.append(Gate("T", [anc]))
+            gates.append(Gate("H", [anc]))
+        else:
+            gates.append(Gate("H", [anc]))
+            gates.append(Gate("CX", [left, anc]))
+            gates.append(Gate("T", [anc]))
+            gates.append(Gate("CX", [right, anc]))
+            gates.append(Gate("H", [anc]))
+            gates.append(Gate("T", [anc]))
+        gates.append(Gate("S", [left]))
+        gates.append(Gate("S", [right]))
 
     return Circuit(gates)
 

@@ -10,6 +10,16 @@ determined via :func:`compute_baseline_best` and only this aggregated
 
 Use the ``--verbose`` flag (repeat it for debug logging) to monitor progress
 while the CLI iterates over qubit widths, backends and scenario instances.
+
+Example
+-------
+Run the dual magic injection scenario with a custom memory cap::
+
+    python benchmarks/run_benchmarks.py \
+        --scenario dual_magic_injection \
+        --repetitions 3 \
+        --memory-bytes 2147483648 \
+        --output benchmarks/results/dual_magic_injection
 """
 
 import argparse
@@ -312,6 +322,20 @@ def run_scenarios(
                     "unsupported": True,
                     "error": str(exc),
                 }
+            except Exception as exc:  # pragma: no cover - defensive guard
+                tracemalloc.stop()
+                LOGGER.warning(
+                    "Preparation failed for %s on backend %s: %s",
+                    instance_label,
+                    backend.value if backend else "auto",
+                    exc,
+                )
+                return {
+                    "framework": backend.value if backend else "quasar",
+                    "backend": backend.value if backend else str(backend),
+                    "unsupported": True,
+                    "error": str(exc),
+                }
             prepare_time = time.perf_counter() - start_prepare
             _, prepare_peak = tracemalloc.get_traced_memory()
             tracemalloc.stop()
@@ -451,6 +475,12 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             "core_qubits",
             "suffix_qubits",
             "total_qubits",
+            "patch_distance",
+            "boundary_width",
+            "gadget_width",
+            "stabilizer_rounds",
+            "gadget",
+            "scheme",
         )
         if col in relevant.columns
     ]
@@ -560,7 +590,10 @@ def main() -> None:  # pragma: no cover - CLI entry point
     parser.add_argument(
         "--scenario",
         choices=sorted(SCENARIOS.keys()),
-        help="Named partitioning scenario defined in partitioning_workloads",
+        help=(
+            "Named partitioning scenario defined in partitioning_workloads "
+            "(e.g. dual_magic_injection)"
+        ),
     )
     parser.add_argument(
         "--qubits",
