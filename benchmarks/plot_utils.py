@@ -609,7 +609,7 @@ def plot_speedup_bars(
 
     setup_benchmark_style()
     if ax is None:
-        ax = plt.gca()
+        _, ax = plt.subplots(figsize=(10, 6))
 
     items = list(speedups.items())
     if sort:
@@ -619,7 +619,15 @@ def plot_speedup_bars(
     ax.set_ylabel("Speedup (×)")
     ax.set_xlabel("Circuit")
     ax.set_ylim(bottom=0)
-    ax.bar_label(bars, fmt="{:.2f}")
+    if values:
+        ymax = max(values)
+        if np.isfinite(ymax) and ymax > 0:
+            ax.set_ylim(top=ymax * 1.08)
+    ax.bar_label(bars, fmt="{:.2f}", padding=3)
+    ax.set_axisbelow(True)
+    ax.yaxis.grid(True, linestyle="--", linewidth=0.7, alpha=0.5)
+    ax.xaxis.grid(False)
+    plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
     return ax
 
 
