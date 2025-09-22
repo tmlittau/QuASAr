@@ -727,6 +727,60 @@ def random_hybrid_circuit(num_qubits: int = 6, depth: int = 10, seed: int | None
     return Circuit(gates)
 
 
+def alternating_ladder_circuit(
+    num_qubits: int = 24,
+    *,
+    dense_gadget_spacing: int = 3,
+    gadget_width: int = 4,
+    ladder_layers: int = 3,
+    gadget_layers: int = 2,
+    seed: int = 0,
+) -> Circuit:
+    """Expose :func:`benchmarks.large_scale_circuits.alternating_ladder_circuit`.
+
+    The helper maps the CLI's ``num_qubits`` parameter to the ladder
+    configuration by treating pairs of qubits as ladder rungs.  The
+    ``dense_gadget_spacing`` controls how many rungs separate the dense gadget
+    regions while ``gadget_layers`` determines how strongly the gadgets drive the
+    Schmidt rank across the ladder boundary.  The wrapper raises ``ValueError``
+    for odd ``num_qubits`` so that the total qubit count exactly matches the CLI
+    input when mapped onto the two rails.
+    """
+
+    if num_qubits <= 0:
+        return Circuit([])
+    if num_qubits % 2 != 0:
+        raise ValueError("alternating ladder requires an even number of qubits")
+
+    rung_count = num_qubits // 2
+    spacing = max(1, dense_gadget_spacing)
+    dense_gadgets = max(1, rung_count // spacing)
+    width = min(gadget_width, rung_count)
+    ladder_layers = max(1, ladder_layers)
+    gadget_layers = max(1, gadget_layers)
+
+    from .large_scale_circuits import alternating_ladder_circuit as _ladder
+
+    circuit = _ladder(
+        chain_length=rung_count,
+        dense_gadgets=dense_gadgets,
+        gadget_width=width,
+        ladder_layers=ladder_layers,
+        gadget_layers=gadget_layers,
+        seed=seed,
+    )
+    meta = {
+        "chain_length": rung_count,
+        "dense_gadgets": dense_gadgets,
+        "gadget_width": width,
+        "ladder_layers": ladder_layers,
+        "gadget_layers": gadget_layers,
+        "total_qubits": num_qubits,
+    }
+    setattr(circuit, "metadata", meta)
+    return circuit
+
+
 def surface_corrected_qaoa_circuit(
     bit_width: int, distance: int = 3, rounds: int = 1
 ) -> Circuit:

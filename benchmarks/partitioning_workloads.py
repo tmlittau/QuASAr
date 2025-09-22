@@ -9,12 +9,14 @@ from quasar.circuit import Circuit
 
 try:  # Allow execution via `python benchmarks/run_benchmarks.py`
     from .large_scale_circuits import (
+        alternating_ladder_circuit,
         dense_to_clifford_partition_circuit,
         dual_magic_injection_circuit,
         staged_partition_circuit,
     )
 except ImportError:  # pragma: no cover - fallback for script execution
     from large_scale_circuits import (  # type: ignore
+        alternating_ladder_circuit,
         dense_to_clifford_partition_circuit,
         dual_magic_injection_circuit,
         staged_partition_circuit,
@@ -207,11 +209,61 @@ def _dual_magic_injection_sweep() -> List[WorkloadInstance]:
     return instances
 
 
+def _ladder_dense_gadgets_sweep() -> List[WorkloadInstance]:
+    chain_length = 18
+    gadget_width = 4
+    ladder_layers = 3
+    dense_gadget_counts = [2, 3, 5]
+    gadget_depths = [1, 2, 3]
+    instances: List[WorkloadInstance] = []
+    variant = 1
+    for dense_count in dense_gadget_counts:
+        for gadget_layers in gadget_depths:
+            params = {
+                "chain_length": chain_length,
+                "dense_gadgets": dense_count,
+                "gadget_width": gadget_width,
+                "ladder_layers": ladder_layers,
+                "gadget_layers": gadget_layers,
+                "seed": variant,
+            }
+            boundary_width = min(gadget_width, chain_length)
+            chi_cap = 2 ** boundary_width
+            chi_depth = 2 ** gadget_layers
+            chi_target = min(chi_cap, chi_depth)
+            spacing = chain_length / dense_count if dense_count else None
+            metadata = {
+                "chain_length": chain_length,
+                "total_qubits": chain_length * 2,
+                "dense_gadgets": dense_count,
+                "gadget_spacing": spacing,
+                "ladder_layers": ladder_layers,
+                "gadget_layers": gadget_layers,
+                "gadget_width": min(gadget_width, chain_length),
+                "gadget_size": min(gadget_width, chain_length),
+                "boundary_width": boundary_width,
+                "chi_target": chi_target,
+            }
+            instances.append(
+                WorkloadInstance(
+                    scenario="ladder_dense_gadgets",
+                    variant=f"ladder_dense_gadgets_{variant}",
+                    builder=alternating_ladder_circuit,
+                    parameters=params,
+                    metadata=metadata,
+                    enable_classical_simplification=False,
+                )
+            )
+            variant += 1
+    return instances
+
+
 SCENARIOS: Dict[str, Callable[[], List[WorkloadInstance]]] = {
     "tableau_boundary": _tableau_boundary_sweep,
     "staged_rank": _staged_rank_sweep,
     "staged_sparsity": _staged_sparsity_sweep,
     "dual_magic_injection": _dual_magic_injection_sweep,
+    "ladder_dense_gadgets": _ladder_dense_gadgets_sweep,
 }
 
 

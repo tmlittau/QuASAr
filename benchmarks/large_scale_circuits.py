@@ -144,6 +144,157 @@ def _shift_gates(gates: Iterable[Gate], offset: int) -> List[Gate]:
     return [Gate(g.gate, [q + offset for q in g.qubits], g.params) for g in gates]
 
 
+def alternating_ladder_circuit(
+    *,
+    chain_length: int,
+    dense_gadgets: int,
+    gadget_width: int,
+    ladder_layers: int,
+    gadget_layers: int,
+    seed: int = 0,
+) -> Circuit:
+    """Construct a ladder circuit alternating Clifford rails and dense gadgets.
+
+    The generator arranges ``2 * chain_length`` qubits into two rails coupled via
+    alternating ``CX``/``CZ`` interactions.  Segments of ``gadget_width`` rungs
+    are selected as ``dense_gadgets`` injection sites where non-Clifford layers
+    dominated by ``RY``/``RZ``/``T`` rotations and ``CCZ`` couplings are applied
+    ``gadget_layers`` times.  The surrounding ladder rails remain comparatively
+    light-weight to model regions that are efficiently simulated by stabiliser
+    or low-rank methods.  Increasing ``gadget_layers`` therefore drives the
+    Schmidt rank ``χ`` across the ladder boundaries while ``dense_gadgets``
+    controls the spacing of these high-entanglement islands.
+
+    Parameters
+    ----------
+    chain_length:
+        Number of rungs in the ladder.  The circuit acts on ``2 * chain_length``
+        qubits arranged into two rails.
+    dense_gadgets:
+        Number of dense gadget regions inserted along the ladder.  The regions
+        are distributed as evenly as possible.
+    gadget_width:
+        Number of consecutive rungs forming each dense gadget.  The value is
+        truncated to ``chain_length`` when larger.
+    ladder_layers:
+        Number of background ladder layers composed of alternating Clifford
+        interactions.
+    gadget_layers:
+        Number of dense non-Clifford layers applied within each gadget region.
+    seed:
+        Random seed controlling angle selection inside the dense gadgets.
+
+    Returns
+    -------
+    Circuit
+        Gate-level circuit combining light-weight ladder rails with embedded
+        dense gadgets.
+    """
+
+    if (
+        chain_length <= 0
+        or dense_gadgets < 0
+        or gadget_width <= 0
+        or ladder_layers <= 0
+        or gadget_layers <= 0
+    ):
+        return Circuit([])
+
+    rng = Random(seed)
+    rung_count = chain_length
+    total_qubits = rung_count * 2
+    top_rail = [2 * idx for idx in range(rung_count)]
+    bottom_rail = [2 * idx + 1 for idx in range(rung_count)]
+
+    gates: List[Gate] = []
+
+    # Background ladder composed mostly of Clifford operations to keep
+    # stabiliser-friendly regions between the dense gadgets.
+    for layer in range(ladder_layers):
+        for qubit in range(total_qubits):
+            if (layer + qubit) % 2 == 0:
+                gates.append(Gate("H", [qubit]))
+            else:
+                gates.append(Gate("S", [qubit]))
+
+        for idx in range(rung_count):
+            control, target = (
+                (top_rail[idx], bottom_rail[idx])
+                if layer % 2 == 0
+                else (bottom_rail[idx], top_rail[idx])
+            )
+            gates.append(Gate("CX", [control, target]))
+
+        for rail in (top_rail, bottom_rail):
+            for idx in range(len(rail) - 1):
+                gates.append(Gate("CZ", [rail[idx], rail[idx + 1]]))
+
+        if rung_count > 2:
+            for idx in range(0, rung_count - 2, 2):
+                gates.append(Gate("CX", [top_rail[idx], bottom_rail[idx + 2]]))
+
+    width = min(gadget_width, rung_count)
+    if dense_gadgets == 0 or width == 0:
+        return Circuit(gates)
+
+    window_count = rung_count - width + 1
+    if window_count <= 0:
+        return Circuit(gates)
+
+    if dense_gadgets >= window_count:
+        gadget_starts = list(range(window_count))
+    else:
+        gadget_starts = sorted(rng.sample(range(window_count), dense_gadgets))
+
+    for start in gadget_starts:
+        top_segment = top_rail[start : start + width]
+        bottom_segment = bottom_rail[start : start + width]
+        local_register = top_segment + bottom_segment
+
+        for layer in range(gadget_layers):
+            # Local single-qubit rotations drive non-Clifford behaviour.
+            for qubit in local_register:
+                gates.append(
+                    Gate("RY", [qubit], {"theta": rng.uniform(0.2, 1.35)})
+                )
+                gates.append(
+                    Gate("RZ", [qubit], {"phi": rng.uniform(0.15, 1.2)})
+                )
+
+            # Dense cross couplings between the rails.
+            for control, target in zip(top_segment, bottom_segment):
+                gates.append(
+                    Gate("CRZ", [control, target], {"phi": rng.uniform(0.3, 1.1)})
+                )
+                gates.append(Gate("CX", [control, target]))
+
+            # Multi-qubit entanglers to raise the Schmidt rank across the
+            # gadget boundary.
+            for idx in range(width - 1):
+                gates.append(
+                    Gate(
+                        "CCZ",
+                        [top_segment[idx], bottom_segment[idx], top_segment[idx + 1]],
+                    )
+                )
+                gates.append(
+                    Gate(
+                        "CCZ",
+                        [
+                            bottom_segment[idx],
+                            top_segment[idx + 1],
+                            bottom_segment[idx + 1],
+                        ],
+                    )
+                )
+
+            focus = (start + layer) % width
+            gates.append(Gate("T", [top_segment[focus]]))
+            gates.append(Gate("T", [bottom_segment[focus]]))
+
+    return Circuit(gates)
+
+
 def surface_code_cycle(distance: int, rounds: int = 1, scheme: str = "surface") -> Circuit:
     """Construct repeated stabiliser cycles for simple error-correction codes.
 
