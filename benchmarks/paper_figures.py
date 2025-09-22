@@ -140,7 +140,7 @@ STATEVECTOR_MAX_QUBITS = max_qubits_statevector(STATEVECTOR_SAFE_MEMORY_BYTES)
 """Largest supported dense statevector width under the configured budget."""
 
 
-RUN_TIMEOUT_DEFAULT_SECONDS = 10
+RUN_TIMEOUT_DEFAULT_SECONDS = 300
 """Maximum duration allowed for a single backend run (adjustable)."""
 
 
