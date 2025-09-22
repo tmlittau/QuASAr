@@ -137,6 +137,34 @@ class BoundarySpec:
     q_max: int | None = None
 
 
+@dataclass(frozen=True)
+class SyntheticPlanScenario:
+    """Pre-baked synthetic partitioning scenario used by documentation."""
+
+    key: str
+    title: str
+    description: str
+    fragments: Sequence[Mapping[str, object]]
+    boundaries: Sequence[Mapping[str, object]]
+    total_qubits: int
+    entanglement_entropy: float
+    rotation_diversity: float
+    sparsity: float
+
+    def evaluate(self, estimator: CostEstimator) -> Mapping[str, object]:
+        """Evaluate the plan using :func:`build_partition_plan`."""
+
+        return build_partition_plan(
+            estimator,
+            self.fragments,
+            self.boundaries,
+            total_qubits=self.total_qubits,
+            entanglement_entropy=self.entanglement_entropy,
+            rotation_diversity=self.rotation_diversity,
+            sparsity=self.sparsity,
+        )
+
+
 def build_clifford_fragment_curves(
     estimator: CostEstimator,
     *,
@@ -437,6 +465,151 @@ def build_conversion_primitive_costs(
             }
         )
     return entries
+
+
+def documentation_plan_scenarios() -> Sequence[SyntheticPlanScenario]:
+    """Return preconfigured scenarios used by partitioning documentation."""
+
+    balanced = SyntheticPlanScenario(
+        key="balanced_handoff",
+        title="Balanced hand-off across fragments",
+        description=(
+            "Conversion windows span 15 and 13 qubits, making the tableau→statevector"
+            " and statevector→decision-diagram transfers visible alongside the"
+            " fragment runtimes without dominating the statevector core."
+        ),
+        fragments=(
+            {
+                "name": "Clifford prefix",
+                "backend": Backend.TABLEAU,
+                "num_qubits": 16,
+                "num_1q": 72,
+                "num_2q": 36,
+                "depth": 18,
+            },
+            {
+                "name": "Non-Clifford core",
+                "backend": Backend.STATEVECTOR,
+                "num_qubits": 16,
+                "num_1q": 18,
+                "num_2q": 12,
+                "entanglement_entropy": 7.4,
+                "rotation_diversity": 0.48,
+                "sparsity": 0.38,
+            },
+            {
+                "name": "Sparse suffix",
+                "backend": Backend.DECISION_DIAGRAM,
+                "num_qubits": 16,
+                "num_1q": 40,
+                "num_2q": 24,
+                "frontier": 7,
+                "entanglement_entropy": 4.2,
+                "sparsity": 0.82,
+                "phase_rotation": 0.08,
+                "amplitude_rotation": 0.08,
+            },
+        ),
+        boundaries=(
+            {
+                "name": "Prefix → core",
+                "source": Backend.TABLEAU,
+                "target": Backend.STATEVECTOR,
+                "num_qubits": 15,
+                "rank": 320,
+                "frontier": 16,
+                "window": 13,
+                "window_1q": 32,
+                "window_2q": 24,
+            },
+            {
+                "name": "Core → suffix",
+                "source": Backend.STATEVECTOR,
+                "target": Backend.DECISION_DIAGRAM,
+                "num_qubits": 13,
+                "rank": 208,
+                "frontier": 11,
+                "window": 11,
+                "window_1q": 26,
+                "window_2q": 18,
+            },
+        ),
+        total_qubits=16,
+        entanglement_entropy=7.4,
+        rotation_diversity=0.48,
+        sparsity=0.38,
+    )
+
+    conversion_dominated = SyntheticPlanScenario(
+        key="conversion_dominated",
+        title="Conversion-dominated hand-off",
+        description=(
+            "Expanded 16- and 14-qubit boundaries trigger the expensive ST"
+            " primitive so conversion time rivals or exceeds the fragment runtime."
+        ),
+        fragments=(
+            {
+                "name": "Clifford prefix",
+                "backend": Backend.TABLEAU,
+                "num_qubits": 16,
+                "num_1q": 60,
+                "num_2q": 28,
+                "depth": 16,
+            },
+            {
+                "name": "Non-Clifford core",
+                "backend": Backend.STATEVECTOR,
+                "num_qubits": 16,
+                "num_1q": 18,
+                "num_2q": 12,
+                "entanglement_entropy": 7.0,
+                "rotation_diversity": 0.46,
+                "sparsity": 0.4,
+            },
+            {
+                "name": "Sparse suffix",
+                "backend": Backend.DECISION_DIAGRAM,
+                "num_qubits": 16,
+                "num_1q": 32,
+                "num_2q": 20,
+                "frontier": 6,
+                "entanglement_entropy": 3.8,
+                "sparsity": 0.84,
+                "phase_rotation": 0.06,
+                "amplitude_rotation": 0.06,
+            },
+        ),
+        boundaries=(
+            {
+                "name": "Prefix → core",
+                "source": Backend.TABLEAU,
+                "target": Backend.STATEVECTOR,
+                "num_qubits": 16,
+                "rank": 400,
+                "frontier": 16,
+                "window": 14,
+                "window_1q": 34,
+                "window_2q": 26,
+            },
+            {
+                "name": "Core → suffix",
+                "source": Backend.STATEVECTOR,
+                "target": Backend.DECISION_DIAGRAM,
+                "num_qubits": 14,
+                "rank": 224,
+                "frontier": 10,
+                "window": 10,
+                "window_1q": 22,
+                "window_2q": 16,
+            },
+        ),
+        total_qubits=16,
+        entanglement_entropy=7.0,
+        rotation_diversity=0.46,
+        sparsity=0.4,
+    )
+
+    return [balanced, conversion_dominated]
 
 
 def build_partition_plan(
@@ -1037,8 +1210,10 @@ __all__ = [
     "build_statevector_partition_tradeoff",
     "build_statevector_vs_mps",
     "build_statevector_vs_decision_diagram",
+    "documentation_plan_scenarios",
     "evaluate_fragment_backends",
     "estimate_conversion",
     "export_figure",
     "load_calibrated_estimator",
+    "SyntheticPlanScenario",
 ]
