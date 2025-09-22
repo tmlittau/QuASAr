@@ -28,17 +28,18 @@ class BackendStyle:
     color: str
     marker: str
     label: str
+    tag: str | None = None
 
 
 _DEFAULT_BACKEND_STYLES: Mapping[str, BackendStyle] = {
-    "quasar": BackendStyle("#1b9e77", "o", "QuASAr"),
-    "baseline_best": BackendStyle("#264653", "s", "Baseline best"),
-    "sv": BackendStyle("#1f77b4", "o", "Statevector"),
-    "tab": BackendStyle("#ff7f0e", "^", "Tableau"),
-    "mps": BackendStyle("#2ca02c", "D", "MPS"),
-    "dd": BackendStyle("#d62728", "s", "DD"),
-    "stim": BackendStyle("#9467bd", "P", "Stim"),
-    "mqt_dd": BackendStyle("#8c564b", "s", "MQT-DD"),
+    "quasar": BackendStyle("#1b9e77", "o", "QuASAr", "QA"),
+    "baseline_best": BackendStyle("#264653", "s", "Baseline best", "BB"),
+    "sv": BackendStyle("#1f77b4", "o", "Statevector", "SV"),
+    "tab": BackendStyle("#ff7f0e", "^", "Tableau", "TB"),
+    "mps": BackendStyle("#2ca02c", "D", "MPS", "MPS"),
+    "dd": BackendStyle("#d62728", "s", "DD", "DD"),
+    "stim": BackendStyle("#9467bd", "P", "Stim", "ST"),
+    "mqt_dd": BackendStyle("#8c564b", "s", "MQT-DD", "MQ"),
 }
 
 
@@ -226,6 +227,22 @@ def backend_labels(order: Iterable[object] | None = None) -> Mapping[object, str
     return labels
 
 
+def backend_tags(order: Iterable[object] | None = None) -> Mapping[object, str]:
+    """Return abbreviated identifiers suitable for point annotations."""
+
+    if order is None:
+        order = _DEFAULT_BACKEND_STYLES.keys()
+    tags: dict[object, str] = {}
+    for backend in order:
+        style = _style_for_backend(backend)
+        if style is None:
+            continue
+        tag = style.tag if style.tag else style.label
+        if tag:
+            tags[backend] = tag
+    return tags
+
+
 def _annotate_backends(
     ax: plt.Axes,
     data: pd.DataFrame,
@@ -234,18 +251,31 @@ def _annotate_backends(
     y_col: str,
     backend_col: str,
     offset: tuple[float, float] = (0.0, 6.0),
+    min_pixel_distance: float = 18.0,
 ) -> None:
     """Annotate each point in ``data`` with a short backend label."""
 
-    labels = backend_labels(data[backend_col])
+    if min_pixel_distance <= 0:
+        min_pixel_distance = 0.0
+    labels = backend_tags(data[backend_col])
+    used_positions: list[tuple[float, float]] = []
     for _, row in data.iterrows():
         backend = row.get(backend_col)
         label = labels.get(backend)
         if not label:
             continue
+        x_value = row.get(x_col)
+        y_value = row.get(y_col)
+        if pd.isna(x_value) or pd.isna(y_value):
+            continue
+        position = ax.transData.transform((x_value, y_value))
+        if used_positions and min_pixel_distance > 0:
+            if any(np.hypot(position[0] - px, position[1] - py) < min_pixel_distance for px, py in used_positions):
+                continue
+        used_positions.append(tuple(position))
         ax.annotate(
             label,
-            (row[x_col], row[y_col]),
+            (x_value, y_value),
             textcoords="offset points",
             xytext=offset,
             ha="center",
@@ -377,12 +407,30 @@ def plot_backend_timeseries(
     x: str = "qubits",
     log_scale: bool = True,
     annotate_auto: bool = True,
+    annotate_offset: tuple[float, float] = (0.0, 6.0),
+    annotation_min_distance: float = 18.0,
+    col_wrap: int | None = 3,
+    height: float | None = 3.2,
+    aspect: float | None = 1.3,
+    facet_kws: Mapping[str, object] | None = None,
 ) -> "sns.axisgrid.FacetGrid | None":
     """Plot forced backend measurements alongside automatic selections.
 
     This helper mirrors the multi-panel figures used in
     ``notebooks/comparison.ipynb``.  Forced runs are rendered as lines per
     backend while automatic runs appear as highlighted markers.
+
+    Parameters
+    ----------
+    annotate_offset:
+        Offset (in display points) applied to annotation text.
+    annotation_min_distance:
+        Minimum spacing (in display pixels) required between annotations to
+        avoid overlapping labels.  Set to ``0`` to disable collision detection.
+    col_wrap, height, aspect, facet_kws:
+        Layout controls passed through to :func:`seaborn.relplot`.  ``col_wrap``
+        defaults to 3 to prevent overly wide grids, while ``height`` and
+        ``aspect`` tweak subplot sizing for readability.
     """
 
     if sns is None:  # pragma: no cover - seaborn optional
@@ -391,6 +439,10 @@ def plot_backend_timeseries(
     order = list(dict.fromkeys(forced[hue].tolist() + auto[hue].tolist()))
     palette = backend_palette(order)
     setup_benchmark_style(palette=palette)
+
+    resolved_facet_kws = dict(facet_kws or {})
+    resolved_facet_kws.setdefault("sharey", False)
+    facet_kwargs = resolved_facet_kws or None
 
     if log_scale:
         forced = forced.copy()
@@ -407,6 +459,10 @@ def plot_backend_timeseries(
         kind="line",
         marker="o",
         palette=palette,
+        col_wrap=col_wrap,
+        height=height,
+        aspect=aspect,
+        facet_kws=facet_kwargs,
     )
     grid.set_axis_labels(x.replace("_", " ").title(), _metric_label(metric))
     if log_scale:
@@ -431,9 +487,17 @@ def plot_backend_timeseries(
             legend=False,
         )
         if annotate_auto and hue in sub.columns:
-            _annotate_backends(ax, sub, x_col=x, y_col=metric, backend_col=hue)
+            _annotate_backends(
+                ax,
+                sub,
+                x_col=x,
+                y_col=metric,
+                backend_col=hue,
+                offset=annotate_offset,
+                min_pixel_distance=annotation_min_distance,
+            )
 
-    grid.fig.subplots_adjust(top=0.9)
+    grid.fig.subplots_adjust(top=0.88, wspace=0.25, hspace=0.35)
     title = _metric_label(metric)
     grid.fig.suptitle(f"Forced (lines) vs auto (markers): {title}")
     _apply_legend_style(
