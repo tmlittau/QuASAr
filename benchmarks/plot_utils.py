@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence, Literal, overload
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.legend import Legend
 import numpy as np
 import pandas as pd
@@ -614,8 +615,11 @@ def plot_heatmap(
     *,
     annot: bool = True,
     fmt: str = "",
-    cmap: str = "viridis",
+    cmap: mcolors.Colormap | str = "viridis",
+    norm: mcolors.Normalize | None = None,
+    cbar: bool = True,
     ax: plt.Axes | None = None,
+    **heatmap_kwargs,
 ) -> plt.Axes:
     """Render a heatmap with the shared style settings.
 
@@ -627,7 +631,16 @@ def plot_heatmap(
         raise RuntimeError("seaborn is required for plot_heatmap")
     if ax is None:
         ax = plt.gca()
-    sns.heatmap(pivot, annot=annot, fmt=fmt, cmap=cmap, ax=ax)
+    sns.heatmap(
+        pivot,
+        annot=annot,
+        fmt=fmt,
+        cmap=cmap,
+        norm=norm,
+        cbar=cbar,
+        ax=ax,
+        **heatmap_kwargs,
+    )
     return ax
 
 

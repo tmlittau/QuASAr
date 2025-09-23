@@ -21,6 +21,8 @@ except Exception:  # pragma: no cover - psutil is optional
     psutil = None  # type: ignore
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.patches import Patch
 import pandas as pd
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -33,6 +35,7 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(REPO_ROOT))
     from plot_utils import (  # type: ignore[no-redef]
         backend_labels,
+        backend_palette,
         plot_backend_timeseries,
         plot_heatmap,
         plot_quasar_vs_baseline_best,
@@ -50,6 +53,7 @@ if __package__ in {None, ""}:
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import (
         backend_labels,
+        backend_palette,
         plot_backend_timeseries,
         plot_heatmap,
         plot_quasar_vs_baseline_best,
@@ -815,15 +819,57 @@ def generate_heatmap() -> None:
     pivot = df.pivot(index="circuit", columns="alpha", values="selected_backend")
     annot = df.pivot(index="circuit", columns="alpha", values="label")
     order = list(labels.keys())
-    pivot_numeric = pivot.apply(
-        lambda col: pd.Categorical(col, categories=order).codes
+
+    if not order:
+        LOGGER.info("Skipping plan-choice heatmap: no backend selections present")
+        return
+
+    palette = backend_palette(order)
+    missing_colours = [backend for backend in order if backend not in palette]
+    if missing_colours:
+        LOGGER.warning(
+            "Missing palette entries for backends: %s", ", ".join(map(str, missing_colours))
+        )
+    colors = [palette.get(backend, "#b3b3b3") for backend in order]
+    cmap = ListedColormap(colors, name="backend_palette")
+    boundaries = [index - 0.5 for index in range(len(colors) + 1)]
+    norm = BoundaryNorm(boundaries, cmap.N)
+
+    pivot_numeric = (
+        pivot.apply(lambda col: pd.Categorical(col, categories=order).codes)
+        .astype(float)
+        .replace(-1, float("nan"))
     )
 
     try:
-        ax = plot_heatmap(pivot_numeric, annot=annot, fmt="")
+        ax = plot_heatmap(
+            pivot_numeric,
+            annot=annot,
+            fmt="",
+            cmap=cmap,
+            norm=norm,
+            cbar=False,
+        )
     except RuntimeError as exc:
         LOGGER.warning("Skipping plan-choice heatmap: %s", exc)
         return
+
+    legend_handles = [
+        Patch(
+            facecolor=color,
+            edgecolor="black",
+            label=labels.get(backend, str(backend)),
+        )
+        for backend, color in zip(order, colors)
+    ]
+    if legend_handles:
+        ax.legend(
+            handles=legend_handles,
+            title="Backend",
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+        )
 
     heatmap_png = FIGURES_DIR / "plan_choice_heatmap.png"
     heatmap_pdf = FIGURES_DIR / "plan_choice_heatmap.pdf"
