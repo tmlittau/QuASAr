@@ -569,6 +569,34 @@ def collect_backend_data(
                 spec.name,
                 n,
             )
+            auto_skip_reason = _mps_skip_reason(
+                circuit_auto,
+                n,
+                forced_width=auto_width,
+            )
+            if auto_skip_reason:
+                LOGGER.info(
+                    "Skipping automatic run: circuit=%s qubits=%s reason=%s",
+                    spec.name,
+                    n,
+                    auto_skip_reason,
+                )
+                auto_records.append(
+                    {
+                        "circuit": spec.name,
+                        "qubits": n,
+                        "actual_qubits": auto_width,
+                        "framework": "quasar",
+                        "backend": Backend.MPS.name,
+                        "mode": "auto",
+                        "unsupported": True,
+                        "failed": False,
+                        "error": auto_skip_reason,
+                        "comment": auto_skip_reason,
+                        "repetitions": 0,
+                    }
+                )
+                continue
             try:
                 rec = runner.run_quasar_multiple(
                     circuit_auto,
