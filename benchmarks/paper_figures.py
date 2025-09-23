@@ -23,6 +23,7 @@ except Exception:  # pragma: no cover - psutil is optional
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
+import numpy as np
 import pandas as pd
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -912,6 +913,408 @@ def generate_speedup_bars() -> None:
     plt.close(ax.figure)
 
 
+def generate_partitioning_figures() -> None:
+    try:
+        from docs.utils import partitioning_analysis
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        LOGGER.warning(
+            "Skipping partitioning figures: documentation helpers unavailable (%s)",
+            exc,
+        )
+        return
+
+    estimator, calibration_path = partitioning_analysis.load_calibrated_estimator()
+    if calibration_path is not None:
+        LOGGER.info(
+            "Loaded partitioning calibration coefficients from %s",
+            calibration_path,
+        )
+    else:
+        LOGGER.info(
+            "Using default cost estimator coefficients for partitioning figures",
+        )
+
+    partitioning_analysis.apply_partitioning_style()
+
+    def _save(paths: Iterable[Path]) -> None:
+        for path in paths:
+            _log_written(path)
+
+    def _safe_run(name: str, fn) -> None:
+        try:
+            fn()
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            LOGGER.warning("Skipping %s: %s", name, exc)
+
+    def _clifford_crossover() -> None:
+        curves = partitioning_analysis.build_clifford_fragment_curves(estimator)
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.plot(curves["num_qubits"], curves["statevector"], label="Statevector", linewidth=2.2)
+        ax.plot(curves["num_qubits"], curves["tableau"], label="Tableau", linewidth=2.2)
+        ax.set_xlim(curves["num_qubits"][0], curves["num_qubits"][-1])
+        combined = np.concatenate(
+            (
+                np.asarray(curves["statevector"], dtype=float),
+                np.asarray(curves["tableau"], dtype=float),
+            )
+        )
+        ax.set_ylim(0, float(np.max(combined)) * 1.1)
+        threshold = curves.get("threshold")
+        if threshold is not None:
+            indices = np.where(curves["num_qubits"] == threshold)[0]
+            if indices.size:
+                idx = int(indices[0])
+                y_val = float(curves["tableau"][idx])
+                ax.axvline(threshold, color="black", linestyle="--", linewidth=1.2)
+                x_text = min(curves["num_qubits"][-1], threshold + 1.5)
+                ax.annotate(
+                    f"Tableau cheaper ≥ {threshold} qubits",
+                    xy=(threshold, y_val),
+                    xytext=(x_text, y_val * 1.05),
+                    arrowprops=dict(arrowstyle="->", linewidth=1.0),
+                    fontsize=10,
+                )
+                LOGGER.info(
+                    "Tableau crossover occurs at %s qubits in the Clifford fragment",
+                    threshold,
+                )
+        else:
+            LOGGER.info(
+                "No tableau crossover observed for Clifford fragments in sampled range",
+            )
+        ax.set_xlabel("Active qubits")
+        ax.set_ylabel("Estimated runtime (arb. units)")
+        ax.set_title("Clifford fragment crossover")
+        ax.legend(loc="upper left")
+        fig.tight_layout()
+        _save(partitioning_analysis.export_figure(fig, "clifford_crossover"))
+        plt.close(fig)
+
+    def _statevector_partition_tradeoff() -> None:
+        tradeoff = partitioning_analysis.build_statevector_partition_tradeoff(estimator)
+        fig, ax = plt.subplots(figsize=(7.5, 4.2))
+        ax.plot(tradeoff["num_qubits"], tradeoff["statevector"], label="Statevector only", linewidth=2.2)
+        ax.plot(
+            tradeoff["num_qubits"],
+            tradeoff["partitioned"],
+            label="Partitioned with conversions",
+            linewidth=2.2,
+        )
+        ax.set_xlim(tradeoff["num_qubits"][0], tradeoff["num_qubits"][-1])
+        combined = np.concatenate(
+            (
+                np.asarray(tradeoff["statevector"], dtype=float),
+                np.asarray(tradeoff["partitioned"], dtype=float),
+            )
+        )
+        ax.set_ylim(0, float(np.max(combined)) * 1.12)
+        threshold = tradeoff.get("threshold")
+        if threshold is not None:
+            indices = np.where(tradeoff["num_qubits"] == threshold)[0]
+            if indices.size:
+                idx = int(indices[0])
+                boundary = int(tradeoff["boundary"][idx])
+                rank = int(tradeoff["rank"][idx])
+                y_val = float(tradeoff["partitioned"][idx])
+                ax.axvline(threshold, color="black", linestyle="--", linewidth=1.2)
+                x_text = min(tradeoff["num_qubits"][-1], threshold + 2)
+                ax.annotate(
+                    f"Switch at q={boundary} (rank≤{rank})",
+                    xy=(threshold, y_val),
+                    xytext=(x_text, y_val * 1.05),
+                    arrowprops=dict(arrowstyle="->", linewidth=1.0),
+                    fontsize=10,
+                )
+                LOGGER.info(
+                    "Partitioned execution overtakes dense simulation beyond %s qubits",
+                    threshold,
+                )
+        else:
+            LOGGER.info(
+                "Partitioned execution never beats dense simulation in sampled range",
+            )
+        ax.set_xlabel("Active qubits")
+        ax.set_ylabel("Estimated runtime (arb. units)")
+        ax.set_title("Statevector vs. tableau with conversions")
+        ax.legend(loc="upper left")
+        fig.tight_layout()
+        _save(partitioning_analysis.export_figure(fig, "statevector_tableau_partition"))
+        plt.close(fig)
+
+    def _statevector_vs_mps() -> None:
+        curves = partitioning_analysis.build_statevector_vs_mps(estimator)
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.plot(curves["num_qubits"], curves["statevector"], label="Statevector", linewidth=2.2)
+        ax.plot(curves["num_qubits"], curves["mps"], label="MPS (χ=4)", linewidth=2.2)
+        ax.set_xlim(curves["num_qubits"][0], curves["num_qubits"][-1])
+        combined = np.concatenate(
+            (
+                np.asarray(curves["statevector"], dtype=float),
+                np.asarray(curves["mps"], dtype=float),
+            )
+        )
+        ax.set_ylim(0, float(np.max(combined)) * 1.12)
+        threshold = curves.get("threshold")
+        if threshold is not None:
+            indices = np.where(curves["num_qubits"] == threshold)[0]
+            if indices.size:
+                idx = int(indices[0])
+                y_val = float(curves["mps"][idx])
+                ax.axvline(threshold, color="black", linestyle="--", linewidth=1.2)
+                x_text = min(curves["num_qubits"][-1], threshold + 1.5)
+                ax.annotate(
+                    f"MPS cheaper ≥ {threshold} qubits",
+                    xy=(threshold, y_val),
+                    xytext=(x_text, y_val * 1.05),
+                    arrowprops=dict(arrowstyle="->", linewidth=1.0),
+                    fontsize=10,
+                )
+                LOGGER.info(
+                    "MPS crossover occurs at %s qubits for local circuits",
+                    threshold,
+                )
+        else:
+            LOGGER.info("MPS crossover not observed for sampled qubit counts")
+        ax.set_xlabel("Active qubits")
+        ax.set_ylabel("Estimated runtime (arb. units)")
+        ax.set_title("Local circuit cost")
+        ax.legend(loc="upper left")
+        fig.tight_layout()
+        _save(partitioning_analysis.export_figure(fig, "statevector_vs_mps"))
+        plt.close(fig)
+
+    def _conversion_aware_mps() -> None:
+        data = partitioning_analysis.build_conversion_aware_mps_paths(estimator)
+        fig, ax = plt.subplots(figsize=(8.0, 4.2))
+        baseline_line, = ax.plot(
+            data["num_qubits"], data["statevector"], label="Statevector only", linewidth=2.2
+        )
+        _ = baseline_line
+        y_values = [np.asarray(data["statevector"], dtype=float)]
+        for scenario in data["scenarios"]:
+            label = f"MPS path (χ={scenario['chi']}, window={scenario['window']})"
+            line, = ax.plot(
+                data["num_qubits"], scenario["total"], label=label, linewidth=2.0
+            )
+            colour = line.get_color()
+            y_values.append(np.asarray(scenario["total"], dtype=float))
+            threshold = scenario.get("threshold")
+            if threshold is not None:
+                indices = np.where(data["num_qubits"] == threshold)[0]
+                if indices.size:
+                    idx = int(indices[0])
+                    y_val = float(scenario["total"][idx])
+                    ax.scatter([threshold], [y_val], color=colour, zorder=5)
+                    x_text = min(data["num_qubits"][-1], threshold + 1.5)
+                    ax.annotate(
+                        f"Switch ≥ {threshold} qubits",
+                        xy=(threshold, y_val),
+                        xytext=(x_text, y_val * 1.05),
+                        arrowprops=dict(arrowstyle="->", linewidth=1.0, color=colour),
+                        fontsize=9,
+                        color=colour,
+                    )
+            conv_time = float(scenario["sv_to_mps"] + scenario["mps_to_sv"])
+            threshold_label = str(threshold) if threshold is not None else "not observed"
+            LOGGER.info(
+                "%s: conversions add %.2f a.u.; threshold %s",
+                label,
+                conv_time,
+                threshold_label,
+            )
+        combined = np.concatenate(y_values)
+        ax.set_ylim(0, float(np.max(combined)) * 1.12)
+        ax.set_xlim(data["num_qubits"][0], data["num_qubits"][-1])
+        ax.set_xlabel("Active qubits")
+        ax.set_ylabel("Estimated runtime (arb. units)")
+        ax.set_title("Conversion-aware MPS planning")
+        ax.legend(loc="upper left")
+        fig.tight_layout()
+        _save(partitioning_analysis.export_figure(fig, "conversion_aware_mps"))
+        plt.close(fig)
+
+    def _statevector_vs_decision_diagram() -> None:
+        curves = partitioning_analysis.build_statevector_vs_decision_diagram(estimator)
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.plot(curves["num_qubits"], curves["statevector"], label="Statevector", linewidth=2.2)
+        ax.plot(
+            curves["num_qubits"],
+            curves["decision_diagram"],
+            label="Decision diagram",
+            linewidth=2.2,
+        )
+        ax.set_xlim(curves["num_qubits"][0], curves["num_qubits"][-1])
+        combined = np.concatenate(
+            (
+                np.asarray(curves["statevector"], dtype=float),
+                np.asarray(curves["decision_diagram"], dtype=float),
+            )
+        )
+        ax.set_ylim(0, float(np.max(combined)) * 1.12)
+        cheaper = curves["decision_diagram"] < curves["statevector"]
+        if np.any(cheaper):
+            idx = int(np.where(cheaper)[0][0])
+            threshold = int(curves["num_qubits"][idx])
+            y_val = float(curves["decision_diagram"][idx])
+            ax.axvline(threshold, color="black", linestyle="--", linewidth=1.2)
+            x_text = min(curves["num_qubits"][-1], threshold + 1.5)
+            ax.annotate(
+                f"DD cheaper ≥ {threshold} qubits",
+                xy=(threshold, y_val),
+                xytext=(x_text, y_val * 1.05),
+                arrowprops=dict(arrowstyle="->", linewidth=1.0),
+                fontsize=10,
+            )
+            LOGGER.info(
+                "Decision diagrams overtake dense simulation from %s qubits",
+                threshold,
+            )
+        else:
+            LOGGER.info(
+                "Decision-diagram crossover not observed for sampled sparse circuits",
+            )
+        ax.set_xlabel("Active qubits")
+        ax.set_ylabel("Estimated runtime (arb. units)")
+        ax.set_title("Sparse circuit cost")
+        ax.legend(loc="upper left")
+        fig.tight_layout()
+        _save(partitioning_analysis.export_figure(fig, "statevector_vs_decision_diagram"))
+        plt.close(fig)
+
+    def _conversion_primitive_selection() -> None:
+        rows = partitioning_analysis.build_conversion_primitive_costs(estimator)
+        if not rows:
+            LOGGER.info(
+                "No conversion primitive data returned; skipping primitive selection plot",
+            )
+            return
+        qs = np.asarray([row["boundary"] for row in rows], dtype=int)
+        times = np.asarray([row["time"] for row in rows], dtype=float)
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        ax.plot(qs, times, marker="o", linewidth=2.2)
+        ax.set_xlabel("Boundary size q")
+        ax.set_ylabel("Estimated conversion time (arb. units)")
+        ax.set_title("Conversion primitive selection")
+        ax.set_xticks(qs)
+        for row in rows:
+            ax.annotate(
+                row["primitive"],
+                xy=(row["boundary"], row["time"]),
+                xytext=(0, 6),
+                textcoords="offset points",
+                ha="center",
+                fontsize=9,
+            )
+        fig.tight_layout()
+        _save(partitioning_analysis.export_figure(fig, "conversion_primitive_selection"))
+        plt.close(fig)
+        last = None
+        for row in rows:
+            primitive = row["primitive"]
+            if primitive != last:
+                LOGGER.info(
+                    "Boundary q=%s prefers primitive %s (%.2f a.u.)",
+                    row["boundary"],
+                    primitive,
+                    row["time"],
+                )
+                last = primitive
+
+    def _partition_plan_breakdowns() -> None:
+        scenarios = partitioning_analysis.documentation_plan_scenarios()
+        for scenario in scenarios:
+            plan = scenario.evaluate(estimator)
+            records: list[dict[str, object]] = [
+                {
+                    "plan": "Single backend",
+                    "component": "Full circuit (statevector)",
+                    "type": "Simulation",
+                    "backend": "Statevector",
+                    "primitive": "",
+                    "time": plan["single_backend"].time,
+                    "memory": plan["single_backend"].memory,
+                }
+            ]
+
+            for frag in plan["fragments"]:
+                records.append(
+                    {
+                        "plan": "Partitioned",
+                        "component": frag["name"],
+                        "type": "Simulation",
+                        "backend": frag["backend"].name.replace("_", " ").title(),
+                        "primitive": "",
+                        "time": frag["cost"].time,
+                        "memory": frag["cost"].memory,
+                    }
+                )
+
+            for conv in plan["conversions"]:
+                records.append(
+                    {
+                        "plan": "Partitioned",
+                        "component": conv["name"],
+                        "type": "Conversion",
+                        "backend": (
+                            f"{conv['source'].name.replace('_', ' ').title()}"
+                            f"→{conv['target'].name.replace('_', ' ').title()}"
+                        ),
+                        "primitive": conv["primitive"],
+                        "time": conv["cost"].time,
+                        "memory": conv["cost"].memory,
+                    }
+                )
+
+            df = pd.DataFrame(records)
+            component_order: list[str] = []
+            for record in records:
+                component = str(record["component"])
+                if component not in component_order:
+                    component_order.append(component)
+
+            pivot = df.pivot_table(
+                index="plan",
+                columns="component",
+                values="time",
+                aggfunc="sum",
+                fill_value=0,
+            )
+            pivot = pivot[component_order]
+            ax = pivot.plot(kind="bar", stacked=True, figsize=(9, 4))
+            ax.set_ylabel("Estimated time (arb. units)")
+            ax.set_title(scenario.title)
+            ax.legend(title="Component", bbox_to_anchor=(1.02, 1), loc="upper left")
+            fig = ax.figure
+            fig.tight_layout()
+            outputs = partitioning_analysis.export_figure(
+                fig, f"partition_plan_breakdown_{scenario.key}"
+            )
+            if scenario.key == "balanced_handoff":
+                outputs.extend(
+                    partitioning_analysis.export_figure(fig, "partition_plan_breakdown")
+                )
+            _save(outputs)
+            plt.close(fig)
+
+            total_cost = plan["aggregate"]["total_cost"]
+            LOGGER.info(
+                "%s: partitioned total %.2f a.u. (peak %.2f) vs. single backend %.2f a.u. (peak %.2f)",
+                scenario.title,
+                total_cost.time,
+                total_cost.memory,
+                plan["single_backend"].time,
+                plan["single_backend"].memory,
+            )
+
+    _safe_run("Clifford crossover plot", _clifford_crossover)
+    _safe_run("Statevector/tableau trade-off plot", _statevector_partition_tradeoff)
+    _safe_run("Statevector vs. MPS plot", _statevector_vs_mps)
+    _safe_run("Conversion-aware MPS plot", _conversion_aware_mps)
+    _safe_run("Statevector vs. decision-diagram plot", _statevector_vs_decision_diagram)
+    _safe_run("Conversion primitive selection plot", _conversion_primitive_selection)
+    _safe_run("Partition plan breakdown plots", _partition_plan_breakdowns)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Generate reproducible benchmark figures for the QuASAr paper",
@@ -959,6 +1362,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     generate_heatmap()
     generate_speedup_bars()
+    generate_partitioning_figures()
 
 
 if __name__ == "__main__":
