@@ -24,6 +24,7 @@ except Exception:  # pragma: no cover - psutil is optional
 from .circuit import Circuit
 from .analyzer import CircuitAnalyzer, AnalysisResult
 from .planner import Planner, PlanResult
+from .method_selector import NoFeasibleBackendError
 from .scheduler import Scheduler
 from .ssd import SSD
 from .cost import CostEstimator, Backend
@@ -227,15 +228,20 @@ class SimulationEngine:
                 max_memory=threshold,
             )
         else:
-            plan = self.planner.plan(
-                circuit,
-                analysis=analysis,
-                max_memory=threshold,
-                backend=backend,
-                target_accuracy=target_accuracy,
-                max_time=max_time,
-                optimization_level=optimization_level,
-            )
+            try:
+                plan = self.planner.plan(
+                    circuit,
+                    analysis=analysis,
+                    max_memory=threshold,
+                    backend=backend,
+                    target_accuracy=target_accuracy,
+                    max_time=max_time,
+                    optimization_level=optimization_level,
+                )
+            except ValueError as exc:
+                if str(exc) == "Requested backend exceeds memory threshold":
+                    raise NoFeasibleBackendError(str(exc)) from exc
+                raise
         planning_time = time.perf_counter() - start
         planning_cache_hits = self.planner.cache_hits - cache_hits_before
 

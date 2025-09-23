@@ -168,8 +168,24 @@ class MethodSelector:
         nnz = int((1 - sparse) * (2**num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
         amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparse)
+        size_override = num_qubits <= 10 and nnz <= config.DEFAULT.dd_nnz_threshold
+        entangling_names = {g.gate.upper() for g in gates if len(g.qubits) > 1}
+        structure_override = (
+            size_override
+            and sparse < s_thresh
+            and amp_rot == 0
+            and phase_rot <= 2
+            and entangling_names <= {"CX"}
+        )
+        effective_sparse = sparse
+        if structure_override:
+            # Small fragments often exhibit structured superpositions (e.g. Grover)
+            # that trigger dense heuristics despite being favourable for DDs.
+            # Boost the sparsity score smoothly so the metric can consider DD.
+            bonus = 1.0 + max(0, 10 - num_qubits) / 5.0
+            effective_sparse = min(1.0, max(sparse, s_thresh * bonus))
         passes = (
-            sparse >= s_thresh
+            effective_sparse >= s_thresh
             and nnz <= config.DEFAULT.dd_nnz_threshold
             and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
             and amp_rot <= amp_thresh
@@ -186,9 +202,11 @@ class MethodSelector:
                     "local": False,
                 }
             )
+            metrics["dd_size_override"] = structure_override
+            metrics["effective_dd_sparsity"] = effective_sparse
 
         if passes:
-            s_score = sparse / s_thresh if s_thresh > 0 else 0.0
+            s_score = effective_sparse / s_thresh if s_thresh > 0 else 0.0
             nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
             phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
             amp_score = 1 - amp_rot / amp_thresh

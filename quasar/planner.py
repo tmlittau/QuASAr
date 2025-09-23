@@ -1377,6 +1377,7 @@ class Planner:
             if diagnostics is not None:
                 diagnostics.single_backend = backend
                 diagnostics.single_cost = cost
+                diagnostics.dp_cost = cost
                 diagnostics.strategy = "forced"
                 result.diagnostics = diagnostics
             if use_cache:
@@ -1449,6 +1450,7 @@ class Planner:
                 circuit.ssd.conversions = []
                 if diagnostics is not None:
                     diagnostics.strategy = "quick"
+                    diagnostics.dp_cost = single_cost
                     result.diagnostics = diagnostics
                 if use_cache:
                     self.cache_insert(gates, result, single_backend_choice)
@@ -1500,6 +1502,7 @@ class Planner:
             circuit.ssd.conversions = []
             if diagnostics is not None:
                 diagnostics.strategy = "single"
+                diagnostics.dp_cost = pre_cost
                 result.diagnostics = diagnostics
             if use_cache:
                 self.cache_insert(gates, result, single_backend_choice)
