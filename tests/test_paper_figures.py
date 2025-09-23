@@ -5,6 +5,7 @@ import logging
 import pytest
 
 from quasar.cost import Backend
+from quasar.method_selector import NoFeasibleBackendError
 
 import benchmarks.paper_figures as paper_figures
 from benchmarks import circuits as circuit_lib
@@ -137,4 +138,56 @@ def test_collect_backend_data_marks_mps_ancilla_unsupported(monkeypatch, recwarn
     assert auto.iloc[0]["mode"] == "auto"
 
     assert not recwarn.list
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_collect_backend_data_records_no_backend(monkeypatch, caplog):
+    """Automatic failures without a feasible backend should be recorded."""
+
+    def fake_run(self, circuit, engine, *, backend=None, **kwargs):
+        if backend is None:
+            raise NoFeasibleBackendError(
+                "No simulation backend satisfies the given constraints"
+            )
+        backend_name = getattr(backend, "name", backend)
+        return {
+            "prepare_time": 0.0,
+            "run_time": 0.0,
+            "total_time": 0.0,
+            "prepare_peak_memory": 0,
+            "run_peak_memory": 0,
+            "result": None,
+            "failed": False,
+            "backend": backend_name,
+        }
+
+    monkeypatch.setattr(paper_figures.BenchmarkRunner, "run_quasar_multiple", fake_run)
+
+    spec = paper_figures.CircuitSpec(
+        "qft_small",
+        circuit_lib.qft_circuit,
+        (4,),
+    )
+
+    caplog.set_level(logging.INFO)
+
+    forced, auto = paper_figures.collect_backend_data(
+        [spec],
+        [Backend.STATEVECTOR],
+        repetitions=1,
+    )
+
+    assert len(forced) == 1
+    assert forced.iloc[0]["backend"] == Backend.STATEVECTOR.name
+
+    assert auto.shape[0] == 1
+    row_auto = auto.iloc[0]
+    assert row_auto["unsupported"]
+    assert row_auto["backend"] is None
+    assert row_auto["mode"] == "auto"
+    assert (
+        row_auto["comment"]
+        == "No simulation backend satisfies the given constraints"
+    )
+
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]

@@ -72,6 +72,7 @@ else:  # pragma: no cover - exercised via runtime execution
 
 from quasar import SimulationEngine
 from quasar.cost import Backend
+from quasar.method_selector import NoFeasibleBackendError
 
 
 FIGURES_DIR = Path(__file__).resolve().parent / "figures"
@@ -385,6 +386,57 @@ def _mps_skip_reason(
     return "; ".join(message_parts)
 
 
+def _automatic_failure_reason(
+    circuit: object | None,
+    requested_qubits: int,
+    *,
+    actual_qubits: int | None,
+    default: str,
+) -> str:
+    """Return a human-readable explanation for automatic run failures."""
+
+    reason = _mps_skip_reason(
+        circuit,
+        requested_qubits,
+        forced_width=actual_qubits,
+    )
+    if reason:
+        return reason
+
+    details: list[str] = []
+    if (
+        actual_qubits is not None
+        and requested_qubits > 0
+        and actual_qubits > requested_qubits
+    ):
+        details.append(
+            "circuit expands to "
+            f"{actual_qubits} qubits (requested {requested_qubits})"
+        )
+    if (
+        actual_qubits is not None
+        and actual_qubits > STATEVECTOR_MAX_QUBITS
+    ):
+        details.append(
+            f"exceeds statevector limit of {STATEVECTOR_MAX_QUBITS}"
+        )
+
+    memory_estimate = _statevector_memory_estimate(circuit)
+    if (
+        memory_estimate is not None
+        and memory_estimate > STATEVECTOR_SAFE_MEMORY_BYTES
+    ):
+        details.append(
+            "est. dense memory "
+            f"{memory_estimate:,} B > budget {STATEVECTOR_SAFE_MEMORY_BYTES:,} B"
+        )
+
+    if not details:
+        details.append(default)
+
+    return "; ".join(details)
+
+
 def collect_backend_data(
     specs: Iterable[CircuitSpec],
     backends: Sequence[Backend],
@@ -607,6 +659,35 @@ def collect_backend_data(
                     memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
                     run_timeout=effective_timeout,
                 )
+            except NoFeasibleBackendError as exc:
+                reason = _automatic_failure_reason(
+                    circuit_auto,
+                    n,
+                    actual_qubits=auto_width,
+                    default=str(exc),
+                )
+                LOGGER.info(
+                    "Skipping automatic run: circuit=%s qubits=%s reason=%s",
+                    spec.name,
+                    n,
+                    reason,
+                )
+                auto_records.append(
+                    {
+                        "circuit": spec.name,
+                        "qubits": n,
+                        "actual_qubits": auto_width,
+                        "framework": "quasar",
+                        "backend": None,
+                        "mode": "auto",
+                        "unsupported": True,
+                        "failed": False,
+                        "error": reason,
+                        "comment": reason,
+                        "repetitions": 0,
+                    }
+                )
+                continue
             except Exception as exc:  # pragma: no cover - skip unsupported mixes
                 LOGGER.warning(
                     "Automatic scheduling failed for circuit=%s qubits=%s: %s",
