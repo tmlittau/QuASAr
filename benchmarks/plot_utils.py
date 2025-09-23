@@ -348,6 +348,12 @@ def _annotate_backends(
 
 
 def _metric_label(name: str) -> str:
+    specific = {
+        "run_peak_memory_mib": "Run peak memory (MiB)",
+    }
+    if name in specific:
+        return specific[name]
+
     pretty = name.replace("_", " ")
     return pretty.replace(" mean", "")
 

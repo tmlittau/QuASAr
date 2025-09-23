@@ -764,9 +764,9 @@ def generate_backend_comparison(
                 frame["run_peak_memory_mib"] = frame.get("run_peak_memory_mean", 0) / (1024**2)
 
             grid_mem = plot_backend_timeseries(
-                forced.assign(run_peak_memory_mean=forced["run_peak_memory_mib"]),
-                auto.assign(run_peak_memory_mean=auto["run_peak_memory_mib"]),
-                metric="run_peak_memory_mean",
+                forced,
+                auto,
+                metric="run_peak_memory_mib",
                 annotate_auto=False,
                 col_wrap=2,
                 height=3.6,
