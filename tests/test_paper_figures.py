@@ -69,10 +69,14 @@ def test_collect_backend_data_marks_statevector_unsupported(monkeypatch, recwarn
     assert row["actual_qubits"] > paper_figures.STATEVECTOR_MAX_QUBITS
     assert "exceeding statevector limit" in row["error"]
     assert Backend.STATEVECTOR not in calls
-    assert calls == [None]
+    assert calls == []
 
     assert auto.shape[0] == 1
-    assert auto.iloc[0]["mode"] == "auto"
+    row_auto = auto.iloc[0]
+    assert row_auto["mode"] == "auto"
+    assert row_auto["backend"] == Backend.MPS.name
+    assert row_auto["unsupported"]
+    assert "ancilla expansion" in row_auto["error"]
 
     assert not recwarn.list
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
@@ -127,7 +131,7 @@ def test_collect_backend_data_marks_mps_ancilla_unsupported(monkeypatch, recwarn
     assert "exceeds statevector limit" in row["comment"]
     assert "dense memory" in row["comment"]
     assert Backend.MPS not in calls
-    assert calls == [None]
+    assert calls == []
 
     assert auto.shape[0] == 1
     assert auto.iloc[0]["mode"] == "auto"
