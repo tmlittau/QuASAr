@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 import pytest
 
@@ -67,24 +68,23 @@ def test_collect_backend_data_marks_statevector_unsupported(monkeypatch, recwarn
     assert bool(row["unsupported"])
     assert row["framework"] == Backend.STATEVECTOR.name
     assert row["backend"] == Backend.STATEVECTOR.name
-    assert row["actual_qubits"] > paper_figures.STATEVECTOR_MAX_QUBITS
+    assert int(row["actual_qubits"]) == 5
     assert "exceeding statevector limit" in row["error"]
     assert Backend.STATEVECTOR not in calls
-    assert calls == []
+    assert calls == [None]
 
     assert auto.shape[0] == 1
     row_auto = auto.iloc[0]
     assert row_auto["mode"] == "auto"
-    assert row_auto["backend"] == Backend.MPS.name
-    assert row_auto["unsupported"]
-    assert "ancilla expansion" in row_auto["error"]
+    assert not bool(row_auto["unsupported"])
+    assert math.isnan(row_auto.get("error", float("nan")))
 
     assert not recwarn.list
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
 
 
-def test_collect_backend_data_marks_mps_ancilla_unsupported(monkeypatch, recwarn, caplog):
-    """Ancilla-heavy circuits should not invoke Aer MPS during benchmarks."""
+def test_collect_backend_data_runs_grover_mps(monkeypatch, recwarn, caplog):
+    """Grover circuits with many controls should execute on the MPS backend."""
 
     monkeypatch.setattr(paper_figures, "STATEVECTOR_MAX_QUBITS", 30)
 
@@ -125,20 +125,29 @@ def test_collect_backend_data_marks_mps_ancilla_unsupported(monkeypatch, recwarn
 
     assert len(forced) == 1
     row = forced.iloc[0]
-    assert bool(row["unsupported"])
+    assert not bool(row["unsupported"])
     assert row["framework"] == Backend.MPS.name
     assert row["backend"] == Backend.MPS.name
-    assert "ancilla expansion" in row["error"]
-    assert "exceeds statevector limit" in row["comment"]
-    assert "dense memory" in row["comment"]
-    assert Backend.MPS not in calls
-    assert calls == []
+    assert int(row["actual_qubits"]) == 20
+    assert calls and calls[0] == Backend.MPS
 
     assert auto.shape[0] == 1
-    assert auto.iloc[0]["mode"] == "auto"
+    row_auto = auto.iloc[0]
+    assert row_auto["mode"] == "auto"
+    assert not bool(row_auto["unsupported"])
+    assert math.isnan(row_auto.get("error", float("nan")))
+    assert calls[-1] is None
 
     assert not recwarn.list
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_large_grover_circuit_preserves_width():
+    """Large Grover circuits should not introduce extra ancilla qubits."""
+
+    circuit = circuit_lib.grover_circuit(28, n_iterations=2)
+    assert circuit.num_qubits == 28
+    assert max(index for gate in circuit.gates for index in gate.qubits) <= 27
 
 
 def test_collect_backend_data_records_no_backend(monkeypatch, caplog):

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import List, Tuple
 
 import numpy as np
 from qiskit import QuantumCircuit
+from qiskit.synthesis.multi_controlled import synth_mcx_noaux_v24
 
 from quasar.circuit import Circuit, Gate
+from quasar.decompositions import decompose_mcx
 
 
 # Names of gates forming the Clifford group used in benchmark filtering.
@@ -128,12 +131,11 @@ def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
 
     controls = list(range(n_qubits - 1))
     target = n_qubits - 1
-    mcx_name = "C" * len(controls) + "X" if controls else "X"
 
     for _ in range(n_iterations):
         # Oracle marking the all-ones state
         gates.append(Gate("H", [target]))
-        gates.append(Gate(mcx_name, controls + [target]))
+        gates.extend(_multi_controlled_x(controls, target))
         gates.append(Gate("H", [target]))
 
         # Diffuser
@@ -142,7 +144,7 @@ def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
         for q in range(n_qubits):
             gates.append(Gate("X", [q]))
         gates.append(Gate("H", [target]))
-        gates.append(Gate(mcx_name, controls + [target]))
+        gates.extend(_multi_controlled_x(controls, target))
         gates.append(Gate("H", [target]))
         for q in range(n_qubits):
             gates.append(Gate("X", [q]))
@@ -150,6 +152,65 @@ def grover_circuit(n_qubits: int, n_iterations: int = 1) -> Circuit:
             gates.append(Gate("H", [q]))
 
     return Circuit(gates)
+
+
+@lru_cache(maxsize=None)
+def _mcx_template(num_controls: int) -> List[Gate]:
+    """Return a cached ancilla-free MCX template with ``num_controls`` controls."""
+
+    if num_controls < 0:
+        raise ValueError("num_controls must be non-negative")
+
+    # Base cases rely on the existing decomposition which is ancilla-free for
+    # up to three controls.
+    if num_controls <= 3:
+        placeholder_controls = list(range(num_controls))
+        placeholder_target = num_controls
+        gates = decompose_mcx(placeholder_controls, placeholder_target)
+        return [
+            Gate(gate.gate, list(gate.qubits), dict(gate.params))
+            for gate in gates
+        ]
+
+    # ``synth_mcx_noaux_v24`` produces an ancilla-free implementation when
+    # composed onto a fresh register and decomposed until only elementary
+    # single- and two-qubit operations remain.
+    num_qubits = num_controls + 1
+    circuit = QuantumCircuit(num_qubits)
+    circuit.append(synth_mcx_noaux_v24(num_controls).to_gate(), range(num_qubits))
+
+    allowed = {"CX", "P", "RZ", "U", "H"}
+    for _ in range(6):
+        names = {instruction.operation.name.upper() for instruction in circuit.data}
+        if names <= allowed:
+            break
+        circuit = circuit.decompose()
+    else:  # pragma: no cover - defensive, decomposition should converge quickly
+        raise RuntimeError("Failed to synthesise ancilla-free MCX decomposition")
+
+    index_map = {qubit: idx for idx, qubit in enumerate(circuit.qubits)}
+    template: List[Gate] = []
+    for instruction in circuit.data:
+        name = instruction.operation.name.upper()
+        qubits = [index_map[qubit] for qubit in instruction.qubits]
+        params = {
+            f"param{idx}": float(value)
+            for idx, value in enumerate(instruction.operation.params)
+        }
+        template.append(Gate(name, qubits, params))
+    return template
+
+
+def _multi_controlled_x(controls: List[int], target: int) -> List[Gate]:
+    """Return an ancilla-free decomposition of a multi-controlled X gate."""
+
+    template = _mcx_template(len(controls))
+    mapping = {idx: qubit for idx, qubit in enumerate(controls)}
+    mapping[len(controls)] = target
+    return [
+        Gate(gate.gate, [mapping[q] for q in gate.qubits], dict(gate.params))
+        for gate in template
+    ]
 
 
 def bernstein_vazirani_circuit(n_qubits: int, secret: int = 0) -> Circuit:
