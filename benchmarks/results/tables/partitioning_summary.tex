@@ -1,0 +1,16 @@
+\begin{table}[htbp]
+\centering
+\caption{Summary of partitioning benchmarks highlighting the strongest observed QuASAr speedups.}
+\label{tab:partitioning-summary}
+\begin{tabular}{llllll}
+\hline
+Scenario & Best variant & Qubits & Backend & Mean speedup & Max speedup \\
+\hline
+Dual Magic Injection & 2 & 36 & Decision_Diagram & 0.88\times & 1.05\times \\
+Staged Rank & 1 & 9 & Mps & 0.27\times & 0.29\times \\
+Staged Sparsity & 3 & 10 & Mps & 0.27\times & 0.28\times \\
+Tableau Boundary & 1 & 7 & Mps & 0.24\times & 0.26\times \\
+W State Oracle & 3 & 18 & Decision_Diagram & 0.80\times & 1.07\times \\
+\hline
+\end{tabular}
+\end{table}

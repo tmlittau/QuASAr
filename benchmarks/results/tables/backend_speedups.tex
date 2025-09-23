@@ -1,0 +1,24 @@
+\begin{table}[htbp]
+\centering
+\caption{Runtime comparison between QuASAr and the strongest baseline per circuit.}
+\label{tab:backend-speedups}
+\begin{tabular}{lllllll}
+\hline
+Circuit & Qubits & Baseline backend & Baseline runtime & QuASAr backend & QuASAr runtime & Speedup \\
+\hline
+GHZ Ladder & 20 & Tableau & 100.4\,\mathrm{\mu s} & Tableau & 68.4\,\mathrm{\mu s} & 1.47\times \\
+GHZ Ladder & 24 & Tableau & 88.9\,\mathrm{\mu s} & Tableau & 78.0\,\mathrm{\mu s} & 1.14\times \\
+GHZ Ladder & 28 & Tableau & 108.2\,\mathrm{\mu s} & Tableau & 91.2\,\mathrm{\mu s} & 1.19\times \\
+Grover & 3 & Decision_Diagram & 591.1\,\mathrm{\mu s} & Mps & 3.1\,\mathrm{ms} & 0.19\times \\
+Grover & 4 & Decision_Diagram & 1.0\,\mathrm{ms} & Mps & 5.8\,\mathrm{ms} & 0.18\times \\
+Grover Large & 20 & Decision_Diagram & 93.7\,\mathrm{ms} & Mps & nan\,\mathrm{s} & nan\times \\
+Grover Large & 24 & Decision_Diagram & 1.93\,\mathrm{s} & Mps & nan\,\mathrm{s} & nan\times \\
+Grover Large & 28 & Decision_Diagram & 733.5\,\mathrm{ms} & Mps & nan\,\mathrm{s} & nan\times \\
+QFT & 3 & Tableau & 23.8\,\mathrm{\mu s} & Tableau & 22.5\,\mathrm{\mu s} & 1.06\times \\
+QFT & 4 & Tableau & 23.8\,\mathrm{\mu s} & Tableau & 23.8\,\mathrm{\mu s} & 1.00\times \\
+Random Clifford T & 20 & Mps & 73.3\,\mathrm{ms} & Statevector & 82.2\,\mathrm{ms} & 0.89\times \\
+Random Clifford T & 24 & Mps & 108.6\,\mathrm{ms} & Statevector & 891.3\,\mathrm{ms} & 0.12\times \\
+Random Clifford T & 28 & Statevector & 13.11\,\mathrm{s} & Statevector & 13.11\,\mathrm{s} & 1.00\times \\
+\hline
+\end{tabular}
+\end{table}

@@ -1,0 +1,20 @@
+\begin{table}[htbp]
+\centering
+\caption{Resource requirements and performance impact of W-state phase oracle variants.}
+\label{tab:w-state-oracle}
+\begin{tabular}{lllllll}
+\hline
+Variant & Layers & Rotations & Rotation set & Entangling gates & Backend & Speedup \\
+\hline
+1 & 1 & 1 & $\{R_{z}\}$ & 2 & Decision_Diagram & 1.04\times \\
+2 & 1 & 2 & $\{R_{y}, R_{z}\}$ & 2 & Decision_Diagram & 1.03\times \\
+3 & 1 & 4 & $\{R_{x}, R_{y}, R_{z}, T\}$ & 4 & Decision_Diagram & 1.07\times \\
+4 & 2 & 2 & $\{R_{z}\}$ & 4 & Mps & 0.16\times \\
+5 & 2 & 4 & $\{R_{y}, R_{z}\}$ & 4 & Decision_Diagram & 0.89\times \\
+6 & 2 & 8 & $\{R_{x}, R_{y}, R_{z}, T\}$ & 8 & Decision_Diagram & 0.94\times \\
+7 & 4 & 4 & $\{R_{z}\}$ & 8 & Mps & 0.21\times \\
+8 & 4 & 8 & $\{R_{y}, R_{z}\}$ & 8 & Decision_Diagram & 0.87\times \\
+9 & 4 & 16 & $\{R_{x}, R_{y}, R_{z}, T\}$ & 16 & Decision_Diagram & 0.98\times \\
+\hline
+\end{tabular}
+\end{table}
