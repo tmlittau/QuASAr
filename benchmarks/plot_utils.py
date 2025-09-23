@@ -920,58 +920,81 @@ def plot_quasar_vs_baseline_best(
     quasar_color = palette.get("quasar", "#1b9e77")
     quasar_marker = markers.get("quasar", "o")
 
-    if std_col in baseline_best.columns:
-        ax.errorbar(
-            baseline_best[x_col],
-            baseline_best[metric],
-            yerr=baseline_best[std_col],
-            color=base_color,
-            marker=base_marker,
-            linestyle="-",
-            linewidth=1.5,
-            capsize=3,
-            label="Baseline best",
-        )
-    else:
-        ax.plot(
-            baseline_best[x_col],
-            baseline_best[metric],
-            marker=base_marker,
-            color=base_color,
-            linewidth=1.5,
-            label="Baseline best",
-        )
+    group_column = "circuit" if ("circuit" in baseline_best.columns or "circuit" in quasar.columns) else None
 
-    if std_col in quasar.columns:
-        ax.errorbar(
-            quasar[x_col],
-            quasar[metric],
-            yerr=quasar[std_col],
-            color=quasar_color,
-            marker=quasar_marker,
-            linestyle="-",
-            linewidth=1.5,
-            capsize=3,
-            label="QuASAr",
-        )
-    else:
-        ax.plot(
-            quasar[x_col],
-            quasar[metric],
-            marker=quasar_marker,
-            color=quasar_color,
-            linewidth=1.5,
-            label="QuASAr",
-        )
-    if std_col in quasar.columns:
-        sub = quasar.sort_values(x_col)
-        ax.fill_between(
-            sub[x_col],
-            sub[metric] - sub[std_col],
-            sub[metric] + sub[std_col],
-            alpha=0.15,
-            color=quasar_color,
-        )
+    def _iter_groups(data: pd.DataFrame) -> Iterable[tuple[object, pd.DataFrame]]:
+        if group_column is None or group_column not in data.columns:
+            yield None, data
+            return
+        try:
+            groups = data.groupby(group_column, dropna=False, sort=False)
+        except TypeError:  # pragma: no cover - compatibility with older pandas
+            groups = data.groupby(group_column, sort=False)
+        for key, group in groups:
+            yield key, group
+
+    def _plot_series(
+        data: pd.DataFrame,
+        *,
+        color: str,
+        marker: str,
+        label: str,
+        with_std: bool,
+        fill: bool = False,
+    ) -> None:
+        label_used = False
+        for _, group in _iter_groups(data):
+            if group.empty:
+                continue
+            ordered = group.sort_values(x_col)
+            plot_label = label if not label_used else None
+            if with_std and std_col in ordered.columns:
+                ax.errorbar(
+                    ordered[x_col],
+                    ordered[metric],
+                    yerr=ordered[std_col],
+                    color=color,
+                    marker=marker,
+                    linestyle="-",
+                    linewidth=1.5,
+                    capsize=3,
+                    label=plot_label,
+                )
+            else:
+                ax.plot(
+                    ordered[x_col],
+                    ordered[metric],
+                    marker=marker,
+                    color=color,
+                    linewidth=1.5,
+                    label=plot_label,
+                )
+            if fill and std_col in ordered.columns:
+                ax.fill_between(
+                    ordered[x_col],
+                    ordered[metric] - ordered[std_col],
+                    ordered[metric] + ordered[std_col],
+                    alpha=0.15,
+                    color=color,
+                )
+            label_used = True
+
+    _plot_series(
+        baseline_best,
+        color=base_color,
+        marker=base_marker,
+        label="Baseline best",
+        with_std=std_col in baseline_best.columns,
+    )
+
+    _plot_series(
+        quasar,
+        color=quasar_color,
+        marker=quasar_marker,
+        label="QuASAr",
+        with_std=std_col in quasar.columns,
+        fill=True,
+    )
 
     if not unsupported.empty:
         ax.scatter(
