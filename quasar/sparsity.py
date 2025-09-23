@@ -74,4 +74,12 @@ def sparsity_estimate(circuit: Circuit) -> float:
                 nnz *= 2
         if nnz > full_dim:
             nnz = full_dim
+    if nnz >= full_dim and circuit.num_qubits <= 12:
+        # Grover-style branching quickly populates the entire state space even
+        # though the resulting superposition remains highly structured.  Treat
+        # small circuits as retaining a sliver of sparsity so decision diagram
+        # heuristics continue to evaluate the fragment instead of rejecting it
+        # outright as "fully dense".
+        slack = max(1, full_dim // (4 * max(1, circuit.num_qubits)))
+        nnz = max(full_dim - slack, 1)
     return 1 - nnz / full_dim

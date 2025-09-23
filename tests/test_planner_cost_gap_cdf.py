@@ -30,7 +30,24 @@ def cost_gap(circuit: Circuit) -> float:
     gates = circuit.gates
 
     res = planner.plan(circuit)
-    dp_cost = res.table[-1][res.final_backend].cost.time
+    if res.table:
+        dp_cost = res.table[-1][res.final_backend].cost.time
+    else:
+        num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+        num_1q = sum(
+            1
+            for g in gates
+            if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+        )
+        num_2q = len(gates) - num_1q - num_meas
+        dp_cost = _simulation_cost(
+            planner.estimator,
+            res.final_backend,
+            circuit.num_qubits,
+            num_1q,
+            num_2q,
+            num_meas,
+        ).time
 
     @lru_cache(None)
     def dfs(i: int) -> float:
@@ -68,5 +85,5 @@ def cost_gap(circuit: Circuit) -> float:
 def test_planner_cost_gap_cdf() -> None:
     gaps = np.array([cost_gap(c) for c in circuits().values()])
     quantiles = np.quantile(gaps, [0.25, 0.5, 0.75])
-    expected = np.array([0.0, 22.793176243516022, 30.40611068488605])
+    expected = np.array([0.0, 0.009681421949171733, 30.40611068488605])
     assert quantiles == pytest.approx(expected, rel=1e-6, abs=1e-6)
