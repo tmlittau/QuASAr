@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from typing import List, Tuple
+from random import Random
+from typing import Iterable, List, Sequence, Tuple
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -44,6 +45,12 @@ def ghz_circuit(n_qubits: int) -> Circuit:
     for i in range(1, n_qubits):
         gates.append(Gate("CX", [i - 1, i]))
     return Circuit(gates)
+
+
+def _ghz_spec(n: int) -> List[Gate]:
+    """Return a gate list preparing a GHZ state on ``n`` qubits."""
+
+    return list(ghz_circuit(max(0, n)).gates)
 
 
 def _qft_spec(n: int) -> List[Gate]:
@@ -87,6 +94,8 @@ def _w_state_spec(n: int) -> List[Gate]:
 
     """Return a gate list for a W state preparation circuit."""
     gates: List[Gate] = []
+    if n <= 0:
+        return gates
     gates.append(Gate("RY", [0], {"theta": 2 * math.acos(math.sqrt(1 / n))}))
 
     for q in range(1, n - 1):
@@ -97,7 +106,7 @@ def _w_state_spec(n: int) -> List[Gate]:
                 {"theta": 2 * math.acos(math.sqrt(1 / (n - q)))}
             )
         )
-    for q in reversed(range(n - 1)):
+    for q in reversed(range(max(0, n - 1))):
         gates.append(Gate("CX", [q, q + 1]))
     gates.append(Gate("X", [0]))
     return gates
@@ -886,3 +895,482 @@ def recur_subroutine_circuit(num_qubits: int = 4, depth: int = 3) -> Circuit:
         for q in range(num_qubits):
             gates.append(Gate("H", [q]))
     return Circuit(gates)
+
+
+def _remap_gates(gates: Iterable[Gate], qubits: Sequence[int]) -> List[Gate]:
+    """Return ``gates`` with local indices remapped to ``qubits``."""
+
+    mapping = list(qubits)
+    return [
+        Gate(g.gate, [mapping[idx] for idx in g.qubits], dict(g.params))
+        for g in gates
+    ]
+
+
+def _random_single_qubit_gate(
+    qubit: int, rng: Random, *, include_non_clifford: bool
+) -> Gate:
+    """Return a random single-qubit gate acting on ``qubit``."""
+
+    if include_non_clifford and rng.random() < 0.4:
+        choice = rng.choice(["T", "TDG", "RY", "RZ"])
+    else:
+        choice = rng.choice(["H", "S", "SDG", "X", "Y", "Z"])
+    if choice == "RY":
+        return Gate("RY", [qubit], {"theta": rng.uniform(-math.pi, math.pi)})
+    if choice == "RZ":
+        return Gate("RZ", [qubit], {"phi": rng.uniform(-math.pi, math.pi)})
+    return Gate(choice, [qubit])
+
+
+def _random_two_qubit_gate(
+    qubit_a: int, qubit_b: int, rng: Random, *, include_non_clifford: bool
+) -> Gate:
+    """Return a random two-qubit entangling gate."""
+
+    if include_non_clifford and rng.random() < 0.5:
+        control, target = (qubit_a, qubit_b) if rng.random() < 0.5 else (qubit_b, qubit_a)
+        phi = rng.uniform(-math.pi, math.pi)
+        return Gate("CRZ", [control, target], {"phi": phi})
+    name = rng.choice(["CX", "CZ", "SWAP"])
+    qubits = [qubit_a, qubit_b]
+    if name != "SWAP" and rng.random() < 0.5:
+        qubits = [qubit_b, qubit_a]
+    return Gate(name, qubits)
+
+
+def _random_layer(
+    num_qubits: int, rng: Random, *, include_non_clifford: bool
+) -> List[Gate]:
+    """Return a depth-one layer of random single- and two-qubit gates."""
+
+    layer: List[Gate] = []
+    for qubit in range(num_qubits):
+        layer.append(
+            _random_single_qubit_gate(
+                qubit, rng, include_non_clifford=include_non_clifford
+            )
+        )
+    order = list(range(num_qubits))
+    rng.shuffle(order)
+    for a, b in zip(order[::2], order[1::2]):
+        layer.append(
+            _random_two_qubit_gate(
+                a, b, rng, include_non_clifford=include_non_clifford
+            )
+        )
+    return layer
+
+
+def _build_layers_from_flags(
+    num_qubits: int, include_non_clifford: Sequence[bool], rng: Random
+) -> Tuple[List[Gate], List[int], List[bool]]:
+    """Return random layers and metadata for the given include flags."""
+
+    gates: List[Gate] = []
+    offsets: List[int] = []
+    non_clifford_layers: List[bool] = []
+    for flag in include_non_clifford:
+        offsets.append(len(gates))
+        layer = _random_layer(num_qubits, rng, include_non_clifford=flag)
+        if flag and all(g.gate in CLIFFORD_GATES for g in layer) and num_qubits > 0:
+            target = rng.randrange(num_qubits)
+            layer.append(Gate("T", [target]))
+        gates.extend(layer)
+        non_clifford_layers.append(
+            any(g.gate not in CLIFFORD_GATES for g in layer)
+        )
+    return gates, offsets, non_clifford_layers
+
+
+def _resolve_random_depths(depth: int | Sequence[int]) -> List[int]:
+    """Normalise depth specifications for random entangling stages."""
+
+    if isinstance(depth, Sequence) and not isinstance(depth, (str, bytes)):
+        depths = [int(d) for d in depth]
+    else:
+        depths = [int(depth)]
+    return [max(0, d) for d in depths if d is not None]
+
+
+def clustered_entanglement_circuit(
+    num_qubits: int,
+    block_size: int = 5,
+    state: str = "ghz",
+    entangler: str = "random",
+    depth: int | Sequence[int] = 1000,
+    *,
+    seed: int | None = 1337,
+) -> Circuit:
+    """Prepare clustered entangled states followed by configurable workloads."""
+
+    if num_qubits <= 0:
+        return Circuit([])
+    if block_size <= 0:
+        raise ValueError("block_size must be positive")
+
+    rng = Random(seed)
+    gates: List[Gate] = []
+    blocks: List[List[int]] = []
+    for start in range(0, num_qubits, block_size):
+        block = list(range(start, min(start + block_size, num_qubits)))
+        if not block:
+            continue
+        blocks.append(block)
+        if state.lower() == "ghz":
+            prep = _ghz_spec(len(block))
+        elif state.lower() == "w":
+            prep = _w_state_spec(len(block))
+        else:
+            raise ValueError(f"unsupported clustered state '{state}'")
+        gates.extend(_remap_gates(prep, block))
+
+    prep_gate_count = len(gates)
+    entangler_sequence = [
+        part.strip().lower()
+        for part in entangler.split("+")
+        if part.strip()
+    ]
+    if not entangler_sequence:
+        entangler_sequence = ["random"] if depth else []
+
+    random_depths = _resolve_random_depths(depth)
+    if not random_depths:
+        random_depths = [0]
+    random_index = 0
+    layer_offsets: List[int] = []
+    stage_summaries: List[dict] = []
+
+    for stage in entangler_sequence:
+        stage_start = len(gates)
+        summary: dict = {"stage": stage, "start": stage_start}
+        if stage == "random":
+            if random_index >= len(random_depths):
+                stage_depth = random_depths[-1]
+            else:
+                stage_depth = random_depths[random_index]
+            random_index += 1
+            include_flags = [True] * stage_depth
+            stage_gates, offsets, non_flags = _build_layers_from_flags(
+                num_qubits, include_flags, rng
+            )
+            layer_offsets.extend(stage_start + offset for offset in offsets)
+            summary.update(
+                {
+                    "depth": stage_depth,
+                    "layers": stage_depth,
+                    "non_clifford_layers": sum(non_flags),
+                }
+            )
+        elif stage == "qft":
+            stage_gates = _qft_spec(num_qubits)
+            summary["layers"] = None
+        elif stage == "iqft":
+            stage_gates = _iqft_spec(num_qubits)
+            summary["layers"] = None
+        elif stage == "grover":
+            iterations = max(1, max(1, num_qubits // max(1, block_size)) // 2)
+            stage_gates = list(grover_circuit(num_qubits, iterations).gates)
+            summary.update({"layers": iterations, "iterations": iterations})
+        else:
+            raise ValueError(f"unknown entangler stage '{stage}'")
+
+        if stage != "random":
+            stage_gates = list(stage_gates)
+        gates.extend(stage_gates)
+        summary["gate_count"] = len(stage_gates)
+        summary["end"] = len(gates)
+        stage_summaries.append(summary)
+
+    circuit = Circuit(gates)
+    metadata = {
+        "family": "clustered_entanglement",
+        "state": state.lower(),
+        "block_size": block_size,
+        "num_blocks": len(blocks),
+        "prep_gate_count": prep_gate_count,
+        "entangler_sequence": entangler_sequence,
+        "random_depths": random_depths,
+        "layer_offsets": layer_offsets,
+        "stage_summaries": stage_summaries,
+        "seed": seed,
+    }
+    setattr(circuit, "metadata", metadata)
+    return circuit
+
+
+def clustered_ghz_random_circuit(num_qubits: int) -> Circuit:
+    """Prepare GHZ clusters followed by deep random layers."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=5,
+        state="ghz",
+        entangler="random",
+        depth=1000,
+    )
+
+
+def clustered_ghz_qft_circuit(num_qubits: int) -> Circuit:
+    """Prepare GHZ clusters followed by a global QFT."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=5,
+        state="ghz",
+        entangler="qft",
+        depth=0,
+    )
+
+
+def clustered_w_random_circuit(num_qubits: int) -> Circuit:
+    """Prepare W-state clusters followed by random entangling layers."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=5,
+        state="w",
+        entangler="random",
+        depth=1000,
+    )
+
+
+def clustered_w_qft_circuit(num_qubits: int) -> Circuit:
+    """Prepare W-state clusters followed by a QFT."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=5,
+        state="w",
+        entangler="qft",
+        depth=0,
+    )
+
+
+def clustered_ghz_random_qft_circuit(num_qubits: int) -> Circuit:
+    """Prepare GHZ clusters, random layers and a final QFT."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=5,
+        state="ghz",
+        entangler="random+qft",
+        depth=800,
+    )
+
+
+def layered_clifford_nonclifford_circuit(
+    num_qubits: int,
+    depth: int = 5000,
+    fraction_clifford: float = 0.8,
+    *,
+    seed: int | None = 2025,
+) -> Circuit:
+    """Build a layered circuit transitioning from Clifford to non-Clifford gates."""
+
+    if num_qubits <= 0 or depth <= 0:
+        return Circuit([])
+    if not 0.0 <= fraction_clifford <= 1.0:
+        raise ValueError("fraction_clifford must be within [0, 1]")
+
+    rng = Random(seed)
+    clifford_layers = min(depth, max(0, int(fraction_clifford * depth)))
+    include_flags = [False] * clifford_layers + [True] * (depth - clifford_layers)
+    gates, offsets, non_flags = _build_layers_from_flags(num_qubits, include_flags, rng)
+    circuit = Circuit(gates, use_classical_simplification=False)
+    metadata = {
+        "family": "layered_clifford_transition",
+        "depth": depth,
+        "fraction_clifford": fraction_clifford,
+        "clifford_layers": clifford_layers,
+        "non_clifford_layers": depth - clifford_layers,
+        "transition_layer": clifford_layers,
+        "layer_offsets": offsets,
+        "non_clifford_layer_flags": non_flags,
+        "seed": seed,
+    }
+    setattr(circuit, "metadata", metadata)
+    return circuit
+
+
+def layered_clifford_midpoint_circuit(num_qubits: int) -> Circuit:
+    """Transition to non-Clifford gates halfway through the depth."""
+
+    return layered_clifford_nonclifford_circuit(
+        num_qubits, depth=5000, fraction_clifford=0.6
+    )
+
+
+def layered_clifford_delayed_magic_circuit(num_qubits: int) -> Circuit:
+    """Delay the introduction of non-Clifford gates to late layers."""
+
+    return layered_clifford_nonclifford_circuit(
+        num_qubits, depth=5000, fraction_clifford=0.8
+    )
+
+
+def layered_clifford_ramp_circuit(
+    num_qubits: int,
+    depth: int = 5000,
+    ramp_start_fraction: float = 0.5,
+    ramp_end_fraction: float = 0.9,
+    *,
+    seed: int | None = 3030,
+) -> Circuit:
+    """Gradually increase the non-Clifford density after an initial Clifford prefix."""
+
+    if num_qubits <= 0 or depth <= 0:
+        return Circuit([])
+    if ramp_start_fraction < 0 or ramp_end_fraction > 1:
+        raise ValueError("ramp fractions must lie in [0, 1]")
+    if ramp_start_fraction > ramp_end_fraction:
+        raise ValueError("ramp_start_fraction must be <= ramp_end_fraction")
+
+    rng = Random(seed)
+    start_layer = int(depth * ramp_start_fraction)
+    end_layer = int(depth * ramp_end_fraction)
+    include_flags: List[bool] = []
+    for layer in range(depth):
+        if layer < start_layer:
+            include_flags.append(False)
+        elif layer >= end_layer:
+            include_flags.append(True)
+        else:
+            span = max(1, end_layer - start_layer)
+            probability = (layer - start_layer + 1) / span
+            include_flags.append(rng.random() < probability)
+    if not any(include_flags[start_layer:]):
+        include_flags[-1] = True
+    gates, offsets, non_flags = _build_layers_from_flags(num_qubits, include_flags, rng)
+    circuit = Circuit(gates, use_classical_simplification=False)
+    metadata = {
+        "family": "layered_clifford_ramp",
+        "depth": depth,
+        "ramp_start_layer": start_layer,
+        "ramp_end_layer": end_layer,
+        "layer_offsets": offsets,
+        "non_clifford_layer_flags": non_flags,
+        "seed": seed,
+    }
+    setattr(circuit, "metadata", metadata)
+    return circuit
+
+
+def _normalise_classical_qubits(
+    classical_qubits: int | Iterable[int], num_qubits: int
+) -> List[int]:
+    """Normalise ``classical_qubits`` to a sorted list of indices."""
+
+    if isinstance(classical_qubits, Iterable) and not isinstance(
+        classical_qubits, (int, float, complex)
+    ):
+        indices = sorted(
+            {
+                q
+                for q in (int(i) for i in classical_qubits)
+                if 0 <= q < num_qubits
+            }
+        )
+    else:
+        count = int(classical_qubits)
+        if count < 0:
+            raise ValueError("number of classical qubits must be non-negative")
+        count = min(count, max(0, num_qubits - 1))
+        indices = list(range(count))
+    return indices
+
+
+def classical_controlled_circuit(
+    num_qubits: int,
+    depth: int = 3000,
+    classical_qubits: int | Iterable[int] = 8,
+    *,
+    toggle_period: int = 64,
+    fanout: int = 2,
+    seed: int | None = 424242,
+) -> Circuit:
+    """Large circuit with classical controls triggering simplifications."""
+
+    if num_qubits <= 1 or depth <= 0:
+        return Circuit([])
+
+    classical = _normalise_classical_qubits(classical_qubits, num_qubits)
+    if not classical:
+        classical = list(range(min(max(1, num_qubits // 4), num_qubits - 1)))
+    quantum = [q for q in range(num_qubits) if q not in classical]
+    if not quantum:
+        raise ValueError("at least one non-classical qubit is required")
+
+    rng = Random(seed)
+    gates: List[Gate] = []
+    for idx, qubit in enumerate(classical):
+        if idx % 2 == 0:
+            gates.append(Gate("X", [qubit]))
+
+    prep_gate_count = len(gates)
+    layer_offsets: List[int] = []
+    toggle_period = max(1, toggle_period)
+
+    for layer in range(depth):
+        layer_offsets.append(len(gates))
+        if layer > 0 and layer % toggle_period == 0:
+            flip_qubit = classical[(layer // toggle_period) % len(classical)]
+            gates.append(Gate("X", [flip_qubit]))
+        for target in quantum:
+            theta = ((layer + 1) * (target + 1)) % 31 / 31 * math.pi
+            phi = ((layer + 1) * (target + 2)) % 37 / 37 * math.pi
+            gates.append(Gate("RY", [target], {"theta": theta}))
+            gates.append(Gate("RZ", [target], {"phi": phi}))
+        for idx, ctrl in enumerate(classical):
+            target = quantum[(layer * fanout + idx) % len(quantum)]
+            pattern = (layer + idx) % 3
+            if pattern == 0:
+                gates.append(Gate("CX", [ctrl, target]))
+            elif pattern == 1:
+                gates.append(Gate("CZ", [ctrl, target]))
+            else:
+                angle = ((layer + 1) * (idx + 1)) % 23 / 23 * math.pi
+                gates.append(Gate("CRZ", [ctrl, target], {"phi": angle}))
+
+    circuit = Circuit(gates, use_classical_simplification=False)
+    metadata = {
+        "family": "classical_controlled",
+        "depth": depth,
+        "classical_qubits": classical,
+        "quantum_qubits": quantum,
+        "prep_gate_count": prep_gate_count,
+        "layer_offsets": layer_offsets,
+        "toggle_period": toggle_period,
+        "fanout": fanout,
+        "seed": seed,
+    }
+    setattr(circuit, "metadata", metadata)
+    setattr(circuit, "classical_qubits", tuple(classical))
+    setattr(circuit, "quantum_qubits", tuple(quantum))
+    return circuit
+
+
+def dynamic_classical_control_circuit(num_qubits: int) -> Circuit:
+    """Classical-control benchmark with frequent basis flips."""
+
+    classical_count = max(4, num_qubits // 3)
+    return classical_controlled_circuit(
+        num_qubits,
+        depth=3000,
+        classical_qubits=classical_count,
+        toggle_period=32,
+        fanout=3,
+    )
+
+
+def classical_controlled_fanout_circuit(num_qubits: int) -> Circuit:
+    """Classical-control benchmark with wide fan-out controls."""
+
+    classical_count = max(6, num_qubits // 2)
+    return classical_controlled_circuit(
+        num_qubits,
+        depth=3000,
+        classical_qubits=classical_count,
+        toggle_period=96,
+        fanout=4,
+    )
