@@ -249,14 +249,38 @@ class MethodSelector:
                 "reasons": reasons,
             }
 
-        # Determine whether the fragment is local enough for MPS
+        # Characterise locality for matrix product state simulation.
         multi = [g for g in gates if len(g.qubits) > 1]
-        local = bool(multi) and all(
-            len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
+        two_qubit = [g for g in multi if len(g.qubits) == 2]
+        higher_arity = len(multi) - len(two_qubit)
+        long_range_two = [
+            g for g in two_qubit if abs(g.qubits[0] - g.qubits[1]) > 1
+        ]
+        non_local_count = len(long_range_two) + max(higher_arity, 0)
+        total_multi = len(multi)
+        long_range_fraction = (
+            non_local_count / total_multi if total_multi else 0.0
         )
+        max_interaction_distance = 0
+        for gate in multi:
+            qubits = sorted(gate.qubits)
+            if qubits:
+                span = qubits[-1] - qubits[0]
+                if span > max_interaction_distance:
+                    max_interaction_distance = span
+        long_range_extent = (
+            max(0.0, (max_interaction_distance - 1) / max(num_qubits - 1, 1))
+            if total_multi
+            else 0.0
+        )
+        local = total_multi > 0 and non_local_count == 0
 
         if diag is not None:
-            diag.setdefault("metrics", {})["local"] = local
+            metrics = diag.setdefault("metrics", {})
+            metrics["local"] = local
+            metrics["mps_long_range_fraction"] = long_range_fraction
+            metrics["mps_long_range_extent"] = long_range_extent
+            metrics["mps_max_interaction_distance"] = max_interaction_distance
 
         candidates: dict[Backend, Cost] = {}
         if dd_metric:
@@ -281,7 +305,7 @@ class MethodSelector:
                     entry["metric"] = diag["metrics"]["decision_diagram_metric"]
                 diag_backends[Backend.DECISION_DIAGRAM] = entry
 
-        if local:
+        if total_multi:
             chi = getattr(self.estimator, "chi_max", None) or 4
             chi_cap: int | None = None
             infeasible_chi = False
@@ -304,6 +328,8 @@ class MethodSelector:
                 num_2q,
                 chi=chi,
                 svd=True,
+                long_range_fraction=long_range_fraction,
+                long_range_extent=long_range_extent,
             )
             mps_reasons: list[str] = []
             feasible = True
@@ -322,6 +348,9 @@ class MethodSelector:
                     "reasons": mps_reasons,
                     "cost": mps_cost,
                     "chi": chi,
+                    "long_range_fraction": long_range_fraction,
+                    "long_range_extent": long_range_extent,
+                    "max_interaction_distance": max_interaction_distance,
                 }
                 if chi_cap is not None:
                     entry["chi_limit"] = chi_cap
@@ -329,10 +358,13 @@ class MethodSelector:
             if feasible:
                 candidates[Backend.MPS] = mps_cost
         elif diag_backends is not None:
-            reason = "non-local gates" if multi else "no multi-qubit gates"
+            reason = "no multi-qubit gates"
             diag_backends[Backend.MPS] = {
                 "feasible": False,
                 "reasons": [reason],
+                "long_range_fraction": 0.0,
+                "long_range_extent": 0.0,
+                "max_interaction_distance": 0,
             }
 
         sv_cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)

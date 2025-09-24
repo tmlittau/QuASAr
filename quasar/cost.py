@@ -177,6 +177,8 @@ class CostEstimator:
             "mps_rotation_weight": 0.18,
             "mps_sparsity_discount": 0.35,
             "mps_modifier_floor": 0.1,
+            "mps_long_range_weight": 0.35,
+            "mps_long_range_extent_weight": 0.2,
             # Decision diagram coefficients ----------------------------------
             # Zulehner & Wille (2019) report node operations linear in the
             # active frontier size; we keep the unit constant.
@@ -406,6 +408,8 @@ class CostEstimator:
         two_qubit_ratio: float | None = None,
         entanglement_entropy: float | None = None,
         rotation_diversity: float | None = None,
+        long_range_fraction: float | None = None,
+        long_range_extent: float | None = None,
     ) -> Cost:
         """Estimate cost for dense statevector simulation.
 
@@ -540,6 +544,8 @@ class CostEstimator:
         entanglement_entropy: float | None = None,
         sparsity: float | None = None,
         rotation_diversity: float | None = None,
+        long_range_fraction: float | None = None,
+        long_range_extent: float | None = None,
     ) -> Cost:
         r"""Estimate cost for matrix product state simulation.
 
@@ -561,6 +567,14 @@ class CostEstimator:
         gates:
             Optional gate sequence used to derive bond dimensions when ``chi``
             is ``None``.
+        long_range_fraction:
+            Fraction of multi-qubit gates acting on non-adjacent qubits.  Used
+            to penalise circuits that deviate from strict nearest-neighbour
+            structure without discarding the MPS backend outright.
+        long_range_extent:
+            Normalised span of the most non-local interaction in the fragment.
+            ``0`` corresponds to strictly local gates while ``1`` matches gates
+            spanning the entire register.
 
         Notes
         -----
@@ -604,6 +618,18 @@ class CostEstimator:
         modifier += self.coeff.get("mps_entropy_weight", 0.0) * ent_norm
         modifier += self.coeff.get("mps_rotation_weight", 0.0) * rot
         modifier -= self.coeff.get("mps_sparsity_discount", 0.0) * sparse
+        lr_fraction = (
+            min(max(long_range_fraction, 0.0), 1.0)
+            if long_range_fraction is not None
+            else 0.0
+        )
+        lr_extent = (
+            min(max(long_range_extent, 0.0), 1.0)
+            if long_range_extent is not None
+            else 0.0
+        )
+        modifier += self.coeff.get("mps_long_range_weight", 0.0) * lr_fraction
+        modifier += self.coeff.get("mps_long_range_extent_weight", 0.0) * lr_extent
         modifier = max(modifier, self.coeff.get("mps_modifier_floor", 0.0))
         time = (
             base_time

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from quasar.circuit import Circuit, Gate
 from quasar.cost import CostEstimator, Backend
 from quasar.method_selector import MethodSelector
@@ -47,9 +49,20 @@ def test_method_selector_populates_diagnostics() -> None:
     assert backends[Backend.TABLEAU]["feasible"] is False
     assert "non-clifford gates" in backends[Backend.TABLEAU]["reasons"]
 
-    # The non-local entangling gate prevents MPS from being considered.
-    assert backends[Backend.MPS]["feasible"] is False
-    assert "non-local gates" in backends[Backend.MPS]["reasons"]
+    # The mildly non-local entangler should keep MPS in the candidate set with
+    # a penalty rather than rejecting it outright.
+    assert backends[Backend.MPS]["feasible"] is True
+    assert backends[Backend.MPS]["selected"] is False
+    assert backends[Backend.MPS]["reasons"] == []
+    assert backends[Backend.MPS]["long_range_fraction"] == pytest.approx(1.0)
+    assert backends[Backend.MPS]["long_range_extent"] == pytest.approx(0.5)
+    assert backends[Backend.MPS]["max_interaction_distance"] == 2
+
+    metrics = diag["metrics"]
+    assert metrics["local"] is False
+    assert metrics["mps_long_range_fraction"] == pytest.approx(1.0)
+    assert metrics["mps_long_range_extent"] == pytest.approx(0.5)
+    assert metrics["mps_max_interaction_distance"] == 2
 
     # The selected backend is marked accordingly in the diagnostics.
     assert backends[backend]["selected"] is True

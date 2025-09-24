@@ -719,6 +719,21 @@ class Planner:
             ("amplitude_rotation_diversity", "amp_div", lambda v: str(int(v))),
             ("nnz", "nnz", lambda v: str(int(v))),
             ("local", "local", lambda v: "yes" if v else "no"),
+            (
+                "mps_long_range_fraction",
+                "mps_long",
+                lambda v: f"{float(v):.3f}",
+            ),
+            (
+                "mps_long_range_extent",
+                "mps_span",
+                lambda v: f"{float(v):.3f}",
+            ),
+            (
+                "mps_max_interaction_distance",
+                "mps_maxd",
+                lambda v: str(int(v)),
+            ),
         ]
         metric_parts: List[str] = []
         for key, label, fmt in metric_fields:
