@@ -72,6 +72,27 @@ You can override the ceiling via the environment variable, the global
 ``SimulationEngine(memory_threshold=...)`` and ``simulate(memory_threshold=...)``
 APIs. Supplying a non-positive threshold disables the guard for that call.
 
+### Showcase benchmark suites
+
+The following circuit families were added to highlight situations where QuASAr
+delivers large wins over single-method simulators. Each generator exposes rich
+metadata on the returned :class:`~quasar.circuit.Circuit` objects under the
+``metadata`` attribute so downstream scripts can recover the layer structure,
+transition depths and control layouts.
+
+| Circuit family | Key characteristics | When to use |
+| -------------- | ------------------- | ----------- |
+| `clustered_ghz_random_circuit`, `clustered_w_random_circuit` | 50-qubit (configurable) circuits that prepare GHZ or W states on disjoint blocks of five qubits before applying ~1000 layers of random hybrid gates. The metadata records the block size, number of blocks, and random-layer offsets. | Stress QuASAr's ability to keep subsystems independent during deep hybrid evolution. |
+| `clustered_ghz_qft_circuit`, `clustered_w_qft_circuit`, `clustered_ghz_random_qft_circuit` | Reuse the clustered preparation but follow it with a global QFT or a QFT after the random evolution. | Demonstrate QuASAr's ability to switch between sparse subsystem handling and dense global transforms. |
+| `layered_clifford_delayed_magic_circuit`, `layered_clifford_midpoint_circuit` | Depth-5000 workloads with configurable Clifford-only prefixes (80% and 60% respectively) before transitioning to non-Clifford layers. | Measure QuASAr's planning decisions when only part of the circuit demands non-Clifford simulation techniques. |
+| `layered_clifford_ramp_circuit` | Similar to the layered transition circuits but gradually increases the non-Clifford density between two fractions. Metadata lists the per-layer Clifford/non-Clifford flag. | Evaluate how quickly QuASAr reacts to gradual changes in gate character. |
+| `classical_controlled_circuit`, `dynamic_classical_control_circuit`, `classical_controlled_fanout_circuit` | 28-qubit (configurable) circuits that initialise subsets of qubits into classical basis states and reuse them as controls across thousands of layers. `dynamic_classical_control_circuit` flips controls frequently while `classical_controlled_fanout_circuit` increases fan-out. The generators default to `use_classical_simplification=False` so benchmarks can toggle the optimisation on demand. | Quantify the savings from QuASAr's classical-control simplification pass and stress the planner's handling of mixed classical/quantum regions. |
+
+All of the showcase circuits adhere to the `<name>_circuit` naming convention
+and are available through the benchmarking CLI via `--circuit <name>`. They use
+fixed seeds by default to keep gate patterns reproducible; override the seed
+argument when exploring stochastic behaviour.
+
 ### Reproducing paper figures
 
 Execute the commands below in order to rebuild every artefact used by
