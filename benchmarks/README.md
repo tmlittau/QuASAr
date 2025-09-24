@@ -93,6 +93,22 @@ and are available through the benchmarking CLI via `--circuit <name>`. They use
 fixed seeds by default to keep gate patterns reproducible; override the seed
 argument when exploring stochastic behaviour.
 
+### Showcase benchmark runner
+
+The [`showcase_benchmarks.py`](showcase_benchmarks.py) helper executes the
+showcase circuits on QuASAr as well as the baseline backends, mirroring the
+timeout handling used for the paper figures.  It exports raw measurements,
+per-circuit summaries, derived speedup tables and comparative figures under
+`benchmarks/results/showcase/` and `benchmarks/figures/showcase/`:
+
+```bash
+python benchmarks/showcase_benchmarks.py --repetitions 3 --run-timeout 900
+```
+
+Use `--circuits` to select a subset of workloads, `--qubits` to override the
+default width selections (e.g. `--qubits clustered_ghz_random=40:60:10`) and
+`--reuse-existing` to skip rerunning configurations with cached results.
+
 ### Reproducing paper figures
 
 Execute the commands below in order to rebuild every artefact used by
