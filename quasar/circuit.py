@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, TYPE_CHECKING
 import json
 import os
 import math
@@ -14,6 +14,10 @@ from qiskit_qasm3_import import api as qasm3_api
 from .ssd import SSD, SSDPartition
 from .cost import Cost, CostEstimator, Backend
 from .decompositions import decompose_mcx, decompose_ccz, decompose_cswap
+
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import networkx as _nx
 
 
 def _cost_to_dict(cost: Cost) -> Dict[str, float]:
@@ -232,6 +236,38 @@ class Circuit:
         """Return the structure used by :mod:`json` during serialisation."""
 
         return self.to_dict(include_metadata=True)
+
+    # ------------------------------------------------------------------
+    # Visualisation helpers
+    # ------------------------------------------------------------------
+    def to_networkx_ssd(
+        self,
+        *,
+        include_dependencies: bool = True,
+        include_entanglement: bool = True,
+        include_conversions: bool = True,
+        include_backends: bool = True,
+    ) -> "_nx.MultiDiGraph":
+        """Return a :class:`networkx.MultiDiGraph` for the circuit's SSD.
+
+        The returned graph mirrors the structure produced by
+        :meth:`quasar.ssd.SSD.to_networkx`, exposing partitions, optional
+        conversion layers and backend assignments as labelled nodes.  The
+        parameters are forwarded verbatim to
+        :meth:`quasar.ssd.SSD.to_networkx`.
+
+        Raises
+        ------
+        RuntimeError
+            If :mod:`networkx` is not installed.
+        """
+
+        return self.ssd.to_networkx(
+            include_dependencies=include_dependencies,
+            include_entanglement=include_entanglement,
+            include_conversions=include_conversions,
+            include_backends=include_backends,
+        )
 
     def _expand_decompositions(self) -> None:
         """Replace higher-level gates by their basic equivalents."""

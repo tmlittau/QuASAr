@@ -396,3 +396,31 @@ documented assumptions with the concrete heuristics above provides clear targets
 for the calculator implementation: expose the selector metrics, replace coarse
 rank defaults, and thread calibration metadata through the partition trace so
 theoretical analyses stay aligned with runtime behaviour.
+
+### Visualising subsystem descriptors
+
+QuASAr now exposes a lightweight network representation of subsystem
+descriptors that can be rendered with the optional :mod:`networkx` package.
+Every :class:`~quasar.ssd.SSD` instance provides
+``SSD.to_networkx(...)`` while :class:`~quasar.circuit.Circuit` offers the
+convenience wrapper ``Circuit.to_networkx_ssd(...)`` for direct use on parsed
+circuits.【F:quasar/ssd.py†L151-L277】【F:quasar/circuit.py†L123-L164】 The methods
+return a :class:`networkx.MultiDiGraph` encoding partitions, conversion layers
+and backend assignments as labelled nodes.  Edges highlight execution
+dependencies, entanglement and conversion boundaries.  The optional parameters
+allow toggling each category so plots can focus on a subset of the metadata.
+
+Example usage:
+
+.. code-block:: python
+
+    from quasar.circuit import Circuit
+    import networkx as nx
+
+    circuit = Circuit([...], use_classical_simplification=False)
+    graph = circuit.to_networkx_ssd()
+
+    nx.draw_networkx(graph)
+
+If :mod:`networkx` is not installed the helpers raise a ``RuntimeError`` with a
+clear installation hint, leaving core simulation dependencies untouched.【F:quasar/ssd.py†L24-L38】【F:tests/test_ssd_visualization.py†L12-L32】

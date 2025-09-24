@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
-from typing import Tuple, List, Dict, Hashable, Callable
+from typing import TYPE_CHECKING, Dict, Hashable, List, Tuple, Callable
 
 from .cost import Backend, Cost
+
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import networkx as _nx
+
+
+def _require_networkx() -> "_nx":
+    """Return the :mod:`networkx` module if available."""
+
+    try:
+        return importlib.import_module("networkx")
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised via tests
+        raise RuntimeError(
+            "networkx is required for SSD.to_networkx(); install it to "
+            "visualise subsystem descriptors."
+        ) from exc
 
 
 @dataclass
@@ -181,6 +198,181 @@ class SSD:
         for idx, part in enumerate(self.partitions):
             part.dependencies = tuple(sorted(dep_sets[idx]))
             part.entangled_with = tuple(sorted(ent_sets[idx]))
+
+    # ------------------------------------------------------------------
+    def to_networkx(
+        self,
+        *,
+        include_dependencies: bool = True,
+        include_entanglement: bool = True,
+        include_conversions: bool = True,
+        include_backends: bool = True,
+    ) -> "_nx.MultiDiGraph":
+        """Return a :class:`networkx.MultiDiGraph` representing the SSD.
+
+        Parameters
+        ----------
+        include_dependencies:
+            When ``True`` include directed edges that encode execution
+            dependencies between partitions.
+        include_entanglement:
+            When ``True`` include undirected edges (recorded as a single
+            directed edge with the ``bidirectional`` flag) between partitions
+            that share entanglement.
+        include_conversions:
+            When ``True`` add conversion layer nodes and connect them to the
+            partitions and backends they touch.
+        include_backends:
+            When ``True`` add a node for every backend referenced by the SSD
+            and connect partitions and conversions to their respective
+            backends.
+
+        Returns
+        -------
+        networkx.MultiDiGraph
+            Graph describing partitions, conversions and (optionally) backend
+            assignments.  Nodes carry metadata mirroring the SSD entries while
+            edges annotate dependencies, entanglement and conversion
+            boundaries.
+
+        Raises
+        ------
+        RuntimeError
+            If :mod:`networkx` is not installed in the current environment.
+        """
+
+        nx = _require_networkx()
+
+        # Ensure dependency and entanglement metadata is populated before
+        # constructing the graph.
+        self.build_metadata()
+
+        graph: "_nx.MultiDiGraph" = nx.MultiDiGraph()
+        graph.graph.update(
+            type="ssd",
+            boundary_qubits=self.boundary_qubits,
+            rank=self.rank,
+            frontier=self.frontier,
+            fingerprint=self.fingerprint,
+            num_partitions=len(self.partitions),
+            total_qubits=self.total_qubits(),
+        )
+        if self.trace:
+            graph.graph["trace"] = list(self.trace)
+
+        backend_nodes: Dict[str, tuple[str, str]] = {}
+
+        def ensure_backend_node(backend: Backend) -> tuple[str, str]:
+            if not include_backends:
+                return ("backend", backend.name)
+            key = backend.name
+            node = backend_nodes.get(key)
+            if node is None:
+                node = ("backend", key)
+                backend_nodes[key] = node
+                graph.add_node(
+                    node,
+                    kind="backend",
+                    backend=backend.name,
+                    label=backend.value,
+                )
+            return node
+
+        qubit_to_partition: Dict[int, int] = {}
+
+        for idx, part in enumerate(self.partitions):
+            node = ("partition", idx)
+            compatible = tuple(
+                method.name if isinstance(method, Backend) else str(method)
+                for method in part.compatible_methods
+            )
+            graph.add_node(
+                node,
+                kind="partition",
+                index=idx,
+                backend=part.backend.name,
+                subsystems=part.subsystems,
+                multiplicity=part.multiplicity,
+                qubits=part.qubits,
+                history=part.history,
+                boundary_qubits=part.boundary_qubits,
+                rank=part.rank,
+                frontier=part.frontier,
+                compatible_methods=compatible,
+                resources=dict(part.resources),
+                cost_time=part.cost.time,
+                cost_memory=part.cost.memory,
+            )
+            if include_backends:
+                backend_node = ensure_backend_node(part.backend)
+                graph.add_edge(node, backend_node, kind="backend_assignment")
+            for qubit in part.qubits:
+                qubit_to_partition[qubit] = idx
+
+        if include_dependencies:
+            for idx, part in enumerate(self.partitions):
+                for dep in part.dependencies:
+                    graph.add_edge(
+                        ("partition", dep),
+                        ("partition", idx),
+                        kind="dependency",
+                    )
+
+        if include_entanglement:
+            for idx, part in enumerate(self.partitions):
+                for partner in part.entangled_with:
+                    if idx < partner:
+                        graph.add_edge(
+                            ("partition", idx),
+                            ("partition", partner),
+                            kind="entanglement",
+                            bidirectional=True,
+                        )
+
+        if include_conversions:
+            for conv_idx, conv in enumerate(self.conversions):
+                node = ("conversion", conv_idx)
+                graph.add_node(
+                    node,
+                    kind="conversion",
+                    index=conv_idx,
+                    boundary=conv.boundary,
+                    source=conv.source.name,
+                    target=conv.target.name,
+                    rank=conv.rank,
+                    frontier=conv.frontier,
+                    primitive=conv.primitive,
+                    cost_time=conv.cost.time,
+                    cost_memory=conv.cost.memory,
+                )
+                if include_backends:
+                    src_backend = ensure_backend_node(conv.source)
+                    tgt_backend = ensure_backend_node(conv.target)
+                    graph.add_edge(
+                        src_backend,
+                        node,
+                        kind="conversion_source",
+                    )
+                    graph.add_edge(
+                        node,
+                        tgt_backend,
+                        kind="conversion_target",
+                    )
+                involved = sorted(
+                    {
+                        qubit_to_partition[qubit]
+                        for qubit in conv.boundary
+                        if qubit in qubit_to_partition
+                    }
+                )
+                for part_idx in involved:
+                    graph.add_edge(
+                        ("partition", part_idx),
+                        node,
+                        kind="conversion_boundary",
+                    )
+
+        return graph
 
 
 
