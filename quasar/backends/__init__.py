@@ -29,7 +29,11 @@ def _require(package: str, backend: str) -> None:
 
 # Core backends -----------------------------------------------------------
 _require("qiskit_aer", "StatevectorBackend")
-from .statevector import StatevectorBackend, AerStatevectorBackend
+from .statevector import (
+    StatevectorBackend,
+    AerStatevectorBackend,
+    ExtendedStabilizerBackend,
+)
 
 _require("qiskit_aer", "MPSBackend")
 from .mps import MPSBackend, AerMPSBackend
@@ -45,6 +49,7 @@ __all__ = [
     "Backend",
     "StatevectorBackend",
     "AerStatevectorBackend",
+    "ExtendedStabilizerBackend",
     "MPSBackend",
     "AerMPSBackend",
     "StimBackend",

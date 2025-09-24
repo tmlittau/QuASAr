@@ -43,6 +43,9 @@ _DEFAULT_BACKEND_STYLES: Mapping[str, BackendStyle] = {
     "sv": BackendStyle(
         "#1f77b4", "o", "Statevector", tag="SV", short_label="SV"
     ),
+    "ext": BackendStyle(
+        "#17becf", "v", "Extended Stabilizer", tag="ES", short_label="ExtStab"
+    ),
     "tab": BackendStyle(
         "#ff7f0e", "^", "Tableau", tag="Tab", short_label="Tab"
     ),
@@ -64,6 +67,10 @@ _BACKEND_ALIASES: Mapping[str, str] = {
     "sv": "sv",
     "STATEVECTOR": "sv",
     "Backend.STATEVECTOR": "sv",
+    "extended_stabilizer": "ext",
+    "ext": "ext",
+    "EXTENDED_STABILIZER": "ext",
+    "Backend.EXTENDED_STABILIZER": "ext",
     "tableau": "tab",
     "tab": "tab",
     "TABLEAU": "tab",

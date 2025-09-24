@@ -25,6 +25,8 @@ CLIFFORD_GATES = {
     "SWAP",
 }
 
+CLIFFORD_PLUS_T_GATES = CLIFFORD_GATES | {"T", "TDG"}
+
 
 class Partitioner:
     """Partition circuits and assign simulation methods."""

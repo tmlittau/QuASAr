@@ -85,7 +85,13 @@ class Config:
     preferred_backend_order: List[Backend] = field(
         default_factory=lambda: _order_from_env(
             "QUASAR_BACKEND_ORDER",
-            [Backend.MPS, Backend.DECISION_DIAGRAM, Backend.STATEVECTOR, Backend.TABLEAU],
+            [
+                Backend.MPS,
+                Backend.DECISION_DIAGRAM,
+                Backend.EXTENDED_STABILIZER,
+                Backend.STATEVECTOR,
+                Backend.TABLEAU,
+            ],
         )
     )
     parallel_backends: List[Backend] = field(default_factory=_default_parallel_backends)

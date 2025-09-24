@@ -140,6 +140,11 @@ class StatevectorBackend(Backend):
             k = float(params.get("k", 0)) if params else 0.0
             theta = 2 * np.pi / (2 ** k)
             self.circuit.cp(theta, qubits[0], qubits[1])
+        elif lname in {"CX", "CY", "CZ"}:
+            method = getattr(self.circuit, lname.lower(), None)
+            if method is None:
+                raise NotImplementedError(f"Unsupported gate {name}")
+            method(*qubits)
         elif lname.startswith("C"):
             base = lname[1:]
             num_params = len(params) if params else 0
@@ -221,3 +226,14 @@ class AerStatevectorBackend(StatevectorBackend):
     def __init__(self, **kwargs):
         kwargs.setdefault("method", "statevector")
         super().__init__(**kwargs)
+
+
+class ExtendedStabilizerBackend(StatevectorBackend):
+    """Backend using Qiskit Aer's ``extended_stabilizer`` method."""
+
+    backend: BackendType = BackendType.EXTENDED_STABILIZER
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("method", "extended_stabilizer")
+        super().__init__(**kwargs)
+        self.backend = BackendType.EXTENDED_STABILIZER

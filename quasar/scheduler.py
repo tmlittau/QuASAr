@@ -15,16 +15,24 @@ try:  # Optional decision diagram backend dependency
 except ImportError:  # pragma: no cover - backend optional
     mqt_dd = None
 
-from .planner import Planner, PlanStep, PlanResult, PlanDiagnostics, _add_cost
+from .planner import (
+    Planner,
+    PlanStep,
+    PlanResult,
+    PlanDiagnostics,
+    _add_cost,
+    _circuit_depth,
+)
 from .method_selector import NoFeasibleBackendError
 from .analyzer import AnalysisResult
-from .partitioner import CLIFFORD_GATES
+from .partitioner import CLIFFORD_GATES, CLIFFORD_PLUS_T_GATES
 from .cost import Backend, Cost, CostEstimator
 from . import config
 from .circuit import Circuit, Gate
 from .ssd import SSD, ConversionLayer, SSDPartition, SSDCache
 from .backends import (
     AerStatevectorBackend,
+    ExtendedStabilizerBackend,
     AerMPSBackend,
     StimBackend,
     DecisionDiagramBackend,
@@ -107,7 +115,7 @@ def merge_subsystems(
         q for q in right_qubits if q not in left_qubits
     )
     merged = _clone_backend_instance(left)
-    if backend_kind == Backend.STATEVECTOR:
+    if backend_kind in {Backend.STATEVECTOR, Backend.EXTENDED_STABILIZER}:
         merged.load(len(merged_qubits))
         left_state = np.asarray(left.statevector(), dtype=complex)
         right_state = np.asarray(right.statevector(), dtype=complex)
@@ -253,6 +261,7 @@ class Scheduler:
             # to stub classes when their dependencies are missing.
             self.backends = {
                 Backend.STATEVECTOR: AerStatevectorBackend(),
+                Backend.EXTENDED_STABILIZER: ExtendedStabilizerBackend(),
                 Backend.MPS: AerMPSBackend(),
                 Backend.TABLEAU: StimBackend(),
                 Backend.DECISION_DIAGRAM: DecisionDiagramBackend(),
@@ -414,6 +423,8 @@ class Scheduler:
             len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
         )
 
+        clifford_t = names and all(name in CLIFFORD_PLUS_T_GATES for name in names)
+
         candidates: List[Backend]
         if names and all(name in CLIFFORD_GATES for name in names):
             candidates = [Backend.TABLEAU]
@@ -423,6 +434,8 @@ class Scheduler:
                 candidates.append(Backend.DECISION_DIAGRAM)
             if local:
                 candidates.append(Backend.MPS)
+            if clifford_t:
+                candidates.append(Backend.EXTENDED_STABILIZER)
             candidates.append(Backend.STATEVECTOR)
 
         def backend_rank(b: Backend) -> int:
@@ -901,6 +914,10 @@ class Scheduler:
                         ["sv_gate_1q", "sv_gate_2q", "sv_meas"],
                         "sv_bytes_per_amp",
                     ),
+                    Backend.EXTENDED_STABILIZER: (
+                        ["es_gate_clifford", "es_gate_t", "es_meas"],
+                        "es_mem_quadratic",
+                    ),
                     Backend.MPS: (
                         ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
                         "mps_mem",
@@ -1052,6 +1069,10 @@ class Scheduler:
                         Backend.STATEVECTOR: (
                             ["sv_gate_1q", "sv_gate_2q", "sv_meas"],
                             "sv_bytes_per_amp",
+                        ),
+                        Backend.EXTENDED_STABILIZER: (
+                            ["es_gate_clifford", "es_gate_t", "es_meas"],
+                            "es_mem_quadratic",
                         ),
                         Backend.MPS: (
                             ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
@@ -1413,6 +1434,10 @@ class Scheduler:
                         ["sv_gate_1q", "sv_gate_2q", "sv_meas"],
                         "sv_bytes_per_amp",
                     ),
+                    Backend.EXTENDED_STABILIZER: (
+                        ["es_gate_clifford", "es_gate_t", "es_meas"],
+                        "es_mem_quadratic",
+                    ),
                     Backend.MPS: (
                         ["mps_gate_1q", "mps_gate_2q", "mps_trunc"],
                         "mps_mem",
@@ -1602,6 +1627,17 @@ class Scheduler:
             )
         if backend == Backend.DECISION_DIAGRAM:
             return estimator.decision_diagram(num_gates=m, frontier=n)
+        if backend == Backend.EXTENDED_STABILIZER:
+            num_t = sum(1 for g in gates if g.gate.upper() in {"T", "TDG"})
+            num_clifford = max(0, m - num_t - num_meas)
+            dep = _circuit_depth(gates)
+            return estimator.extended_stabilizer(
+                n,
+                num_clifford,
+                num_t,
+                num_meas=num_meas,
+                depth=dep,
+            )
         return estimator.statevector(n, num_1q, num_2q, num_meas)
 
     def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:

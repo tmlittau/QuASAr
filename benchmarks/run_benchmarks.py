@@ -34,7 +34,7 @@ from typing import Any, Dict, Iterable, List
 import pandas as pd
 
 from benchmark_cli import parse_qubit_range, resolve_circuit
-from circuits import is_clifford
+from circuits import is_clifford, is_clifford_plus_t
 from plot_utils import compute_baseline_best
 from partitioning_workloads import SCENARIOS, WorkloadInstance, iter_scenario
 from runner import BenchmarkRunner
@@ -46,6 +46,7 @@ from memory_utils import max_qubits_statevector
 
 BASELINE_BACKENDS: tuple[Backend, ...] = (
     Backend.STATEVECTOR,
+    Backend.EXTENDED_STABILIZER,
     Backend.TABLEAU,
     Backend.MPS,
     Backend.DECISION_DIAGRAM,
@@ -109,6 +110,16 @@ def run_all(
             continue
 
         for backend in BASELINE_BACKENDS:
+            if (
+                backend == Backend.EXTENDED_STABILIZER
+                and not is_clifford_plus_t(circuit)
+            ):
+                LOGGER.info(
+                    "Skipping backend %s for width %s (not Clifford+T)",
+                    backend.value,
+                    n,
+                )
+                continue
             LOGGER.info(
                 "Running backend %s for width %s", backend.value, n
             )
