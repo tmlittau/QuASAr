@@ -52,6 +52,7 @@ class Backend(Enum):
     """Simulation backends supported by the estimator."""
 
     STATEVECTOR = "sv"
+    EXTENDED_STABILIZER = "ext"
     TABLEAU = "tab"
     MPS = "mps"
     DECISION_DIAGRAM = "dd"
@@ -136,6 +137,16 @@ class CostEstimator:
             "sv_modifier_floor": 0.2,
             "sv_memory_rotation_weight": 0.06,
             "sv_memory_entropy_weight": 0.1,
+            # Extended stabilizer coefficients ------------------------------
+            "es_gate_clifford": 2.5,
+            "es_gate_t": 6.5,
+            "es_meas": 1.5,
+            "es_base_time": 0.012,
+            "es_depth_weight": 0.05,
+            "es_base_mem": 90000.0,
+            "es_mem_quadratic": 512.0,
+            "es_mem_linear": 4096.0,
+            "es_mem_t_weight": 2048.0,
             # Stabilizer tableau coefficients -------------------------------
             # Aaronson & Gottesman (2004) show O(n^2) bit operations per
             # Clifford gate; we approximate the constant factor with 2.
@@ -223,11 +234,13 @@ class CostEstimator:
             # Approximate per-amplitude ingestion costs assuming memory-bound
             # transfers on contemporary CPUs.
             "ingest_sv": 5.0,
+            "ingest_ext": 5.0,
             "ingest_tab": 3.0,
             "ingest_mps": 4.0,
             "ingest_dd": 2.0,
             # Additional memory required during ingestion.
             "ingest_sv_mem": 0.0,
+            "ingest_ext_mem": 0.0,
             "ingest_tab_mem": 0.0,
             "ingest_mps_mem": 0.0,
             "ingest_dd_mem": 0.0,
@@ -531,6 +544,47 @@ class CostEstimator:
 
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
+
+    def extended_stabilizer(
+        self,
+        num_qubits: int,
+        num_clifford_gates: int,
+        num_t_gates: int,
+        num_meas: int = 0,
+        *,
+        depth: int | None = None,
+    ) -> Cost:
+        """Estimate cost for Aer's extended stabilizer simulator.
+
+        The method models Clifford operations with quadratic scaling in the
+        number of qubits and applies an additional penalty for T / Tdg gates
+        that trigger CH-form updates.  Memory usage is approximated with a
+        quadratic term reflecting the tableau component alongside linear
+        corrections for metadata tracked per qubit and per T gate.
+        """
+
+        quad = num_qubits * num_qubits
+        total_depth = depth if depth is not None else (
+            num_clifford_gates + num_t_gates + num_meas
+        )
+        depth_norm = total_depth / max(num_qubits, 1)
+        modifier = 1.0 + self.coeff.get("es_depth_weight", 0.0) * depth_norm
+        gate_time = (
+            self.coeff["es_gate_clifford"] * num_clifford_gates
+            + self.coeff["es_gate_t"] * num_t_gates
+            + self.coeff.get("es_meas", 0.0) * num_meas
+        )
+        time = self.coeff.get("es_base_time", 0.0) + gate_time * quad * modifier
+
+        base_mem = self.coeff.get("es_base_mem", 0.0)
+        memory = base_mem + self.coeff["es_mem_quadratic"] * quad
+        memory += self.coeff.get("es_mem_linear", 0.0) * max(num_qubits, 1)
+        memory += (
+            self.coeff.get("es_mem_t_weight", 0.0) * num_t_gates * max(num_qubits, 1)
+        )
+
+        log_depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
+        return Cost(time=time, memory=memory, log_depth=log_depth)
 
     def mps(
         self,

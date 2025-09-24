@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Iterable, Set, Tuple, Hashable
 
 from .cost import Backend, Cost, CostEstimator
 from quasar_convert import ConversionEngine
-from .partitioner import CLIFFORD_GATES, Partitioner
+from .partitioner import CLIFFORD_GATES, CLIFFORD_PLUS_T_GATES, Partitioner
 from .ssd import ConversionLayer, SSD
 from . import config
 from .analyzer import AnalysisResult
@@ -361,6 +361,9 @@ def _supported_backends(
                 return []
         return [Backend.TABLEAU]
 
+    clifford_t = names and all(name in CLIFFORD_PLUS_T_GATES for name in names)
+    num_t = sum(1 for name in names if name in {"T", "TDG"})
+
     candidates: List[Backend] = []
 
     sparse = sparsity if sparsity is not None else 0.0
@@ -412,12 +415,15 @@ def _supported_backends(
         if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
     )
     num_2q = num_gates - num_1q - num_meas
+    num_clifford = max(0, num_gates - num_t - num_meas)
 
     if estimator is None:
         if dd_metric:
             candidates.append(Backend.DECISION_DIAGRAM)
         if mps_metric:
             candidates.append(Backend.MPS)
+        if clifford_t:
+            candidates.append(Backend.EXTENDED_STABILIZER)
         candidates.append(Backend.STATEVECTOR)
 
         order = list(config.DEFAULT.preferred_backend_order)
@@ -469,6 +475,16 @@ def _supported_backends(
         mps_cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi=4, svd=True)
         if max_memory is None or mps_cost.memory <= max_memory:
             costs[Backend.MPS] = mps_cost
+    if clifford_t:
+        ext_cost = estimator.extended_stabilizer(
+            num_qubits,
+            num_clifford,
+            num_t,
+            num_meas=num_meas,
+            depth=num_gates,
+        )
+        if max_memory is None or ext_cost.memory <= max_memory:
+            costs[Backend.EXTENDED_STABILIZER] = ext_cost
     sv_cost = estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
     if max_memory is None or sv_cost.memory <= max_memory:
         costs[Backend.STATEVECTOR] = sv_cost
@@ -533,6 +549,9 @@ def _simulation_cost(
     num_1q_gates: int,
     num_2q_gates: int,
     num_meas: int,
+    *,
+    num_t_gates: int = 0,
+    depth: int | None = None,
 ) -> Cost:
     """Query the cost estimator for a simulation fragment."""
 
@@ -550,6 +569,16 @@ def _simulation_cost(
         )
     if backend == Backend.DECISION_DIAGRAM:
         return estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+    if backend == Backend.EXTENDED_STABILIZER:
+        num_clifford = max(0, num_gates - num_t_gates - num_meas)
+        dep = depth if depth is not None else num_gates
+        return estimator.extended_stabilizer(
+            num_qubits,
+            num_clifford,
+            num_t_gates,
+            num_meas=num_meas,
+            depth=dep,
+        )
     return estimator.statevector(num_qubits, num_1q_gates, num_2q_gates, num_meas)
 
 
@@ -572,8 +601,19 @@ def _parallel_simulation_cost(
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         two = m - one - meas
+        t_count = sum(1 for g in gates if g.gate.upper() in {"T", "TDG"})
+        depth = _circuit_depth(gates)
         costs.append(
-            _simulation_cost(estimator, backend, len(qubits), one, two, meas)
+            _simulation_cost(
+                estimator,
+                backend,
+                len(qubits),
+                one,
+                two,
+                meas,
+                num_t_gates=t_count,
+                depth=depth,
+            )
         )
     total = costs[0]
     for cost in costs[1:]:
@@ -915,6 +955,8 @@ class Planner:
                     if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
                 )
                 num_2q = num_gates - num_1q - num_meas
+                num_t_segment = sum(1 for g in segment if g.gate.upper() in {"T", "TDG"})
+                segment_depth = _circuit_depth(segment)
                 groups = part.parallel_groups(segment) if num_qubits > 1 else []
                 backends = self._order_backends(
                     _supported_backends(
@@ -938,7 +980,14 @@ class Planner:
                 violations: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
                     cost = _simulation_cost(
-                        self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+                        self.estimator,
+                        backend,
+                        num_qubits,
+                        num_1q,
+                        num_2q,
+                        num_meas,
+                        num_t_gates=num_t_segment,
+                        depth=segment_depth,
                     )
                     if len(groups) > 1:
                         par_cost = _parallel_simulation_cost(
@@ -970,6 +1019,8 @@ class Planner:
                                     num_1q,
                                     num_2q,
                                     num_meas,
+                                    num_t_gates=num_t_segment,
+                                    depth=segment_depth,
                                 )
                                 if len(groups) > 1:
                                     par_retry = _parallel_simulation_cost(
@@ -1326,6 +1377,7 @@ class Planner:
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
+        num_t_total = sum(1 for g in gates if g.gate.upper() in {"T", "TDG"})
 
         if self.estimator is not None:
             fidelity = (
@@ -1369,7 +1421,14 @@ class Planner:
                     diagnostics.backend_selection["forced"] = selection_trace
                 self._print_selection_diagnostics(selection_trace, stage="forced")
             cost = _simulation_cost(
-                self.estimator, backend, num_qubits, num_1q, num_2q, num_meas
+                self.estimator,
+                backend,
+                num_qubits,
+                num_1q,
+                num_2q,
+                num_meas,
+                num_t_gates=num_t_total,
+                depth=depth,
             )
             if threshold is not None and cost.memory > threshold:
                 raise ValueError("Requested backend exceeds memory threshold")
@@ -1653,7 +1712,18 @@ class Planner:
                 )
                 two = m - one - meas
                 groups = part.parallel_groups(seg) if n > 1 else []
-                cost = _simulation_cost(self.estimator, sub_step.backend, n, one, two, meas)
+                t_sub = sum(1 for g in seg if g.gate.upper() in {"T", "TDG"})
+                seg_depth = _circuit_depth(seg)
+                cost = _simulation_cost(
+                    self.estimator,
+                    sub_step.backend,
+                    n,
+                    one,
+                    two,
+                    meas,
+                    num_t_gates=t_sub,
+                    depth=seg_depth,
+                )
                 if len(groups) > 1:
                     par_cost = _parallel_simulation_cost(
                         self.estimator, sub_step.backend, groups

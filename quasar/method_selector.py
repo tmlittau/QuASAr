@@ -25,6 +25,8 @@ CLIFFORD_GATES = {
     "SWAP",
 }
 
+CLIFFORD_PLUS_T_GATES = CLIFFORD_GATES | {"T", "TDG"}
+
 
 class NoFeasibleBackendError(RuntimeError):
     """Raised when no backend satisfies the provided constraints."""
@@ -157,6 +159,49 @@ class MethodSelector:
                     "reasons": [reason] if names or not allow_tableau else ["no gates"],
                 }
 
+        clifford_t = names and all(n in CLIFFORD_PLUS_T_GATES for n in names)
+        num_t_gates = sum(1 for n in names if n in {"T", "TDG"})
+
+        ext_cost = None
+        if clifford_t and names:
+            num_clifford = num_gates - num_t_gates - num_meas
+            num_clifford = max(0, num_clifford)
+            ext_cost = self.estimator.extended_stabilizer(
+                num_qubits,
+                num_clifford,
+                num_t_gates,
+                num_meas=num_meas,
+                depth=num_gates,
+            )
+            ext_reasons: list[str] = []
+            ext_feasible = True
+            if max_memory is not None and ext_cost.memory > max_memory:
+                ext_reasons.append("memory > threshold")
+                ext_feasible = False
+            if max_time is not None and ext_cost.time > max_time:
+                ext_reasons.append("time > threshold")
+                ext_feasible = False
+            if ext_feasible:
+                candidates: dict[Backend, Cost] = {Backend.EXTENDED_STABILIZER: ext_cost}
+            else:
+                candidates = {}
+            if diag_backends is not None:
+                diag_backends[Backend.EXTENDED_STABILIZER] = {
+                    "feasible": ext_feasible,
+                    "reasons": ext_reasons,
+                    "cost": ext_cost,
+                    "num_t_gates": num_t_gates,
+                }
+        else:
+            candidates = {}
+            if diag_backends is not None:
+                reason = "no gates" if not names else "contains non-Clifford+T gates"
+                diag_backends[Backend.EXTENDED_STABILIZER] = {
+                    "feasible": False,
+                    "reasons": [reason],
+                    "num_t_gates": num_t_gates,
+                }
+
         # ------------------------------------------------------------------
         # Heuristics for decision diagram suitability
         # ------------------------------------------------------------------
@@ -282,7 +327,6 @@ class MethodSelector:
             metrics["mps_long_range_extent"] = long_range_extent
             metrics["mps_max_interaction_distance"] = max_interaction_distance
 
-        candidates: dict[Backend, Cost] = {}
         if dd_metric:
             dd_cost = self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
             dd_reasons: list[str] = []
