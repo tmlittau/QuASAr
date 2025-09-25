@@ -20,6 +20,7 @@ class ProgressReporter:
         self.total = max(int(self.total), 1)
         self._count = 0
         self._last_len = 0
+        self._render("", done=False)
 
     # ------------------------------------------------------------------
     def advance(self, message: str = "") -> None:
@@ -28,6 +29,11 @@ class ProgressReporter:
         self._count += 1
         if self._count > self.total:
             self.total = self._count
+        done = self._count >= self.total
+        self._render(message, done=done)
+
+    # ------------------------------------------------------------------
+    def _render(self, message: str, *, done: bool) -> None:
         fraction = min(self._count / self.total, 1.0)
         filled = int(self.bar_width * fraction)
         bar = f"[{'#' * filled}{'-' * (self.bar_width - filled)}]"
@@ -38,7 +44,7 @@ class ProgressReporter:
         if message:
             parts.append(message)
         line = " ".join(parts)
-        self._write(line, done=self._count >= self.total)
+        self._write(line, done=done)
 
     # ------------------------------------------------------------------
     def _write(self, text: str, *, done: bool = False) -> None:

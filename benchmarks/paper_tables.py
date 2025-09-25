@@ -27,8 +27,10 @@ if __package__ in {None, ""}:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from plot_utils import backend_labels, compute_baseline_best  # type: ignore[no-redef]
+    from progress import ProgressReporter  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import backend_labels, compute_baseline_best
+    from .progress import ProgressReporter
 
 from quasar.cost import Backend
 
@@ -650,20 +652,37 @@ def generate_tables(
     base_output.mkdir(parents=True, exist_ok=True)
 
     selected = {name for name in tables} if tables is not None else None
+    target_specs = [
+        spec for spec in TABLE_SPECS if selected is None or spec.name in selected
+    ]
+    if selected is not None:
+        missing = sorted(selected.difference({spec.name for spec in target_specs}))
+        if missing:
+            LOGGER.warning("Unknown table(s) requested: %s", ", ".join(missing))
     written: dict[str, Path] = {}
-    for spec in TABLE_SPECS:
-        if selected is not None and spec.name not in selected:
-            continue
+    progress = (
+        ProgressReporter(len(target_specs), prefix="Table generation")
+        if target_specs
+        else None
+    )
+    for spec in target_specs:
+        status = spec.name
         try:
             table = spec.builder(base_results)
         except FileNotFoundError as exc:
             LOGGER.warning("Skipping %s: %s", spec.name, exc)
+            if progress:
+                progress.advance(f"{status} missing")
             continue
         except Exception as exc:  # pragma: no cover - defensive
             LOGGER.error("Failed to build table %s: %s", spec.name, exc)
+            if progress:
+                progress.advance(f"{status} error")
             continue
         if table.empty:
             LOGGER.warning("Skipping %s: no rows to tabulate", spec.name)
+            if progress:
+                progress.advance(f"{status} empty")
             continue
         latex_path = base_output / f"{spec.name}.tex"
         latex = _dataframe_to_latex(
@@ -675,6 +694,10 @@ def generate_tables(
         latex_path.write_text(latex, encoding="utf-8")
         _log_written(latex_path)
         written[spec.name] = latex_path
+        if progress:
+            progress.advance(status)
+    if progress:
+        progress.close()
     return written
 
 
