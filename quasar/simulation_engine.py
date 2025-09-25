@@ -11,7 +11,7 @@ users that simply want to simulate a circuit and obtain both the final
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Any, List, Optional
 import math
 import os
 import time
@@ -26,7 +26,7 @@ from .analyzer import CircuitAnalyzer, AnalysisResult
 from .planner import Planner, PlanResult
 from .method_selector import NoFeasibleBackendError
 from .scheduler import Scheduler
-from .ssd import SSD
+from .ssd import SSD, SSDPartition
 from .cost import CostEstimator, Backend
 from quasar_convert import ConversionEngine
 
@@ -114,6 +114,55 @@ class SimulationResult:
     conversion_durations: List[float] = field(default_factory=list)
     plan_cache_hits: int = 0
     fidelity: float | None = None
+
+    # ------------------------------------------------------------------
+    def final_state(
+        self,
+        partition: SSDPartition | int | None = None,
+        *,
+        as_numpy: bool = False,
+        dtype: Any | None = complex,
+    ) -> Any:
+        """Return the terminal state recorded in the SSD.
+
+        Parameters
+        ----------
+        partition:
+            Optional partition identifier.  When ``None`` the method returns
+            the state stored on the last partition in :attr:`ssd.partitions`.
+        as_numpy:
+            When ``True`` coerce the backend specific state into a
+            :class:`numpy.ndarray`.  ``numpy`` must be installed in this case
+            and the backend has to expose an ``__array__`` interface or return
+            an object that ``numpy.asarray`` understands.
+        dtype:
+            Optional NumPy data type used when ``as_numpy`` is ``True``.
+
+        Returns
+        -------
+        object or ``None``
+            The backend native state, the converted NumPy array or ``None``
+            when the SSD does not contain any recorded state for the selected
+            partition.
+        """
+
+        if partition is None:
+            if not self.ssd.partitions:
+                return None
+            partition = -1
+
+        state = self.ssd.extract_state(partition)
+        if state is None or not as_numpy:
+            return state
+
+        try:  # Import lazily to keep the dependency optional.
+            import numpy as _np  # type: ignore
+        except ImportError as exc:  # pragma: no cover - exercised in docs
+            raise RuntimeError(
+                "NumPy is required to convert the final state to an array."
+            ) from exc
+
+        return _np.asarray(state, dtype=dtype)
 
 
 class SimulationEngine:
