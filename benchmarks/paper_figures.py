@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -52,6 +53,7 @@ if __package__ in {None, ""}:
         max_qubits_statevector,
     )
     from progress import ProgressReporter  # type: ignore[no-redef]
+    from threading_utils import resolve_worker_count, thread_engine  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import (
         compute_baseline_best,
@@ -71,6 +73,7 @@ else:  # pragma: no cover - exercised via runtime execution
         max_qubits_statevector,
     )
     from .progress import ProgressReporter
+    from .threading_utils import resolve_worker_count, thread_engine
 
 from quasar import SimulationEngine
 from quasar.cost import Backend
@@ -448,17 +451,324 @@ def _automatic_failure_reason(
     return "; ".join(details)
 
 
+def _collect_backend_for_width(
+    engine: SimulationEngine,
+    spec: CircuitSpec,
+    n: int,
+    backends: Sequence[Backend],
+    *,
+    repetitions: int,
+    run_timeout: float | None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
+    """Execute forced baselines and QuASAr for ``spec`` at ``n`` qubits."""
+
+    forced_records: list[dict[str, object]] = []
+    auto_records: list[dict[str, object]] = []
+    messages: list[str] = []
+
+    LOGGER.info("Preparing circuits for %s with %s qubits", spec.name, n)
+    circuit_forced = _build_circuit(spec, n, use_classical_simplification=False)
+    circuit_auto = _build_circuit(spec, n, use_classical_simplification=True)
+    if circuit_forced is None or circuit_auto is None:
+        LOGGER.warning(
+            "Skipping circuit %s with %s qubits because construction failed",
+            spec.name,
+            n,
+        )
+        return forced_records, auto_records, messages
+
+    forced_width = _circuit_qubit_width(circuit_forced)
+    auto_width = _circuit_qubit_width(circuit_auto)
+    effective_timeout = run_timeout if run_timeout and run_timeout > 0 else None
+
+    for backend in backends:
+        status = f"{spec.name}@{n} {backend.name.lower()}"
+        if (
+            backend == Backend.STATEVECTOR
+            and forced_width is not None
+            and forced_width > STATEVECTOR_MAX_QUBITS
+        ):
+            message = (
+                f"circuit uses {forced_width} qubits exceeding "
+                f"statevector limit of {STATEVECTOR_MAX_QUBITS}"
+            )
+            forced_records.append(
+                {
+                    "circuit": spec.name,
+                    "qubits": n,
+                    "actual_qubits": forced_width,
+                    "framework": backend.name,
+                    "backend": backend.name,
+                    "unsupported": True,
+                    "failed": False,
+                    "error": message,
+                    "comment": message,
+                }
+            )
+            LOGGER.info(
+                "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
+                spec.name,
+                n,
+                backend.name,
+                message,
+            )
+            messages.append(f"{status} skip: {message}")
+            continue
+        if backend == Backend.MPS:
+            reason = _mps_skip_reason(
+                circuit_forced,
+                n,
+                forced_width=forced_width,
+            )
+            if reason:
+                forced_records.append(
+                    {
+                        "circuit": spec.name,
+                        "qubits": n,
+                        "actual_qubits": forced_width,
+                        "framework": backend.name,
+                        "backend": backend.name,
+                        "unsupported": True,
+                        "failed": False,
+                        "error": reason,
+                        "comment": reason,
+                    }
+                )
+                LOGGER.info(
+                    "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
+                    spec.name,
+                    n,
+                    backend.name,
+                    reason,
+                )
+                messages.append(f"{status} skip: {reason}")
+                continue
+        if not _supports_backend(circuit_forced, backend):
+            reason = (
+                "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
+            )
+            forced_records.append(
+                {
+                    "circuit": spec.name,
+                    "qubits": n,
+                    "actual_qubits": forced_width,
+                    "framework": backend.name,
+                    "backend": backend.name,
+                    "unsupported": True,
+                    "failed": False,
+                    "error": f"circuit uses {reason} unsupported by {backend.name}",
+                }
+            )
+            LOGGER.info(
+                "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
+                spec.name,
+                n,
+                backend.name,
+                reason,
+            )
+            messages.append(f"{status} skip: {reason}")
+            continue
+        runner = BenchmarkRunner()
+        LOGGER.info(
+            "Executing forced run: circuit=%s qubits=%s backend=%s",
+            spec.name,
+            n,
+            backend.name,
+        )
+        try:
+            rec = runner.run_quasar_multiple(
+                circuit_forced,
+                engine,
+                backend=backend,
+                repetitions=repetitions,
+                quick=True,
+                memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
+                run_timeout=effective_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - backend limitations
+            forced_records.append(
+                {
+                    "circuit": spec.name,
+                    "qubits": n,
+                    "actual_qubits": forced_width,
+                    "framework": backend.name,
+                    "backend": backend.name,
+                    "unsupported": True,
+                    "failed": False,
+                    "error": str(exc),
+                }
+            )
+            LOGGER.warning(
+                "Forced run failed for circuit=%s qubits=%s backend=%s: %s",
+                spec.name,
+                n,
+                backend.name,
+                exc,
+            )
+            messages.append(f"{status} failed: {exc}")
+            continue
+
+        rec.pop("result", None)
+        rec.update(
+            {
+                "circuit": spec.name,
+                "qubits": n,
+                "actual_qubits": forced_width,
+                "framework": backend.name,
+                "backend": backend.name,
+                "mode": "forced",
+                "unsupported": bool(rec.get("unsupported", False)),
+            }
+        )
+        forced_records.append(rec)
+        LOGGER.info(
+            "Completed forced run: circuit=%s qubits=%s backend=%s",
+            spec.name,
+            n,
+            backend.name,
+        )
+        messages.append(status)
+
+    runner = BenchmarkRunner()
+    LOGGER.info(
+        "Executing automatic run: circuit=%s qubits=%s backend=quasar",
+        spec.name,
+        n,
+    )
+    auto_status = f"{spec.name}@{n} quasar"
+    auto_skip_reason = _mps_skip_reason(
+        circuit_auto,
+        n,
+        forced_width=auto_width,
+    )
+    if auto_skip_reason:
+        LOGGER.info(
+            "Skipping automatic run: circuit=%s qubits=%s reason=%s",
+            spec.name,
+            n,
+            auto_skip_reason,
+        )
+        auto_records.append(
+            {
+                "circuit": spec.name,
+                "qubits": n,
+                "actual_qubits": auto_width,
+                "framework": "quasar",
+                "backend": Backend.MPS.name,
+                "mode": "auto",
+                "unsupported": True,
+                "failed": False,
+                "error": auto_skip_reason,
+                "comment": auto_skip_reason,
+                "repetitions": 0,
+            }
+        )
+        messages.append(f"{auto_status} skip: {auto_skip_reason}")
+        return forced_records, auto_records, messages
+
+    try:
+        rec = runner.run_quasar_multiple(
+            circuit_auto,
+            engine,
+            repetitions=repetitions,
+            quick=False,
+            memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
+            run_timeout=effective_timeout,
+        )
+    except NoFeasibleBackendError as exc:
+        reason = _automatic_failure_reason(
+            circuit_auto,
+            n,
+            actual_qubits=auto_width,
+            default=str(exc),
+        )
+        LOGGER.info(
+            "Skipping automatic run: circuit=%s qubits=%s reason=%s",
+            spec.name,
+            n,
+            reason,
+        )
+        auto_records.append(
+            {
+                "circuit": spec.name,
+                "qubits": n,
+                "actual_qubits": auto_width,
+                "framework": "quasar",
+                "backend": None,
+                "mode": "auto",
+                "unsupported": True,
+                "failed": False,
+                "error": reason,
+                "comment": reason,
+                "repetitions": 0,
+            }
+        )
+        messages.append(f"{auto_status} unsupported: {reason}")
+        return forced_records, auto_records, messages
+    except Exception as exc:  # pragma: no cover - skip unsupported mixes
+        LOGGER.warning(
+            "Automatic scheduling failed for circuit=%s qubits=%s: %s",
+            spec.name,
+            n,
+            exc,
+        )
+        messages.append(f"{auto_status} failed: {exc}")
+        return forced_records, auto_records, messages
+
+    rec.pop("result", None)
+    backend_choice = rec.get("backend")
+    if isinstance(backend_choice, Backend):
+        rec["backend"] = backend_choice.name
+    rec.update(
+        {
+            "circuit": spec.name,
+            "qubits": n,
+            "actual_qubits": auto_width,
+            "framework": "quasar",
+            "mode": "auto",
+            "unsupported": bool(rec.get("unsupported", False)),
+        }
+    )
+    auto_records.append(rec)
+    LOGGER.info(
+        "Completed automatic run: circuit=%s qubits=%s backend=quasar",
+        spec.name,
+        n,
+    )
+    messages.append(auto_status)
+    return forced_records, auto_records, messages
+
+
+def _collect_backend_for_width_worker(
+    spec: CircuitSpec,
+    n: int,
+    backends: Sequence[Backend],
+    *,
+    repetitions: int,
+    run_timeout: float | None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
+    engine = thread_engine()
+    return _collect_backend_for_width(
+        engine,
+        spec,
+        n,
+        backends,
+        repetitions=repetitions,
+        run_timeout=run_timeout,
+    )
+
+
 def collect_backend_data(
     specs: Iterable[CircuitSpec],
     backends: Sequence[Backend],
     *,
     repetitions: int = 3,
     run_timeout: float | None = RUN_TIMEOUT_DEFAULT_SECONDS,
+    max_workers: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return forced and automatic scheduler results for ``specs``."""
 
     spec_list = list(specs)
-    effective_timeout = run_timeout if run_timeout and run_timeout > 0 else None
     LOGGER.info(
         "Collecting backend data for %d circuit family(ies)", len(spec_list)
     )
@@ -466,296 +776,80 @@ def collect_backend_data(
         LOGGER.warning("No circuit specifications provided; skipping collection")
         return pd.DataFrame(), pd.DataFrame()
 
-    engine = SimulationEngine()
+    tasks: list[tuple[int, int, CircuitSpec, int]] = []
+    for spec_index, spec in enumerate(spec_list):
+        LOGGER.info("Processing circuit family '%s'", spec.name)
+        for width_index, n in enumerate(spec.qubits):
+            tasks.append((spec_index, width_index, spec, n))
+
+    if not tasks:
+        return pd.DataFrame(), pd.DataFrame()
+
+    total_steps = len(tasks) * (len(backends) + 1)
+    progress = ProgressReporter(total_steps, prefix="Backend benchmarking")
+
+    ordered_forced: dict[tuple[int, int], list[dict[str, object]]] = {}
+    ordered_auto: dict[tuple[int, int], list[dict[str, object]]] = {}
+
+    worker_count = resolve_worker_count(max_workers, len(tasks))
+    LOGGER.info("Using %d worker thread(s) for backend collection", worker_count)
+
+    try:
+        if worker_count <= 1:
+            engine = SimulationEngine()
+            for spec_index, width_index, spec, n in tasks:
+                forced, auto, messages = _collect_backend_for_width(
+                    engine,
+                    spec,
+                    n,
+                    backends,
+                    repetitions=repetitions,
+                    run_timeout=run_timeout,
+                )
+                ordered_forced[(spec_index, width_index)] = forced
+                ordered_auto[(spec_index, width_index)] = auto
+                for message in messages:
+                    progress.advance(message)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures: dict[object, tuple[int, int]] = {}
+                for spec_index, width_index, spec, n in tasks:
+                    future = executor.submit(
+                        _collect_backend_for_width_worker,
+                        spec,
+                        n,
+                        backends,
+                        repetitions=repetitions,
+                        run_timeout=run_timeout,
+                    )
+                    futures[future] = (spec_index, width_index)
+
+                for future in as_completed(futures):
+                    spec_index, width_index = futures[future]
+                    try:
+                        forced, auto, messages = future.result()
+                    except Exception:
+                        progress.close()
+                        raise
+                    ordered_forced[(spec_index, width_index)] = forced
+                    ordered_auto[(spec_index, width_index)] = auto
+                    for message in messages:
+                        progress.advance(message)
+    finally:
+        progress.close()
+
     forced_records: list[dict[str, object]] = []
     auto_records: list[dict[str, object]] = []
-
-    total_steps = sum(len(spec.qubits) * (len(backends) + 1) for spec in spec_list)
-    progress = (
-        ProgressReporter(total_steps, prefix="Backend benchmarking")
-        if total_steps
-        else None
-    )
-
-    for spec in spec_list:
-        LOGGER.info("Processing circuit family '%s'", spec.name)
-        for n in spec.qubits:
-            LOGGER.info("Preparing circuits for %s with %s qubits", spec.name, n)
-            circuit_forced = _build_circuit(spec, n, use_classical_simplification=False)
-            circuit_auto = _build_circuit(spec, n, use_classical_simplification=True)
-            if circuit_forced is None or circuit_auto is None:
-                LOGGER.warning(
-                    "Skipping circuit %s with %s qubits because construction failed",
-                    spec.name,
-                    n,
-                )
-                continue
-
-            forced_width = _circuit_qubit_width(circuit_forced)
-            auto_width = _circuit_qubit_width(circuit_auto)
-
-            for backend in backends:
-                status = f"{spec.name}@{n} {backend.name.lower()}"
-                if (
-                    backend == Backend.STATEVECTOR
-                    and forced_width is not None
-                    and forced_width > STATEVECTOR_MAX_QUBITS
-                ):
-                    message = (
-                        f"circuit uses {forced_width} qubits exceeding "
-                        f"statevector limit of {STATEVECTOR_MAX_QUBITS}"
-                    )
-                    forced_records.append(
-                        {
-                            "circuit": spec.name,
-                            "qubits": n,
-                            "actual_qubits": forced_width,
-                            "framework": backend.name,
-                            "backend": backend.name,
-                            "unsupported": True,
-                            "failed": False,
-                            "error": message,
-                            "comment": message,
-                        }
-                    )
-                    LOGGER.info(
-                        "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
-                        spec.name,
-                        n,
-                        backend.name,
-                        message,
-                    )
-                    if progress:
-                        progress.advance(f"{status} skip: {message}")
-                    continue
-                if backend == Backend.MPS:
-                    reason = _mps_skip_reason(
-                        circuit_forced,
-                        n,
-                        forced_width=forced_width,
-                    )
-                    if reason:
-                        forced_records.append(
-                            {
-                                "circuit": spec.name,
-                                "qubits": n,
-                                "actual_qubits": forced_width,
-                                "framework": backend.name,
-                                "backend": backend.name,
-                                "unsupported": True,
-                                "failed": False,
-                                "error": reason,
-                                "comment": reason,
-                            }
-                        )
-                        LOGGER.info(
-                            "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
-                            spec.name,
-                            n,
-                            backend.name,
-                            reason,
-                        )
-                        if progress:
-                            progress.advance(f"{status} skip: {reason}")
-                        continue
-                if not _supports_backend(circuit_forced, backend):
-                    reason = "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
-                    forced_records.append(
-                        {
-                            "circuit": spec.name,
-                            "qubits": n,
-                            "actual_qubits": forced_width,
-                            "framework": backend.name,
-                            "backend": backend.name,
-                            "unsupported": True,
-                            "failed": False,
-                            "error": f"circuit uses {reason} unsupported by {backend.name}",
-                        }
-                    )
-                    LOGGER.info(
-                        "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
-                        spec.name,
-                        n,
-                        backend.name,
-                        reason,
-                    )
-                    if progress:
-                        progress.advance(f"{status} skip: {reason}")
-                    continue
-                runner = BenchmarkRunner()
-                LOGGER.info(
-                    "Executing forced run: circuit=%s qubits=%s backend=%s",
-                    spec.name,
-                    n,
-                    backend.name,
-                )
-                try:
-                    rec = runner.run_quasar_multiple(
-                        circuit_forced,
-                        engine,
-                        backend=backend,
-                        repetitions=repetitions,
-                        quick=True,
-                        memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
-                        run_timeout=effective_timeout,
-                    )
-                except Exception as exc:  # pragma: no cover - backend limitations
-                    forced_records.append(
-                        {
-                            "circuit": spec.name,
-                            "qubits": n,
-                            "actual_qubits": forced_width,
-                            "framework": backend.name,
-                            "backend": backend.name,
-                            "unsupported": True,
-                            "failed": False,
-                            "error": str(exc),
-                        }
-                    )
-                    LOGGER.warning(
-                        "Forced run failed for circuit=%s qubits=%s backend=%s: %s",
-                        spec.name,
-                        n,
-                        backend.name,
-                        exc,
-                    )
-                    if progress:
-                        progress.advance(f"{status} failed: {exc}")
-                    continue
-
-                rec.pop("result", None)
-                rec.update(
-                    {
-                        "circuit": spec.name,
-                        "qubits": n,
-                        "actual_qubits": forced_width,
-                        "framework": backend.name,
-                        "backend": backend.name,
-                        "mode": "forced",
-                        "unsupported": bool(rec.get("unsupported", False)),
-                    }
-                )
-                forced_records.append(rec)
-                LOGGER.info(
-                    "Completed forced run: circuit=%s qubits=%s backend=%s",
-                    spec.name,
-                    n,
-                    backend.name,
-                )
-                if progress:
-                    progress.advance(status)
-
-            runner = BenchmarkRunner()
-            LOGGER.info(
-                "Executing automatic run: circuit=%s qubits=%s backend=quasar",
-                spec.name,
-                n,
+    for spec_index, spec in enumerate(spec_list):
+        for width_index, _ in enumerate(spec.qubits):
+            forced_records.extend(
+                ordered_forced.get((spec_index, width_index), [])
             )
-            auto_skip_reason = _mps_skip_reason(
-                circuit_auto,
-                n,
-                forced_width=auto_width,
-            )
-            auto_status = f"{spec.name}@{n} quasar"
-            if auto_skip_reason:
-                LOGGER.info(
-                    "Skipping automatic run: circuit=%s qubits=%s reason=%s",
-                    spec.name,
-                    n,
-                    auto_skip_reason,
-                )
-                auto_records.append(
-                    {
-                        "circuit": spec.name,
-                        "qubits": n,
-                        "actual_qubits": auto_width,
-                        "framework": "quasar",
-                        "backend": Backend.MPS.name,
-                        "mode": "auto",
-                        "unsupported": True,
-                        "failed": False,
-                        "error": auto_skip_reason,
-                        "comment": auto_skip_reason,
-                        "repetitions": 0,
-                    }
-                )
-                if progress:
-                    progress.advance(f"{auto_status} skip: {auto_skip_reason}")
-                continue
-            try:
-                rec = runner.run_quasar_multiple(
-                    circuit_auto,
-                    engine,
-                    repetitions=repetitions,
-                    quick=False,
-                    memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
-                    run_timeout=effective_timeout,
-                )
-            except NoFeasibleBackendError as exc:
-                reason = _automatic_failure_reason(
-                    circuit_auto,
-                    n,
-                    actual_qubits=auto_width,
-                    default=str(exc),
-                )
-                LOGGER.info(
-                    "Skipping automatic run: circuit=%s qubits=%s reason=%s",
-                    spec.name,
-                    n,
-                    reason,
-                )
-                auto_records.append(
-                    {
-                        "circuit": spec.name,
-                        "qubits": n,
-                        "actual_qubits": auto_width,
-                        "framework": "quasar",
-                        "backend": None,
-                        "mode": "auto",
-                        "unsupported": True,
-                        "failed": False,
-                        "error": reason,
-                        "comment": reason,
-                        "repetitions": 0,
-                    }
-                )
-                if progress:
-                    progress.advance(f"{auto_status} unsupported: {reason}")
-                continue
-            except Exception as exc:  # pragma: no cover - skip unsupported mixes
-                LOGGER.warning(
-                    "Automatic scheduling failed for circuit=%s qubits=%s: %s",
-                    spec.name,
-                    n,
-                    exc,
-                )
-                if progress:
-                    progress.advance(f"{auto_status} failed: {exc}")
-                continue
-            rec.pop("result", None)
-            rec.update(
-                {
-                    "circuit": spec.name,
-                    "qubits": n,
-                    "actual_qubits": auto_width,
-                    "framework": "quasar",
-                    "mode": "auto",
-                    "unsupported": bool(rec.get("unsupported", False)),
-                }
-            )
-            auto_records.append(rec)
-            LOGGER.info(
-                "Completed automatic run: circuit=%s qubits=%s backend=quasar",
-                spec.name,
-                n,
-            )
-            if progress:
-                progress.advance(auto_status)
+            auto_records.extend(ordered_auto.get((spec_index, width_index), []))
 
-    if progress:
-        progress.close()
-    return pd.DataFrame(forced_records), pd.DataFrame(auto_records)
-
+    forced_df = pd.DataFrame(forced_records)
+    auto_df = pd.DataFrame(auto_records)
+    return forced_df, auto_df
 
 def _normalise_backend_label(value: object) -> str | None:
     """Return an uppercase backend label for ``value`` when possible."""
@@ -1001,6 +1095,7 @@ def generate_backend_comparison(
     repetitions: int = 3,
     run_timeout: float | None = RUN_TIMEOUT_DEFAULT_SECONDS,
     reuse_existing: bool = False,
+    max_workers: int | None = None,
 ) -> None:
     LOGGER.info("Generating backend comparison figures")
     forced_path = RESULTS_DIR / "backend_forced.csv"
@@ -1100,6 +1195,7 @@ def generate_backend_comparison(
             BACKENDS,
             repetitions=repetitions,
             run_timeout=run_timeout,
+            max_workers=max_workers,
         )
     forced_path = RESULTS_DIR / "backend_forced.csv"
     auto_path = RESULTS_DIR / "backend_auto.csv"
@@ -1763,6 +1859,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Load and filter cached backend CSVs instead of running new simulations.",
     )
+    parser.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=None,
+        help=(
+            "Number of worker threads for backend simulations (default: auto)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     _configure_logging(args.verbose)
@@ -1774,6 +1879,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         repetitions=args.repetitions,
         run_timeout=run_timeout,
         reuse_existing=args.reuse_existing,
+        max_workers=args.workers,
     )
     generate_heatmap()
     generate_speedup_bars()
