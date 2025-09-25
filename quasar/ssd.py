@@ -120,17 +120,20 @@ class GatePathNode:
 
     id: int
     num_qubits: int
-    operations: Tuple[Tuple[int, Tuple[int, ...]], ...]
     predecessors: set[int] = field(default_factory=set)
     successors: set[int] = field(default_factory=set)
+    operations: Tuple[Tuple[int, Tuple[int, ...]], ...] = ()
     backend: Backend | None = None
     cost: Cost | None = None
     history: Tuple[str, ...] = ()
     last_gate_id: int = 0
+    parent: int | None = None
+    operation: Tuple[int, Tuple[int, ...]] | None = None
+    extensions: Dict[Tuple[int, Tuple[int, ...]], int] = field(default_factory=dict)
 
     @property
     def is_root(self) -> bool:
-        return not self.operations
+        return self.operation is None
 
 
 class GatePathGraph:
@@ -138,48 +141,40 @@ class GatePathGraph:
 
     def __init__(self, init_gate_id: int) -> None:
         self._counter = itertools.count()
-        self._key_index: Dict[Tuple[int, Tuple[Tuple[int, Tuple[int, ...]], ...]], GatePathNode] = {}
         self.nodes: Dict[int, GatePathNode] = {}
-        self.root = self._create_node(0, (), predecessors=(), last_gate_id=init_gate_id)
+        self._merge_index: Dict[Tuple[Tuple[int, ...], int, Tuple[int, ...]], GatePathNode] = {}
+        self._essential_ids: set[int] = set()
+        self.root = self._create_node(
+            0,
+            predecessors=(),
+            last_gate_id=init_gate_id,
+            parent=None,
+            operation=None,
+            operations=(),
+        )
 
     def _create_node(
         self,
         num_qubits: int,
-        operations: Tuple[Tuple[int, Tuple[int, ...]], ...],
         *,
         predecessors: Iterable[int],
         last_gate_id: int,
+        parent: int | None,
+        operation: Tuple[int, Tuple[int, ...]] | None,
+        operations: Tuple[Tuple[int, Tuple[int, ...]], ...],
     ) -> GatePathNode:
         node = GatePathNode(
             id=next(self._counter),
             num_qubits=num_qubits,
-            operations=operations,
             predecessors=set(predecessors),
             last_gate_id=last_gate_id,
+            parent=parent,
+            operation=operation,
+            operations=operations,
         )
         self.nodes[node.id] = node
-        key = (num_qubits, operations)
-        self._key_index[key] = node
         for pred in predecessors:
             self.nodes[pred].successors.add(node.id)
-        return node
-
-    def get_or_create(
-        self,
-        num_qubits: int,
-        operations: Tuple[Tuple[int, Tuple[int, ...]], ...],
-        *,
-        predecessors: Iterable[int],
-        last_gate_id: int,
-    ) -> GatePathNode:
-        key = (num_qubits, operations)
-        node = self._key_index.get(key)
-        if node is None:
-            node = self._create_node(num_qubits, operations, predecessors=predecessors, last_gate_id=last_gate_id)
-        else:
-            node.predecessors.update(predecessors)
-            for pred in predecessors:
-                self.nodes[pred].successors.add(node.id)
         return node
 
     def extend(
@@ -190,13 +185,25 @@ class GatePathGraph:
         *,
         num_qubits: int,
     ) -> GatePathNode:
-        operations = prev.operations + ((gate_id, positions),)
-        return self.get_or_create(
+        key = (gate_id, positions)
+        existing_id = prev.extensions.get(key)
+        if existing_id is not None:
+            node = self.nodes[existing_id]
+            if prev.id not in node.predecessors:
+                node.predecessors.add(prev.id)
+                prev.successors.add(node.id)
+            return node
+        node = self._create_node(
             num_qubits,
-            operations,
             predecessors=(prev.id,),
             last_gate_id=gate_id,
+            parent=prev.id,
+            operation=key,
+            operations=prev.operations + (key,),
         )
+        prev.extensions[key] = node.id
+        prev.successors.add(node.id)
+        return node
 
     def merge(
         self,
@@ -207,18 +214,30 @@ class GatePathGraph:
         num_qubits: int,
     ) -> GatePathNode:
         pred_ids = tuple(node.id for node in predecessors)
-        return self.get_or_create(
-            num_qubits,
-            ((gate_id, positions),),
-            predecessors=pred_ids,
-            last_gate_id=gate_id,
-        )
+        key = (tuple(sorted(pred_ids)), gate_id, positions)
+        node = self._merge_index.get(key)
+        if node is None:
+            node = self._create_node(
+                num_qubits,
+                predecessors=pred_ids,
+                last_gate_id=gate_id,
+                parent=None,
+                operation=(gate_id, positions),
+                operations=((gate_id, positions),),
+            )
+            self._merge_index[key] = node
+        else:
+            for pred in pred_ids:
+                if pred not in node.predecessors:
+                    node.predecessors.add(pred)
+                    self.nodes[pred].successors.add(node.id)
+        return node
 
     def to_networkx(self, gate_graph: GateGraph) -> "_nx.DiGraph":
         nx = _require_networkx()
         graph = nx.DiGraph()
         for node in self.nodes.values():
-            label = tuple(gate_graph.nodes[gid].name for gid, _ in node.operations)
+            label = tuple(gate_graph.nodes[gid].name for gid, _ in self.iter_operations(node))
             backend_name = node.backend.name if node.backend is not None else None
             cost_time = node.cost.time if node.cost is not None else None
             graph.add_node(
@@ -232,6 +251,32 @@ class GatePathGraph:
             for succ in node.successors:
                 graph.add_edge(("path", node.id), ("path", succ))
         return graph
+
+    def iter_operations(self, node: GatePathNode) -> Tuple[Tuple[int, Tuple[int, ...]], ...]:
+        return node.operations
+
+    def compute_essential_nodes(self) -> set[int]:
+        essential: set[int] = set()
+        for node in self.nodes.values():
+            if node.is_root:
+                continue
+            if not node.successors:
+                essential.add(node.id)
+                continue
+            if len(node.successors) > 1:
+                essential.add(node.id)
+                continue
+            for succ_id in node.successors:
+                succ = self.nodes[succ_id]
+                if len(succ.predecessors) > 1:
+                    essential.add(node.id)
+                    break
+        self._essential_ids = essential
+        return essential
+
+    @property
+    def essential_ids(self) -> set[int]:
+        return self._essential_ids
 
 
 @dataclass
@@ -633,6 +678,7 @@ class _HierarchyBuilder:
         self.path_graph = GatePathGraph(self.gate_graph.init_id)
         self.subsystem_graph = SubsystemGraph()
         self._active: Dict[int, _SubsystemState] = {}
+        self._essential_ids: set[int] = set()
 
     # ------------------------------------------------------------------
     def build(self) -> SSD:
@@ -655,6 +701,7 @@ class _HierarchyBuilder:
         for gate in self.circuit.gates:
             self._apply_gate(gate)
 
+        self._essential_ids = self.path_graph.compute_essential_nodes()
         self._assign_methods()
         return self._to_ssd()
 
@@ -669,7 +716,11 @@ class _HierarchyBuilder:
             if state.node_id not in seen:
                 seen.add(state.node_id)
                 involved_states.append(state)
-            last_gate = state.path_node.last_gate_id if state.path_node.operations else self.gate_graph.init_id
+            last_gate = (
+                state.path_node.last_gate_id
+                if state.path_node.operation is not None
+                else self.gate_graph.init_id
+            )
             self.gate_graph.add_transition(last_gate, gate_node.id)
 
         if not involved_states:
@@ -721,8 +772,11 @@ class _HierarchyBuilder:
         for node in self.path_graph.nodes.values():
             if node.is_root:
                 continue
+            if node.id not in self._essential_ids:
+                continue
+            operations = self.path_graph.iter_operations(node)
             gates: List[Gate] = []
-            for gate_id, positions in node.operations:
+            for gate_id, positions in operations:
                 gate_node = self.gate_graph.nodes[gate_id]
                 gates.append(
                     Gate(
@@ -731,9 +785,16 @@ class _HierarchyBuilder:
                         dict(gate_node.params),
                     )
                 )
+            if node.num_qubits:
+                num_qubits = node.num_qubits
+            else:
+                num_qubits = 0
+                for _, positions in operations:
+                    if positions:
+                        num_qubits = max(num_qubits, max(positions) + 1)
             backend, cost = self.selector.select(
                 gates,
-                node.num_qubits or max((max(p) for _, p in node.operations), default=-1) + 1,
+                num_qubits,
                 max_memory=self.max_memory,
                 max_time=self.max_time,
                 target_accuracy=self.target_accuracy,
@@ -745,24 +806,36 @@ class _HierarchyBuilder:
     # ------------------------------------------------------------------
     def _to_ssd(self) -> SSD:
         partitions: List[SSDPartition] = []
-        path_nodes = [node for node in self.path_graph.nodes.values() if not node.is_root]
-        path_nodes.sort(key=lambda n: n.id)
+        path_nodes = [self.path_graph.nodes[node_id] for node_id in sorted(self._essential_ids)]
         id_to_index = {node.id: idx for idx, node in enumerate(path_nodes)}
 
         path_to_qubits: Dict[int, List[Tuple[int, ...]]] = {}
         for subsystem in self.subsystem_graph.nodes:
             path_id = subsystem.path
-            if path_id == self.path_graph.root.id:
+            if path_id == self.path_graph.root.id or path_id not in id_to_index:
                 continue
             path_to_qubits.setdefault(path_id, []).append(subsystem.qubits)
+
+        def essential_dependencies(node: GatePathNode) -> Tuple[int, ...]:
+            deps: set[int] = set()
+            stack = list(node.predecessors)
+            visited: set[int] = set()
+            while stack:
+                pred_id = stack.pop()
+                if pred_id in visited:
+                    continue
+                visited.add(pred_id)
+                if pred_id in self._essential_ids:
+                    deps.add(id_to_index[pred_id])
+                else:
+                    stack.extend(self.path_graph.nodes[pred_id].predecessors)
+            return tuple(sorted(deps))
 
         for node in path_nodes:
             qubit_groups = tuple(path_to_qubits.get(node.id, []))
             if not qubit_groups:
                 qubit_groups = (tuple(range(node.num_qubits)),) if node.num_qubits else ((),)
-            dependencies = tuple(
-                sorted(id_to_index[p] for p in node.predecessors if p in id_to_index)
-            )
+            dependencies = essential_dependencies(node)
             backend = node.backend or Backend.STATEVECTOR
             cost = node.cost or Cost(time=0.0, memory=0.0)
             partition = SSDPartition(
