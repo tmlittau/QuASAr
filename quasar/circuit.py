@@ -11,7 +11,7 @@ import math
 from qiskit.circuit import QuantumCircuit
 from qiskit_qasm3_import import api as qasm3_api
 
-from .ssd import SSD, SSDPartition
+from .ssd import SSD, SSDPartition, build_hierarchical_ssd
 from .cost import Cost, CostEstimator, Backend
 from .decompositions import decompose_mcx, decompose_ccz, decompose_cswap
 
@@ -694,10 +694,7 @@ class Circuit:
         """Construct the initial subsystem descriptor."""
         if self._num_qubits == 0:
             return SSD([])
-        part = SSDPartition(subsystems=(tuple(range(self._num_qubits)),))
-        ssd = SSD([part])
-        ssd.build_metadata()
-        return ssd
+        return build_hierarchical_ssd(self)
 
     def _estimate_costs(self) -> Dict[str, Cost]:
         """Estimate simulation costs for standard backends."""
