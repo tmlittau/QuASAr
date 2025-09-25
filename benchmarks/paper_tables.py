@@ -26,9 +26,9 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(PACKAGE_ROOT))
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from plot_utils import backend_labels  # type: ignore[no-redef]
+    from plot_utils import backend_labels, compute_baseline_best  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
-    from .plot_utils import backend_labels
+    from .plot_utils import backend_labels, compute_baseline_best
 
 from quasar.cost import Backend
 
@@ -150,6 +150,22 @@ def _format_speedup(value: object) -> str:
     return f"{numeric:.2f}\\times"
 
 
+def _format_memory_bytes(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if pd.isna(numeric):
+        return ""
+    mib = numeric / (1024**2)
+    if abs(mib) >= 1024:
+        gib = mib / 1024
+        return f"{gib:.2f}\\,\\mathrm{{GiB}}"
+    return f"{mib:.1f}\\,\\mathrm{{MiB}}"
+
+
 def _lookup_backend(value: object) -> Backend | None:
     if isinstance(value, Backend):
         return value
@@ -174,6 +190,37 @@ def _format_backend(value: object) -> str:
     if backend is None:
         return str(value)
     return BACKEND_LABELS.get(backend, backend.name.title())
+
+
+def _format_boolean(
+    value: object,
+    *,
+    true_label: str = "\\checkmark",
+    false_label: str = "\\texttimes",
+) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text or text in {"nan", "none"}:
+            return ""
+        if text in {"true", "yes", "y", "1"}:
+            return true_label
+        if text in {"false", "no", "n", "0"}:
+            return false_label
+        return value
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return true_label if bool(value) else false_label
+    if numeric == 0:
+        return false_label
+    return true_label
 
 
 def _format_rotation_set(value: object) -> str:
@@ -235,38 +282,245 @@ def _dataframe_to_latex(
     return "\n".join(lines)
 
 
-def _build_backend_speedup_table(results_dir: Path) -> pd.DataFrame:
-    path = results_dir / "backend_vs_baseline_speedups.csv"
+def _load_showcase_raw(results_dir: Path) -> pd.DataFrame:
+    path = results_dir / "showcase" / "showcase_raw.csv"
     if not path.exists():
-        raise FileNotFoundError(f"backend speedup summary not found: {path}")
+        raise FileNotFoundError(f"showcase raw results not found: {path}")
     df = pd.read_csv(path)
     if df.empty:
+        LOGGER.info("Showcase raw results at %s are empty", path)
+    return df
+
+
+def _build_showcase_summary(results_dir: Path) -> pd.DataFrame:
+    raw = _load_showcase_raw(results_dir)
+    if raw.empty:
         return pd.DataFrame()
-    required = [
+
+    required = {
         "circuit",
         "qubits",
-        "run_time_mean_baseline",
-        "run_time_mean_quasar",
-        "backend_baseline",
-        "backend_quasar",
-        "speedup",
+        "framework",
+        "backend",
+        "run_time_mean",
+        "run_peak_memory_mean",
+    }
+    _require_columns(raw, required, context="showcase summary")
+
+    try:
+        baseline_runtime = compute_baseline_best(
+            raw,
+            metrics=("run_time_mean", "run_peak_memory_mean"),
+        )
+    except ValueError as exc:
+        LOGGER.warning("Unable to compute showcase baseline minima: %s", exc)
+        return pd.DataFrame()
+
+    baseline_runtime = baseline_runtime.rename(
+        columns={
+            "backend": "baseline_runtime_backend",
+            "run_time_mean": "baseline_run_time_mean",
+            "run_time_std": "baseline_run_time_std",
+            "run_peak_memory_mean": "baseline_run_peak_memory_mean",
+            "run_peak_memory_std": "baseline_run_peak_memory_std",
+        }
+    )
+
+    quasar = raw[raw["framework"].astype(str).str.lower() == "quasar"].copy()
+    if quasar.empty:
+        LOGGER.info("Showcase results do not contain QuASAr measurements")
+        return pd.DataFrame()
+
+    if "unsupported" in quasar.columns:
+        mask = quasar["unsupported"].astype("boolean", copy=False).fillna(False)
+        quasar = quasar[~mask.to_numpy(dtype=bool)]
+    if "failed" in quasar.columns:
+        mask = quasar["failed"].astype("boolean", copy=False).fillna(False)
+        quasar = quasar[~mask.to_numpy(dtype=bool)]
+    if quasar.empty:
+        LOGGER.info("No successful QuASAr runs available for showcase summary")
+        return pd.DataFrame()
+
+    quasar = quasar.rename(
+        columns={
+            "backend": "quasar_backend",
+            "run_time_mean": "quasar_run_time_mean",
+            "run_time_std": "quasar_run_time_std",
+            "total_time_mean": "quasar_total_time_mean",
+            "total_time_std": "quasar_total_time_std",
+            "run_peak_memory_mean": "quasar_run_peak_memory_mean",
+            "run_peak_memory_std": "quasar_run_peak_memory_std",
+        }
+    )
+
+    quasar_columns = [
+        "circuit",
+        "qubits",
+        "quasar_backend",
+        "quasar_run_time_mean",
+        "quasar_run_time_std",
+        "quasar_total_time_mean",
+        "quasar_total_time_std",
+        "quasar_run_peak_memory_mean",
+        "quasar_run_peak_memory_std",
     ]
-    _require_columns(df, required, context="backend speedup table")
-    df = df.loc[:, required].copy()
-    df.sort_values(["circuit", "qubits"], inplace=True)
+    available_quasar_columns = [
+        column for column in quasar_columns if column in quasar.columns
+    ]
+    summary = baseline_runtime.merge(
+        quasar[available_quasar_columns],
+        on=["circuit", "qubits"],
+        how="inner",
+    )
+    if summary.empty:
+        LOGGER.info("Showcase summary merge produced no rows")
+        return summary
+
+    try:
+        baseline_memory = compute_baseline_best(
+            raw,
+            metrics=("run_peak_memory_mean", "run_time_mean"),
+        )
+    except ValueError:
+        baseline_memory = pd.DataFrame()
+    else:
+        baseline_memory = baseline_memory.rename(
+            columns={
+                "backend": "baseline_memory_backend",
+                "run_peak_memory_mean": "baseline_min_peak_memory_mean",
+                "run_peak_memory_std": "baseline_min_peak_memory_std",
+                "run_time_mean": "baseline_memory_run_time_mean",
+                "run_time_std": "baseline_memory_run_time_std",
+            }
+        )
+        memory_columns = [
+            "circuit",
+            "qubits",
+            "baseline_memory_backend",
+            "baseline_min_peak_memory_mean",
+            "baseline_min_peak_memory_std",
+        ]
+        available_memory_columns = [
+            column for column in memory_columns if column in baseline_memory.columns
+        ]
+        summary = summary.merge(
+            baseline_memory[available_memory_columns],
+            on=["circuit", "qubits"],
+            how="left",
+        )
+
+    runtime_valid = (
+        summary["baseline_run_time_mean"] > 0
+    ) & (summary["quasar_run_time_mean"] > 0)
+    summary["runtime_speedup"] = summary["baseline_run_time_mean"] / summary[
+        "quasar_run_time_mean"
+    ]
+    summary.loc[~runtime_valid, "runtime_speedup"] = pd.NA
+
+    memory_valid = (
+        summary["baseline_run_peak_memory_mean"] > 0
+    ) & (summary["quasar_run_peak_memory_mean"] > 0)
+    summary["memory_ratio"] = summary["baseline_run_peak_memory_mean"] / summary[
+        "quasar_run_peak_memory_mean"
+    ]
+    summary.loc[~memory_valid, "memory_ratio"] = pd.NA
+
+    runtime_baseline_backend = summary["baseline_runtime_backend"].map(
+        _lookup_backend
+    )
+    quasar_backend = summary["quasar_backend"].map(_lookup_backend)
+    summary["runtime_optimal"] = pd.Series(
+        runtime_baseline_backend == quasar_backend,
+        dtype="boolean",
+    )
+    summary.loc[runtime_baseline_backend.isna(), "runtime_optimal"] = pd.NA
+
+    if "baseline_memory_backend" in summary.columns:
+        memory_baseline_backend = summary["baseline_memory_backend"].map(
+            _lookup_backend
+        )
+        summary["memory_optimal"] = pd.Series(
+            memory_baseline_backend == quasar_backend,
+            dtype="boolean",
+        )
+        summary.loc[memory_baseline_backend.isna(), "memory_optimal"] = pd.NA
+    else:
+        summary["memory_optimal"] = pd.Series(pd.NA, index=summary.index, dtype="boolean")
+
+    scale = float(1024**2)
+    summary["baseline_run_peak_memory_mib"] = (
+        summary["baseline_run_peak_memory_mean"] / scale
+    )
+    summary["quasar_run_peak_memory_mib"] = (
+        summary["quasar_run_peak_memory_mean"] / scale
+    )
+    if "baseline_min_peak_memory_mean" in summary.columns:
+        summary["baseline_min_peak_memory_mib"] = (
+            summary["baseline_min_peak_memory_mean"] / scale
+        )
+
+    summary.sort_values(["circuit", "qubits"], inplace=True)
+    return summary.reset_index(drop=True)
+
+
+def _build_showcase_runtime_table(results_dir: Path) -> pd.DataFrame:
+    summary = _build_showcase_summary(results_dir)
+    if summary.empty:
+        return pd.DataFrame()
+
     table = pd.DataFrame(
         {
-            "Circuit": df["circuit"].map(_format_circuit_name),
-            "Qubits": df["qubits"].map(_format_integer),
-            "Baseline backend": df["backend_baseline"].map(_format_backend),
-            "Baseline runtime": df["run_time_mean_baseline"].map(
+            "Circuit": summary["circuit"].map(_format_circuit_name),
+            "Qubits": summary["qubits"].map(_format_integer),
+            "Baseline backend": summary["baseline_runtime_backend"].map(
+                _format_backend
+            ),
+            "Baseline runtime": summary["baseline_run_time_mean"].map(
                 _format_duration_seconds
             ),
-            "QuASAr backend": df["backend_quasar"].map(_format_backend),
-            "QuASAr runtime": df["run_time_mean_quasar"].map(
+            "QuASAr backend": summary["quasar_backend"].map(_format_backend),
+            "QuASAr runtime": summary["quasar_run_time_mean"].map(
                 _format_duration_seconds
             ),
-            "Speedup": df["speedup"].map(_format_speedup),
+            "Speedup": summary["runtime_speedup"].map(_format_speedup),
+            "Optimal backend": summary["runtime_optimal"].map(_format_boolean),
+        }
+    )
+    return table
+
+
+def _build_showcase_memory_table(results_dir: Path) -> pd.DataFrame:
+    summary = _build_showcase_summary(results_dir)
+    if summary.empty:
+        return pd.DataFrame()
+
+    min_backend = summary.get(
+        "baseline_memory_backend", pd.Series([None] * len(summary))
+    )
+    min_memory = summary.get(
+        "baseline_min_peak_memory_mean", pd.Series([None] * len(summary))
+    )
+
+    table = pd.DataFrame(
+        {
+            "Circuit": summary["circuit"].map(_format_circuit_name),
+            "Qubits": summary["qubits"].map(_format_integer),
+            "Baseline backend": summary["baseline_runtime_backend"].map(
+                _format_backend
+            ),
+            "Baseline peak memory": summary["baseline_run_peak_memory_mean"].map(
+                _format_memory_bytes
+            ),
+            "QuASAr backend": summary["quasar_backend"].map(_format_backend),
+            "QuASAr peak memory": summary["quasar_run_peak_memory_mean"].map(
+                _format_memory_bytes
+            ),
+            "Peak memory ratio": summary["memory_ratio"].map(_format_speedup),
+            "Minimum-memory backend": min_backend.map(_format_backend),
+            "Minimum peak memory": min_memory.map(_format_memory_bytes),
+            "QuASAr memory optimal": summary["memory_optimal"].map(
+                _format_boolean
+            ),
         }
     )
     return table
@@ -345,13 +599,22 @@ def _build_w_state_oracle_table(results_dir: Path) -> pd.DataFrame:
 
 TABLE_SPECS: Sequence[TableSpec] = (
     TableSpec(
-        name="backend_speedups",
-        builder=_build_backend_speedup_table,
+        name="showcase_runtime",
+        builder=_build_showcase_runtime_table,
         caption=(
-            "Runtime comparison between QuASAr and the strongest baseline per "
-            "circuit."
+            "Runtime comparison between QuASAr and the strongest baseline for "
+            "each showcase circuit."
         ),
-        label="tab:backend-speedups",
+        label="tab:showcase-runtime",
+    ),
+    TableSpec(
+        name="showcase_memory",
+        builder=_build_showcase_memory_table,
+        caption=(
+            "Peak memory comparison for the showcase circuits, highlighting "
+            "whether QuASAr matches the minimum-memory backend."
+        ),
+        label="tab:showcase-memory",
     ),
     TableSpec(
         name="partitioning_summary",

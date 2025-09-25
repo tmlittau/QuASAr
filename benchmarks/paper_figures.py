@@ -35,11 +35,11 @@ if __package__ in {None, ""}:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from plot_utils import (  # type: ignore[no-redef]
+        compute_baseline_best,
         backend_labels,
         backend_palette,
         plot_backend_timeseries,
         plot_heatmap,
-        plot_quasar_vs_baseline_best,
         plot_speedup_bars,
         setup_benchmark_style,
     )
@@ -53,11 +53,11 @@ if __package__ in {None, ""}:
     )
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import (
+        compute_baseline_best,
         backend_labels,
         backend_palette,
         plot_backend_timeseries,
         plot_heatmap,
-        plot_quasar_vs_baseline_best,
         plot_speedup_bars,
         setup_benchmark_style,
     )
@@ -726,6 +726,245 @@ def collect_backend_data(
     return pd.DataFrame(forced_records), pd.DataFrame(auto_records)
 
 
+def _normalise_backend_label(value: object) -> str | None:
+    """Return an uppercase backend label for ``value`` when possible."""
+
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    text = str(value).strip()
+    return text.upper() if text else None
+
+
+def _build_selection_summary(forced: pd.DataFrame, auto: pd.DataFrame) -> pd.DataFrame:
+    """Summarise how QuASAr compares against the best baselines."""
+
+    if forced.empty or auto.empty:
+        return pd.DataFrame()
+
+    required_forced = {
+        "circuit",
+        "qubits",
+        "framework",
+        "run_time_mean",
+        "run_peak_memory_mean",
+    }
+    required_auto = {
+        "circuit",
+        "qubits",
+        "backend",
+        "run_time_mean",
+        "run_peak_memory_mean",
+    }
+    if missing := required_forced.difference(forced.columns):
+        LOGGER.warning(
+            "Forced results missing required columns for selection summary: %s",
+            ", ".join(sorted(missing)),
+        )
+        return pd.DataFrame()
+    if missing := required_auto.difference(auto.columns):
+        LOGGER.warning(
+            "Automatic results missing required columns for selection summary: %s",
+            ", ".join(sorted(missing)),
+        )
+        return pd.DataFrame()
+
+    try:
+        baseline_runtime = compute_baseline_best(
+            forced,
+            metrics=("run_time_mean", "run_peak_memory_mean"),
+        )
+    except ValueError as exc:
+        LOGGER.warning("Unable to compute baseline runtime minima: %s", exc)
+        return pd.DataFrame()
+
+    baseline_runtime = baseline_runtime.rename(
+        columns={
+            "backend": "baseline_runtime_backend",
+            "run_time_mean": "baseline_run_time_mean",
+            "run_time_std": "baseline_run_time_std",
+            "run_peak_memory_mean": "baseline_run_peak_memory_mean",
+            "run_peak_memory_std": "baseline_run_peak_memory_std",
+        }
+    )
+
+    try:
+        baseline_memory = compute_baseline_best(
+            forced,
+            metrics=("run_peak_memory_mean", "run_time_mean"),
+        )
+    except ValueError:
+        baseline_memory = pd.DataFrame()
+    else:
+        baseline_memory = baseline_memory.rename(
+            columns={
+                "backend": "baseline_memory_backend",
+                "run_peak_memory_mean": "baseline_min_peak_memory_mean",
+                "run_peak_memory_std": "baseline_min_peak_memory_std",
+                "run_time_mean": "baseline_memory_run_time_mean",
+                "run_time_std": "baseline_memory_run_time_std",
+            }
+        )
+
+    auto_summary = auto.copy()
+    auto_summary = auto_summary.rename(
+        columns={
+            "backend": "quasar_backend",
+            "run_time_mean": "quasar_run_time_mean",
+            "run_time_std": "quasar_run_time_std",
+            "total_time_mean": "quasar_total_time_mean",
+            "total_time_std": "quasar_total_time_std",
+            "run_peak_memory_mean": "quasar_run_peak_memory_mean",
+            "run_peak_memory_std": "quasar_run_peak_memory_std",
+        }
+    )
+
+    summary = auto_summary.merge(
+        baseline_runtime[
+            [
+                "circuit",
+                "qubits",
+                "baseline_runtime_backend",
+                "baseline_run_time_mean",
+                "baseline_run_time_std",
+                "baseline_run_peak_memory_mean",
+                "baseline_run_peak_memory_std",
+            ]
+        ],
+        on=["circuit", "qubits"],
+        how="left",
+    )
+
+    if not baseline_memory.empty:
+        summary = summary.merge(
+            baseline_memory[
+                [
+                    "circuit",
+                    "qubits",
+                    "baseline_memory_backend",
+                    "baseline_min_peak_memory_mean",
+                    "baseline_min_peak_memory_std",
+                    "baseline_memory_run_time_mean",
+                    "baseline_memory_run_time_std",
+                ]
+            ],
+            on=["circuit", "qubits"],
+            how="left",
+        )
+    else:
+        summary = summary.assign(
+            baseline_memory_backend=np.nan,
+            baseline_min_peak_memory_mean=np.nan,
+            baseline_min_peak_memory_std=np.nan,
+            baseline_memory_run_time_mean=np.nan,
+            baseline_memory_run_time_std=np.nan,
+        )
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        summary["runtime_speedup"] = summary["baseline_run_time_mean"] / summary[
+            "quasar_run_time_mean"
+        ]
+        summary.loc[
+            (summary["baseline_run_time_mean"] <= 0)
+            | (summary["quasar_run_time_mean"] <= 0),
+            "runtime_speedup",
+        ] = np.nan
+
+        summary["memory_ratio"] = summary["baseline_run_peak_memory_mean"] / summary[
+            "quasar_run_peak_memory_mean"
+        ]
+        summary.loc[
+            (summary["baseline_run_peak_memory_mean"] <= 0)
+            | (summary["quasar_run_peak_memory_mean"] <= 0),
+            "memory_ratio",
+        ] = np.nan
+
+        summary["memory_ratio_min"] = summary[
+            "baseline_min_peak_memory_mean"
+        ] / summary["quasar_run_peak_memory_mean"]
+        summary.loc[
+            (summary["baseline_min_peak_memory_mean"] <= 0)
+            | (summary["quasar_run_peak_memory_mean"] <= 0),
+            "memory_ratio_min",
+        ] = np.nan
+
+    runtime_norm = summary["quasar_backend"].map(_normalise_backend_label)
+    baseline_runtime_norm = summary["baseline_runtime_backend"].map(
+        _normalise_backend_label
+    )
+    summary["runtime_optimal"] = runtime_norm == baseline_runtime_norm
+    summary.loc[baseline_runtime_norm.isna(), "runtime_optimal"] = np.nan
+
+    baseline_memory_norm = summary["baseline_memory_backend"].map(
+        _normalise_backend_label
+    )
+    summary["memory_optimal"] = runtime_norm == baseline_memory_norm
+    summary.loc[baseline_memory_norm.isna(), "memory_optimal"] = np.nan
+
+    scale = float(1024**2)
+    summary["quasar_run_peak_memory_mib"] = summary[
+        "quasar_run_peak_memory_mean"
+    ] / scale
+    summary["baseline_run_peak_memory_mib"] = summary[
+        "baseline_run_peak_memory_mean"
+    ] / scale
+    summary["baseline_min_peak_memory_mib"] = summary[
+        "baseline_min_peak_memory_mean"
+    ] / scale
+
+    summary.sort_values(["circuit", "qubits"], inplace=True)
+    return summary.reset_index(drop=True)
+
+
+def _annotate_optimal_markers(
+    ax: plt.Axes,
+    data: pd.DataFrame,
+    *,
+    bool_col: str,
+    y_col: str,
+    offset: tuple[float, float] = (0.0, 10.0),
+) -> None:
+    """Highlight QuASAr selections that match (or miss) the optimum."""
+
+    if data.empty or bool_col not in data or y_col not in data:
+        return
+
+    for _, row in data.iterrows():
+        status = row.get(bool_col)
+        if pd.isna(status):
+            continue
+        x_val = row.get("qubits")
+        y_val = row.get(y_col)
+        if pd.isna(x_val) or pd.isna(y_val):
+            continue
+        color = "#1b9e77" if bool(status) else "#d62728"
+        symbol = "✓" if bool(status) else "✗"
+        ax.scatter(
+            [x_val],
+            [y_val],
+            s=160,
+            facecolors="none",
+            edgecolors=color,
+            linewidths=1.5,
+            zorder=5,
+        )
+        ax.annotate(
+            symbol,
+            (x_val, y_val),
+            textcoords="offset points",
+            xytext=offset,
+            ha="center",
+            fontsize=10,
+            fontweight="bold",
+            color=color,
+            clip_on=False,
+        )
+
+
 def generate_backend_comparison(
     *,
     repetitions: int = 3,
@@ -838,30 +1077,19 @@ def generate_backend_comparison(
     _log_written(forced_path)
     _log_written(auto_path)
 
-    combined = pd.concat([forced, auto], ignore_index=True)
-    ax, summary, fig = plot_quasar_vs_baseline_best(
-        combined,
-        metric="run_time_mean",
-        annotate_backend=True,
-        return_table=True,
-        return_figure=True,
-        show_speedup_table=True,
-    )
-    ax.set_title("Runtime comparison versus baseline best")
-    png_path = FIGURES_DIR / "backend_vs_baseline.png"
-    pdf_path = FIGURES_DIR / "backend_vs_baseline.pdf"
-    csv_path = RESULTS_DIR / "backend_vs_baseline_speedups.csv"
-    fig.savefig(png_path)
-    fig.savefig(pdf_path)
-    _log_written(png_path)
-    _log_written(pdf_path)
-    summary.to_csv(csv_path, index=False)
-    _log_written(csv_path)
-    plt.close(fig)
+    selection_summary = _build_selection_summary(forced, auto)
+    if not selection_summary.empty:
+        summary_path = RESULTS_DIR / "backend_selection_summary.csv"
+        selection_summary.to_csv(summary_path, index=False)
+        _log_written(summary_path)
+    else:
+        LOGGER.info(
+            "Skipping selection summary export because the merged table is empty"
+        )
 
     if not forced.empty and not auto.empty:
         try:
-            grid = plot_backend_timeseries(
+            runtime_grid = plot_backend_timeseries(
                 forced,
                 auto,
                 metric="run_time_mean",
@@ -875,20 +1103,41 @@ def generate_backend_comparison(
         except RuntimeError as exc:
             LOGGER.warning("Skipping backend timeseries plots: %s", exc)
         else:
+            runtime_title = "Forced (lines) vs auto (markers): Runtime"
+            if runtime_grid is not None and not selection_summary.empty:
+                for circuit_name, ax in runtime_grid.axes_dict.items():
+                    subset = selection_summary[
+                        selection_summary["circuit"] == circuit_name
+                    ]
+                    if subset.empty:
+                        continue
+                    _annotate_optimal_markers(
+                        ax,
+                        subset,
+                        bool_col="runtime_optimal",
+                        y_col="quasar_run_time_mean",
+                    )
+                runtime_title += "\n✓ indicates runtime-optimal backend selection"
+            if runtime_grid is not None:
+                runtime_grid.fig.suptitle(runtime_title)
             runtime_png = FIGURES_DIR / "backend_timeseries_runtime.png"
             runtime_pdf = FIGURES_DIR / "backend_timeseries_runtime.pdf"
-            grid.savefig(runtime_png)
-            grid.savefig(runtime_pdf)
+            runtime_grid.savefig(runtime_png)
+            runtime_grid.savefig(runtime_pdf)
             _log_written(runtime_png)
             _log_written(runtime_pdf)
-            plt.close(grid.fig)
+            plt.close(runtime_grid.fig)
 
-            for frame in (forced, auto):
-                frame["run_peak_memory_mib"] = frame.get("run_peak_memory_mean", 0) / (1024**2)
+            forced_mem = forced.copy()
+            auto_mem = auto.copy()
+            for frame in (forced_mem, auto_mem):
+                frame["run_peak_memory_mib"] = frame.get(
+                    "run_peak_memory_mean", 0
+                ) / (1024**2)
 
             grid_mem = plot_backend_timeseries(
-                forced,
-                auto,
+                forced_mem,
+                auto_mem,
                 metric="run_peak_memory_mib",
                 annotate_auto=False,
                 col_wrap=2,
@@ -896,6 +1145,23 @@ def generate_backend_comparison(
                 aspect=1.1,
                 facet_kws={"sharey": False},
             )
+            memory_title = "Forced (lines) vs auto (markers): Peak memory"
+            if grid_mem is not None and not selection_summary.empty:
+                for circuit_name, ax in grid_mem.axes_dict.items():
+                    subset = selection_summary[
+                        selection_summary["circuit"] == circuit_name
+                    ]
+                    if subset.empty:
+                        continue
+                    _annotate_optimal_markers(
+                        ax,
+                        subset,
+                        bool_col="memory_optimal",
+                        y_col="quasar_run_peak_memory_mib",
+                    )
+                memory_title += "\n✓ indicates minimum-memory backend selection"
+            if grid_mem is not None:
+                grid_mem.fig.suptitle(memory_title)
             mem_png = FIGURES_DIR / "backend_timeseries_memory.png"
             mem_pdf = FIGURES_DIR / "backend_timeseries_memory.pdf"
             grid_mem.savefig(mem_png)

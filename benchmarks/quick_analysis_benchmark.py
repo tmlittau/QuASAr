@@ -30,6 +30,11 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from quasar.circuit import Circuit
 from quasar.planner import Planner
 
+try:  # shared utilities for both package and script execution
+    from .progress import ProgressReporter
+except ImportError:  # pragma: no cover - fallback when executed as a script
+    from progress import ProgressReporter  # type: ignore
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -95,6 +100,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     qubit_sizes = [4, 8, 12]
     depths = [4, 8, 12]
 
+    progress = ProgressReporter(
+        len(qubit_sizes) * len(depths), prefix="Planning benchmark"
+    )
+
     for q in qubit_sizes:
         for d in depths:
             LOGGER.info("Benchmarking configuration qubits=%s depth=%s", q, d)
@@ -110,6 +119,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                     "full_time": slow_time,
                 }
             )
+            progress.advance(f"qubits={q} depth={d}")
+
+    progress.close()
 
     df = pd.DataFrame(results)
     LOGGER.info("Completed benchmarking %d configuration(s)", len(df))

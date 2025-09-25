@@ -43,6 +43,13 @@ from quasar.cost import Backend
 from quasar.circuit import Circuit
 from memory_utils import max_qubits_statevector
 
+try:  # shared utilities for both package and script execution
+    from .progress import ProgressReporter
+    from .ssd_metrics import partition_metrics_from_result
+except ImportError:  # pragma: no cover - fallback when executed as a script
+    from progress import ProgressReporter  # type: ignore
+    from ssd_metrics import partition_metrics_from_result  # type: ignore
+
 
 BASELINE_BACKENDS: tuple[Backend, ...] = (
     Backend.STATEVECTOR,
@@ -92,7 +99,14 @@ def run_all(
     runner = BenchmarkRunner()
     records: list[dict[str, object]] = []
 
-    for n in qubits:
+    qubit_list = list(qubits)
+    if not qubit_list:
+        return pd.DataFrame()
+
+    total_steps = len(qubit_list) * (len(BASELINE_BACKENDS) + 1)
+    progress = ProgressReporter(total_steps, prefix="Circuit benchmark")
+
+    for n in qubit_list:
         LOGGER.info("Starting benchmarks for circuit width %s", n)
         circuit = circuit_fn(n)
         if use_classical_simplification:
@@ -106,6 +120,9 @@ def run_all(
 
         if is_clifford(circuit):
             LOGGER.info("Skipping width %s because the circuit is Clifford-only", n)
+            skip_msg = f"skip width {n} (Clifford)"
+            for _ in range(len(BASELINE_BACKENDS) + 1):
+                progress.advance(skip_msg)
             LOGGER.info("Finished benchmarks for circuit width %s", n)
             continue
 
@@ -119,10 +136,12 @@ def run_all(
                     backend.value,
                     n,
                 )
+                progress.advance(f"{backend.value}@{n} (skipped)")
                 continue
             LOGGER.info(
                 "Running backend %s for width %s", backend.value, n
             )
+            status_msg = f"{backend.value}@{n}"
             try:
                 rec = runner.run_quasar_multiple(
                     circuit,
@@ -149,31 +168,38 @@ def run_all(
                     n,
                     exc,
                 )
-                continue
-
-            rec.pop("result", None)
-            rec.update(
-                {
-                    "circuit": circuit_fn.__name__,
-                    "qubits": n,
-                    "framework": backend.value,
-                    "backend": backend.value,
-                }
-            )
-            records.append(rec)
-            LOGGER.info(
-                "Completed backend %s for width %s", backend.value, n
-            )
+            else:
+                result = rec.pop("result", None)
+                rec.update(partition_metrics_from_result(result))
+                rec.update(
+                    {
+                        "circuit": circuit_fn.__name__,
+                        "qubits": n,
+                        "framework": backend.value,
+                        "backend": backend.value,
+                    }
+                )
+                records.append(rec)
+                LOGGER.info(
+                    "Completed backend %s for width %s", backend.value, n
+                )
+            finally:
+                progress.advance(status_msg)
 
         LOGGER.info("Running QuASAr scheduler for width %s", n)
-        quasar_rec = runner.run_quasar_multiple(
-            circuit,
-            engine,
-            repetitions=repetitions,
-            quick=False,
-            memory_bytes=memory_bytes,
-        )
-        quasar_rec.pop("result", None)
+        quasar_status = f"quasar@{n}"
+        try:
+            quasar_rec = runner.run_quasar_multiple(
+                circuit,
+                engine,
+                repetitions=repetitions,
+                quick=False,
+                memory_bytes=memory_bytes,
+            )
+        finally:
+            progress.advance(quasar_status)
+        result = quasar_rec.pop("result", None)
+        quasar_rec.update(partition_metrics_from_result(result))
         backend_name = quasar_rec.get("backend")
         if isinstance(backend_name, str) and backend_name in Backend.__members__:
             quasar_rec["backend"] = Backend[backend_name].value
@@ -185,6 +211,7 @@ def run_all(
         LOGGER.info("Finished benchmarks for circuit width %s", n)
 
     df = pd.DataFrame(records)
+    progress.close()
     if df.empty or "framework" not in df.columns:
         return df
     try:
@@ -221,6 +248,13 @@ def run_scenarios(
     planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
     records: List[dict[str, object]] = []
 
+    instance_list = list(instances)
+    if not instance_list:
+        return pd.DataFrame()
+
+    total_steps = len(instance_list) * (len(BASELINE_BACKENDS) + 1)
+    progress = ProgressReporter(total_steps, prefix="Scenario benchmark")
+
     def _conversion_summary(layers: List[Any]) -> Dict[str, Any]:
         summary: Dict[str, Any] = {
             "conversion_count": len(layers),
@@ -254,7 +288,7 @@ def run_scenarios(
             summary["conversion_primitive_summary"] = ", ".join(parts) if parts else None
         return summary
 
-    for instance in instances:
+    for instance in instance_list:
         instance_label = f"{instance.scenario}:{instance.variant}"
         LOGGER.info("Starting scenario instance %s", instance_label)
         metadata: Dict[str, object] = {}
@@ -399,6 +433,7 @@ def run_scenarios(
                 "failed": False,
             }
             record.update(_conversion_summary(conversion_layers))
+            record.update(partition_metrics_from_result(result))
             if total_qubits is not None:
                 record["qubits"] = total_qubits
             return record
@@ -409,6 +444,7 @@ def run_scenarios(
                 backend.value,
                 instance_label,
             )
+            status_msg = f"{instance_label} {backend.value}"
             record = _execute_backend(backend)
             record.update({"circuit": instance.builder.__name__, "framework": backend.value})
             record.update(metadata)
@@ -419,6 +455,7 @@ def run_scenarios(
                 backend.value,
                 instance_label,
             )
+            progress.advance(status_msg)
 
         LOGGER.info("Benchmarking QuASAr for scenario %s", instance_label)
         quasar_record = _execute_backend(None)
@@ -428,8 +465,10 @@ def run_scenarios(
         records.append(quasar_record)
         LOGGER.info("Completed QuASAr run for scenario %s", instance_label)
         LOGGER.info("Completed scenario %s", instance_label)
+        progress.advance(f"{instance_label} quasar")
 
     df = pd.DataFrame(records)
+    progress.close()
     if df.empty or "framework" not in df.columns:
         return df
     try:
@@ -523,6 +562,13 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             "oracle_entangling_per_layer",
             "oracle_sparsity",
             "rotation_set",
+            "partition_count",
+            "partition_total_subsystems",
+            "partition_unique_backends",
+            "partition_max_multiplicity",
+            "partition_mean_multiplicity",
+            "partition_backend_breakdown",
+            "hierarchy_available",
         )
         if col in relevant.columns
     ]

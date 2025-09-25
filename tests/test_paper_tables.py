@@ -16,18 +16,35 @@ def test_generate_tables_creates_latex(tmp_path):
     results_dir = tmp_path / "results"
     results_dir.mkdir()
 
+    showcase_dir = results_dir / "showcase"
+    showcase_dir.mkdir(parents=True)
     _write_csv(
-        results_dir / "backend_vs_baseline_speedups.csv",
+        showcase_dir / "showcase_raw.csv",
         [
             {
-                "circuit": "ghz_ladder",
-                "qubits": 20,
-                "run_time_mean_baseline": 0.0008,
-                "run_time_mean_quasar": 0.0005,
-                "backend_baseline": "TABLEAU",
-                "backend_quasar": "STATEVECTOR",
-                "speedup": 1.6,
-            }
+                "circuit": "clustered_ghz_random",
+                "qubits": 30,
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "run_time_mean": 0.6,
+                "run_peak_memory_mean": 2048.0,
+            },
+            {
+                "circuit": "clustered_ghz_random",
+                "qubits": 30,
+                "framework": "MPS",
+                "backend": "MPS",
+                "run_time_mean": 0.8,
+                "run_peak_memory_mean": 1024.0,
+            },
+            {
+                "circuit": "clustered_ghz_random",
+                "qubits": 30,
+                "framework": "quasar",
+                "backend": "MPS",
+                "run_time_mean": 0.4,
+                "run_peak_memory_mean": 1536.0,
+            },
         ],
     )
 
@@ -105,15 +122,16 @@ def test_generate_tables_creates_latex(tmp_path):
     )
 
     assert set(written) == {
-        "backend_speedups",
+        "showcase_runtime",
+        "showcase_memory",
         "partitioning_summary",
         "w_state_oracle",
     }
-
-    backend_table = output_dir / "backend_speedups.tex"
-    content = backend_table.read_text()
-    assert "\\begin{tabular}" in content
-    assert "\\mathrm" in content
+    runtime_table = output_dir / "showcase_runtime.tex"
+    runtime_content = runtime_table.read_text()
+    assert "\\begin{tabular}" in runtime_content
+    assert "Optimal backend" in runtime_content
+    assert "\\times" in runtime_content
 
     partitioning_table = output_dir / "partitioning_summary.tex"
     partition_content = partitioning_table.read_text()
@@ -123,3 +141,8 @@ def test_generate_tables_creates_latex(tmp_path):
     oracle_table = output_dir / "w_state_oracle.tex"
     oracle_content = oracle_table.read_text()
     assert "\\{" in oracle_content
+
+    memory_table = output_dir / "showcase_memory.tex"
+    memory_content = memory_table.read_text()
+    assert "Minimum-memory backend" in memory_content
+    assert "\\mathrm" in memory_content
