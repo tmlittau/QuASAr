@@ -43,6 +43,7 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
         load_coefficients,
     )
     from quasar.cost import Backend, Cost, CostEstimator  # type: ignore[no-redef]
+    from progress import ProgressReporter  # type: ignore[no-redef]
 else:  # pragma: no cover - package import path
     from . import paper_figures
     from quasar.analyzer import CircuitAnalyzer
@@ -52,6 +53,7 @@ else:  # pragma: no cover - package import path
         load_coefficients,
     )
     from quasar.cost import Backend, Cost, CostEstimator
+    from .progress import ProgressReporter
 
 
 OPS_PER_SECOND_DEFAULT = 1_000_000_000.0
@@ -154,15 +156,24 @@ def _estimate_forced(
 ) -> list[EstimateRecord]:
     """Return cost estimates for the forced backend runs."""
 
+    spec_list = list(specs)
+    backend_list = list(backends)
+    total_steps = sum(len(spec.qubits) * len(backend_list) for spec in spec_list)
+    progress = (
+        ProgressReporter(total_steps, prefix="Forced estimates")
+        if total_steps
+        else None
+    )
+
     records: list[EstimateRecord] = []
-    for spec in specs:
+    for spec in spec_list:
         for n in spec.qubits:
             circuit = paper_figures._build_circuit(
                 spec, n, use_classical_simplification=False
             )
             analyzer = CircuitAnalyzer(circuit, estimator=estimator)
             resources = analyzer.resource_estimates()
-            for backend in backends:
+            for backend in backend_list:
                 supported = paper_figures._supports_backend(circuit, backend)
                 cost = resources.get(backend)
                 note = None
@@ -179,6 +190,11 @@ def _estimate_forced(
                         note=note,
                     )
                 )
+                if progress:
+                    progress.advance(f"{spec.name}@{n} {backend.name.lower()}")
+
+    if progress:
+        progress.close()
     return records
 
 
@@ -188,8 +204,14 @@ def _estimate_auto(
 ) -> list[EstimateRecord]:
     """Return heuristic cost estimates for automatic scheduling runs."""
 
+    spec_list = list(specs)
+    total_steps = sum(len(spec.qubits) for spec in spec_list)
+    progress = (
+        ProgressReporter(total_steps, prefix="Auto estimates") if total_steps else None
+    )
+
     records: list[EstimateRecord] = []
-    for spec in specs:
+    for spec in spec_list:
         for n in spec.qubits:
             circuit = paper_figures._build_circuit(
                 spec, n, use_classical_simplification=True
@@ -226,6 +248,11 @@ def _estimate_auto(
                     note=note,
                 )
             )
+            if progress:
+                progress.advance(f"{spec.name}@{n}")
+
+    if progress:
+        progress.close()
     return records
 
 

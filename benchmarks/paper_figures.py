@@ -51,6 +51,7 @@ if __package__ in {None, ""}:
         ENV_VAR as STATEVECTOR_MEMORY_ENV_VAR,
         max_qubits_statevector,
     )
+    from progress import ProgressReporter  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import (
         compute_baseline_best,
@@ -69,6 +70,7 @@ else:  # pragma: no cover - exercised via runtime execution
         ENV_VAR as STATEVECTOR_MEMORY_ENV_VAR,
         max_qubits_statevector,
     )
+    from .progress import ProgressReporter
 
 from quasar import SimulationEngine
 from quasar.cost import Backend
@@ -468,6 +470,13 @@ def collect_backend_data(
     forced_records: list[dict[str, object]] = []
     auto_records: list[dict[str, object]] = []
 
+    total_steps = sum(len(spec.qubits) * (len(backends) + 1) for spec in spec_list)
+    progress = (
+        ProgressReporter(total_steps, prefix="Backend benchmarking")
+        if total_steps
+        else None
+    )
+
     for spec in spec_list:
         LOGGER.info("Processing circuit family '%s'", spec.name)
         for n in spec.qubits:
@@ -486,6 +495,7 @@ def collect_backend_data(
             auto_width = _circuit_qubit_width(circuit_auto)
 
             for backend in backends:
+                status = f"{spec.name}@{n} {backend.name.lower()}"
                 if (
                     backend == Backend.STATEVECTOR
                     and forced_width is not None
@@ -515,6 +525,8 @@ def collect_backend_data(
                         backend.name,
                         message,
                     )
+                    if progress:
+                        progress.advance(f"{status} skip: {message}")
                     continue
                 if backend == Backend.MPS:
                     reason = _mps_skip_reason(
@@ -543,6 +555,8 @@ def collect_backend_data(
                             backend.name,
                             reason,
                         )
+                        if progress:
+                            progress.advance(f"{status} skip: {reason}")
                         continue
                 if not _supports_backend(circuit_forced, backend):
                     reason = "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
@@ -565,6 +579,8 @@ def collect_backend_data(
                         backend.name,
                         reason,
                     )
+                    if progress:
+                        progress.advance(f"{status} skip: {reason}")
                     continue
                 runner = BenchmarkRunner()
                 LOGGER.info(
@@ -603,6 +619,8 @@ def collect_backend_data(
                         backend.name,
                         exc,
                     )
+                    if progress:
+                        progress.advance(f"{status} failed: {exc}")
                     continue
 
                 rec.pop("result", None)
@@ -624,6 +642,8 @@ def collect_backend_data(
                     n,
                     backend.name,
                 )
+                if progress:
+                    progress.advance(status)
 
             runner = BenchmarkRunner()
             LOGGER.info(
@@ -636,6 +656,7 @@ def collect_backend_data(
                 n,
                 forced_width=auto_width,
             )
+            auto_status = f"{spec.name}@{n} quasar"
             if auto_skip_reason:
                 LOGGER.info(
                     "Skipping automatic run: circuit=%s qubits=%s reason=%s",
@@ -658,6 +679,8 @@ def collect_backend_data(
                         "repetitions": 0,
                     }
                 )
+                if progress:
+                    progress.advance(f"{auto_status} skip: {auto_skip_reason}")
                 continue
             try:
                 rec = runner.run_quasar_multiple(
@@ -696,6 +719,8 @@ def collect_backend_data(
                         "repetitions": 0,
                     }
                 )
+                if progress:
+                    progress.advance(f"{auto_status} unsupported: {reason}")
                 continue
             except Exception as exc:  # pragma: no cover - skip unsupported mixes
                 LOGGER.warning(
@@ -704,6 +729,8 @@ def collect_backend_data(
                     n,
                     exc,
                 )
+                if progress:
+                    progress.advance(f"{auto_status} failed: {exc}")
                 continue
             rec.pop("result", None)
             rec.update(
@@ -722,7 +749,11 @@ def collect_backend_data(
                 spec.name,
                 n,
             )
+            if progress:
+                progress.advance(auto_status)
 
+    if progress:
+        progress.close()
     return pd.DataFrame(forced_records), pd.DataFrame(auto_records)
 
 

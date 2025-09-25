@@ -18,6 +18,11 @@ from quasar.cost import Backend
 import circuits as circuit_lib
 from circuits import is_clifford
 
+if __package__ in {None, ""}:  # pragma: no cover - script execution
+    from progress import ProgressReporter  # type: ignore[no-redef]
+else:  # pragma: no cover - package import
+    from .progress import ProgressReporter
+
 
 def parse_qubit_range(spec: str) -> List[int]:
     """Parse a ``start:end[:step]`` range specification."""
@@ -63,45 +68,59 @@ def run_suite(
 
     engine = SimulationEngine()
     results = []
-    for n in qubits:
-        circuit = circuit_fn(n)
-        if use_classical_simplification:
-            enable = getattr(circuit, "enable_classical_simplification", None)
-            if callable(enable):
-                enable()
+    qubit_list = list(qubits)
+    if not qubit_list:
+        return results
+
+    progress = ProgressReporter(
+        len(qubit_list), prefix=f"{circuit_fn.__name__} benchmark"
+    )
+    try:
+        for n in qubit_list:
+            status = f"qubits={n}"
+            circuit = circuit_fn(n)
+            if use_classical_simplification:
+                enable = getattr(circuit, "enable_classical_simplification", None)
+                if callable(enable):
+                    enable()
+                else:
+                    circuit.use_classical_simplification = True
             else:
-                circuit.use_classical_simplification = True
-        else:
-            circuit.use_classical_simplification = False
-        if is_clifford(circuit):
-            continue
-        runner = BenchmarkRunner()
-        rec = runner.run_quasar_multiple(
-            circuit,
-            engine,
-            backend=Backend.STATEVECTOR,
-            repetitions=repetitions,
-            quick=True,
-        )
-        state = rec.get("result")
-        if state is None:
-            raise RuntimeError("benchmark run did not return a state")
-        _ = state  # retain state for potential downstream use
-        record = {
-            "circuit": circuit_fn.__name__,
-            "qubits": n,
-            "framework": rec["backend"],
-            "repetitions": rec["repetitions"],
-            "avg_time": rec["run_time_mean"],
-            "time_variance": rec["run_time_std"] ** 2,
-            "avg_total_time": rec["total_time_mean"],
-            "total_time_variance": rec["total_time_std"] ** 2,
-            "avg_prepare_peak_memory": rec["prepare_peak_memory_mean"],
-            "prepare_peak_memory_variance": rec["prepare_peak_memory_std"] ** 2,
-            "avg_run_peak_memory": rec["run_peak_memory_mean"],
-            "run_peak_memory_variance": rec["run_peak_memory_std"] ** 2,
-        }
-        results.append(record)
+                circuit.use_classical_simplification = False
+            if is_clifford(circuit):
+                if progress:
+                    progress.advance(f"{status} clifford")
+                continue
+            runner = BenchmarkRunner()
+            rec = runner.run_quasar_multiple(
+                circuit,
+                engine,
+                backend=Backend.STATEVECTOR,
+                repetitions=repetitions,
+                quick=True,
+            )
+            state = rec.get("result")
+            if state is None:
+                raise RuntimeError("benchmark run did not return a state")
+            _ = state  # retain state for potential downstream use
+            record = {
+                "circuit": circuit_fn.__name__,
+                "qubits": n,
+                "framework": rec["backend"],
+                "repetitions": rec["repetitions"],
+                "avg_time": rec["run_time_mean"],
+                "time_variance": rec["run_time_std"] ** 2,
+                "avg_total_time": rec["total_time_mean"],
+                "total_time_variance": rec["total_time_std"] ** 2,
+                "avg_prepare_peak_memory": rec["prepare_peak_memory_mean"],
+                "prepare_peak_memory_variance": rec["prepare_peak_memory_std"] ** 2,
+                "avg_run_peak_memory": rec["run_peak_memory_mean"],
+                "run_peak_memory_variance": rec["run_peak_memory_std"] ** 2,
+            }
+            results.append(record)
+            progress.advance(status)
+    finally:
+        progress.close()
     return results
 
 
