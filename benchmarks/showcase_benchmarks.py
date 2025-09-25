@@ -57,6 +57,13 @@ else:  # pragma: no cover - exercised when imported as a package module
 from quasar import SimulationEngine
 from quasar.cost import Backend
 
+try:  # shared utilities for both package and script execution
+    from .progress import ProgressReporter
+    from .ssd_metrics import partition_metrics_from_result
+except ImportError:  # pragma: no cover - fallback when executed as a script
+    from progress import ProgressReporter  # type: ignore
+    from ssd_metrics import partition_metrics_from_result  # type: ignore
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -269,7 +276,14 @@ def _run_backend_suite(
     engine = SimulationEngine()
     records: list[dict[str, object]] = []
 
-    for width in widths:
+    width_list = list(widths)
+    if not width_list:
+        return pd.DataFrame()
+
+    total_steps = len(width_list) * (len(BASELINE_BACKENDS) + 1)
+    progress = ProgressReporter(total_steps, prefix=f"{spec.name} benchmark")
+
+    for width in width_list:
         LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
 
         for backend in BASELINE_BACKENDS:
@@ -283,6 +297,7 @@ def _run_backend_suite(
                 spec.name,
                 width,
             )
+            status_msg = f"{backend.name}@{width}"
             try:
                 rec = runner.run_quasar_multiple(
                     circuit,
@@ -314,26 +329,29 @@ def _run_backend_suite(
                         "repetitions": 0,
                     }
                 )
-                continue
-
-            rec = dict(rec)
-            rec.pop("result", None)
-            rec.update(
-                {
-                    "circuit": spec.name,
-                    "qubits": width,
-                    "framework": backend.name,
-                    "backend": backend.name,
-                    "mode": "forced",
-                }
-            )
-            records.append(rec)
+            else:
+                rec = dict(rec)
+                result = rec.pop("result", None)
+                rec.update(partition_metrics_from_result(result))
+                rec.update(
+                    {
+                        "circuit": spec.name,
+                        "qubits": width,
+                        "framework": backend.name,
+                        "backend": backend.name,
+                        "mode": "forced",
+                    }
+                )
+                records.append(rec)
+            finally:
+                progress.advance(status_msg)
 
         circuit = _build_circuit(
             spec, width, classical_simplification=classical_simplification
         )
         runner = BenchmarkRunner()
         LOGGER.debug("Running QuASAr for %s qubits=%s", spec.name, width)
+        quasar_status = f"quasar@{width}"
         try:
             rec = runner.run_quasar_multiple(
                 circuit,
@@ -360,18 +378,28 @@ def _run_backend_suite(
                     "repetitions": 0,
                 }
             )
-            continue
-
-        rec = dict(rec)
-        rec.pop("result", None)
-        backend_choice = rec.get("backend")
-        if isinstance(backend_choice, Backend):
-            rec["backend"] = backend_choice.name
-        rec.update({"circuit": spec.name, "qubits": width, "framework": "quasar", "mode": "auto"})
-        records.append(rec)
+        else:
+            rec = dict(rec)
+            result = rec.pop("result", None)
+            rec.update(partition_metrics_from_result(result))
+            backend_choice = rec.get("backend")
+            if isinstance(backend_choice, Backend):
+                rec["backend"] = backend_choice.name
+            rec.update(
+                {
+                    "circuit": spec.name,
+                    "qubits": width,
+                    "framework": "quasar",
+                    "mode": "auto",
+                }
+            )
+            records.append(rec)
+        finally:
+            progress.advance(quasar_status)
 
         LOGGER.info("Completed benchmarks for %s qubits=%s", spec.name, width)
 
+    progress.close()
     return pd.DataFrame(records)
 
 
