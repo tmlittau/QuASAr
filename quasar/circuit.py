@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Literal, Mapping, TYPE_CHECKING
 import json
 import os
 import math
@@ -11,7 +11,7 @@ import math
 from qiskit.circuit import QuantumCircuit
 from qiskit_qasm3_import import api as qasm3_api
 
-from .ssd import SSD, SSDPartition, build_hierarchical_ssd
+from .ssd import SSD, SSDPartition, build_flat_ssd, build_hierarchical_ssd
 from .cost import Cost, CostEstimator, Backend
 from .decompositions import decompose_mcx, decompose_ccz, decompose_cswap
 
@@ -150,8 +150,12 @@ class Circuit:
         gates: Iterable[Dict[str, Any] | Gate],
         *,
         use_classical_simplification: bool = True,
+        ssd_mode: Literal["hierarchical", "flat"] = "hierarchical",
     ):
         self.use_classical_simplification = use_classical_simplification
+        if ssd_mode not in {"hierarchical", "flat"}:
+            raise ValueError("ssd_mode must be either 'hierarchical' or 'flat'")
+        self.ssd_mode = ssd_mode
         self.gates: List[Gate] = [g if isinstance(g, Gate) else Gate(**g) for g in gates]
         self._expand_decompositions()
         self._num_qubits = self._infer_qubit_count()
@@ -191,6 +195,7 @@ class Circuit:
 
         data: Dict[str, Any] = {
             "use_classical_simplification": self.use_classical_simplification,
+            "ssd_mode": self.ssd_mode,
             "gates": [gate.to_dict(include_metadata=include_metadata) for gate in self.gates],
         }
         if include_metadata:
@@ -378,10 +383,18 @@ class Circuit:
         """Return gates in topological order (based on dependencies)."""
 
         indegree: Dict[int, int] = {id(g): len(g.predecessors) for g in self.gates}
-        ready = [g for g in self.gates if indegree[id(g)] == 0]
+        # ``ready`` behaves as a FIFO queue; ``deque`` keeps the complexity linear
+        # even for large circuits with tens of thousands of gates.  The previous
+        # list-based implementation incurred quadratic behaviour because
+        # ``pop(0)`` shifts all remaining elements, which made ``pytest`` time out
+        # on large random circuits once flat-SSD mode started invoking this
+        # helper eagerly.
+        from collections import deque
+
+        ready = deque(g for g in self.gates if indegree[id(g)] == 0)
         order: List[Gate] = []
         while ready:
-            g = ready.pop(0)
+            g = ready.popleft()
             order.append(g)
             for s in g.successors:
                 key = id(s)
@@ -560,10 +573,40 @@ class Circuit:
         depth, sparsity and cost estimates reflect the simplified circuit.
         """
 
+        if self.use_classical_simplification:
+            return
         self.use_classical_simplification = True
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         self.classical_state = [0] * (max_index + 1)
         self.simplify_classical_controls()
+
+    def disable_classical_simplification(self) -> None:
+        """Disable classical simplification and recompute circuit metadata."""
+
+        if not self.use_classical_simplification:
+            return
+
+        self.use_classical_simplification = False
+        max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
+        self.classical_state = [None] * (max_index + 1)
+        self._build_dag()
+        self._annotate_gates()
+        self._num_gates = len(self.gates)
+        self._depth = self._compute_depth()
+        self.ssd = self._create_ssd()
+        from .sparsity import sparsity_estimate
+        from .symmetry import (
+            symmetry_score,
+            phase_rotation_diversity,
+            amplitude_rotation_diversity,
+        )
+
+        self.sparsity = sparsity_estimate(self)
+        self.symmetry = symmetry_score(self)
+        self.phase_rotation_diversity = phase_rotation_diversity(self)
+        self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
+        self.rotation_diversity = self.phase_rotation_diversity
+        self.cost_estimates = self._estimate_costs()
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -574,6 +617,7 @@ class Circuit:
         data: Iterable[Dict[str, Any]] | Mapping[str, Any],
         *,
         use_classical_simplification: bool = True,
+        ssd_mode: Literal["hierarchical", "flat"] = "hierarchical",
     ) -> "Circuit":
         """Build a circuit from an iterable of gate dictionaries or a mapping."""
 
@@ -584,6 +628,7 @@ class Circuit:
             use_classical_simplification = bool(
                 data.get("use_classical_simplification", use_classical_simplification)
             )
+            ssd_mode = data.get("ssd_mode", ssd_mode)
             gates_iterable = gates_data
         else:
             gates_iterable = data
@@ -596,7 +641,11 @@ class Circuit:
                 gates.append(Gate.from_dict(gate))
             else:
                 gates.append(gate)
-        return cls(gates, use_classical_simplification=use_classical_simplification)
+        return cls(
+            gates,
+            use_classical_simplification=use_classical_simplification,
+            ssd_mode=ssd_mode,
+        )
 
     @classmethod
     def from_json(
@@ -604,6 +653,7 @@ class Circuit:
         path: str,
         *,
         use_classical_simplification: bool = True,
+        ssd_mode: Literal["hierarchical", "flat"] = "hierarchical",
     ):
         """Load a circuit from a JSON file.
 
@@ -614,6 +664,7 @@ class Circuit:
         return cls.from_dict(
             data,
             use_classical_simplification=use_classical_simplification,
+            ssd_mode=ssd_mode,
         )
 
     @classmethod
@@ -622,6 +673,7 @@ class Circuit:
         circuit: QuantumCircuit,
         *,
         use_classical_simplification: bool = True,
+        ssd_mode: Literal["hierarchical", "flat"] = "hierarchical",
     ) -> "Circuit":
         """Build a :class:`Circuit` from a Qiskit ``QuantumCircuit``.
 
@@ -639,7 +691,11 @@ class Circuit:
                 for i, val in enumerate(op.params):
                     params[f"param{i}"] = float(val) if isinstance(val, (int, float)) else val
             gates.append({"gate": op.name.upper(), "qubits": qubits, "params": params})
-        return cls(gates, use_classical_simplification=use_classical_simplification)
+        return cls(
+            gates,
+            use_classical_simplification=use_classical_simplification,
+            ssd_mode=ssd_mode,
+        )
 
     @classmethod
     def from_qasm(
@@ -647,6 +703,7 @@ class Circuit:
         path_or_str: str,
         *,
         use_classical_simplification: bool = True,
+        ssd_mode: Literal["hierarchical", "flat"] = "hierarchical",
     ) -> "Circuit":
         """Build a :class:`Circuit` from an OpenQASM 3 string or file.
 
@@ -662,7 +719,11 @@ class Circuit:
         else:
             qasm = path_or_str
         qc = qasm3_api.parse(qasm)
-        return cls.from_qiskit(qc, use_classical_simplification=use_classical_simplification)
+        return cls.from_qiskit(
+            qc,
+            use_classical_simplification=use_classical_simplification,
+            ssd_mode=ssd_mode,
+        )
 
     # ------------------------------------------------------------------
     def _infer_qubit_count(self) -> int:
@@ -694,7 +755,9 @@ class Circuit:
         """Construct the initial subsystem descriptor."""
         if self._num_qubits == 0:
             return SSD([])
-        return build_hierarchical_ssd(self)
+        if self.ssd_mode == "hierarchical":
+            return build_hierarchical_ssd(self)
+        return build_flat_ssd(self)
 
     def _estimate_costs(self) -> Dict[str, Cost]:
         """Estimate simulation costs for standard backends."""
