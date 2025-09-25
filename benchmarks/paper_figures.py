@@ -298,15 +298,24 @@ def _build_circuit(spec: CircuitSpec, n_qubits: int, *, use_classical_simplifica
     enable = getattr(circuit, "enable_classical_simplification", None)
     disable = getattr(circuit, "disable_classical_simplification", None)
     if use_classical_simplification:
-        if callable(enable):
-            enable()
-        else:
-            circuit.use_classical_simplification = True
+        if not getattr(circuit, "use_classical_simplification", False):
+            if callable(enable):
+                enable()
+            else:
+                circuit.use_classical_simplification = True
     else:
-        if callable(disable):
-            disable()
-        else:
-            circuit.use_classical_simplification = False
+        # Forced runs should mimic a monolithic simulator, so opt into flat SSDs.
+        if hasattr(circuit, "ssd_mode"):
+            circuit.ssd_mode = "flat"
+            if hasattr(circuit, "ssd"):
+                from quasar.ssd import build_flat_ssd
+
+                circuit.ssd = build_flat_ssd(circuit)
+        if getattr(circuit, "use_classical_simplification", True):
+            if callable(disable):
+                disable()
+            else:
+                circuit.use_classical_simplification = False
     return circuit
 
 

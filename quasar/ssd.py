@@ -122,7 +122,7 @@ class GatePathNode:
     num_qubits: int
     predecessors: set[int] = field(default_factory=set)
     successors: set[int] = field(default_factory=set)
-    operations: Tuple[Tuple[int, Tuple[int, ...]], ...] = ()
+    operations: Tuple[Tuple[int, Tuple[int, ...]], ...] | None = None
     backend: Backend | None = None
     cost: Cost | None = None
     history: Tuple[str, ...] = ()
@@ -161,7 +161,7 @@ class GatePathGraph:
         last_gate_id: int,
         parent: int | None,
         operation: Tuple[int, Tuple[int, ...]] | None,
-        operations: Tuple[Tuple[int, Tuple[int, ...]], ...],
+        operations: Tuple[Tuple[int, Tuple[int, ...]], ...] | None,
     ) -> GatePathNode:
         node = GatePathNode(
             id=next(self._counter),
@@ -199,7 +199,7 @@ class GatePathGraph:
             last_gate_id=gate_id,
             parent=prev.id,
             operation=key,
-            operations=prev.operations + (key,),
+            operations=None,
         )
         prev.extensions[key] = node.id
         prev.successors.add(node.id)
@@ -253,7 +253,13 @@ class GatePathGraph:
         return graph
 
     def iter_operations(self, node: GatePathNode) -> Tuple[Tuple[int, Tuple[int, ...]], ...]:
-        return node.operations
+        ops: List[Tuple[int, Tuple[int, ...]]] = []
+        current: GatePathNode | None = node
+        while current is not None and current.operation is not None:
+            ops.append(current.operation)
+            parent_id = current.parent
+            current = self.nodes[parent_id] if parent_id is not None else None
+        return tuple(reversed(ops))
 
     def compute_essential_nodes(self) -> set[int]:
         essential: set[int] = set()
@@ -769,22 +775,24 @@ class _HierarchyBuilder:
 
         from .circuit import Gate
 
+        cache: Dict[
+            Tuple[Tuple[Tuple[str, int, Tuple[Tuple[str, Any], ...]], ...], int],
+            Tuple[Backend, Cost, Tuple[str, ...]],
+        ] = {}
         for node in self.path_graph.nodes.values():
             if node.is_root:
                 continue
             if node.id not in self._essential_ids:
                 continue
             operations = self.path_graph.iter_operations(node)
-            gates: List[Gate] = []
-            for gate_id, positions in operations:
-                gate_node = self.gate_graph.nodes[gate_id]
-                gates.append(
-                    Gate(
-                        gate_node.name,
-                        list(positions),
-                        dict(gate_node.params),
-                    )
+            op_key = tuple(
+                (
+                    self.gate_graph.nodes[gate_id].name,
+                    len(positions),
+                    tuple(self.gate_graph.nodes[gate_id].params),
                 )
+                for gate_id, positions in operations
+            )
             if node.num_qubits:
                 num_qubits = node.num_qubits
             else:
@@ -792,16 +800,32 @@ class _HierarchyBuilder:
                 for _, positions in operations:
                     if positions:
                         num_qubits = max(num_qubits, max(positions) + 1)
-            backend, cost = self.selector.select(
-                gates,
-                num_qubits,
-                max_memory=self.max_memory,
-                max_time=self.max_time,
-                target_accuracy=self.target_accuracy,
-            )
+            key = (op_key, num_qubits)
+            cached = cache.get(key)
+            if cached is None:
+                gates: List[Gate] = []
+                for (gate_name, _, params), (_, positions) in zip(op_key, operations):
+                    gates.append(
+                        Gate(
+                            gate_name,
+                            list(positions),
+                            dict(params),
+                        )
+                    )
+                backend, cost = self.selector.select(
+                    gates,
+                    num_qubits,
+                    max_memory=self.max_memory,
+                    max_time=self.max_time,
+                    target_accuracy=self.target_accuracy,
+                )
+                history = tuple(gate_name for gate_name, _, _ in op_key)
+                cache[key] = (backend, cost, history)
+            else:
+                backend, cost, history = cached
             node.backend = backend
             node.cost = cost
-            node.history = tuple(g.gate for g in gates)
+            node.history = history
 
     # ------------------------------------------------------------------
     def _to_ssd(self) -> SSD:
@@ -853,6 +877,56 @@ class _HierarchyBuilder:
         ssd = SSD(partitions=partitions, conversions=[], hierarchy=hierarchy)
         ssd.build_metadata()
         return ssd
+
+
+def build_flat_ssd(
+    circuit: "Circuit",
+    *,
+    estimator: CostEstimator | None = None,
+    selector: "MethodSelector" | None = None,
+    max_memory: float | None = None,
+    max_time: float | None = None,
+    target_accuracy: float | None = None,
+) -> SSD:
+    """Return an SSD with a single partition spanning the full circuit.
+
+    This mode bypasses hierarchical execution entirely by assigning a single
+    backend to the complete gate sequence.  It is primarily intended for
+    baseline comparisons where QuASAr should mimic a monolithic simulator.
+    """
+
+    num_qubits = circuit.num_qubits
+    if num_qubits == 0:
+        return SSD([])
+
+    if estimator is None:
+        estimator = CostEstimator()
+    if selector is None:
+        from .method_selector import MethodSelector
+
+        selector = MethodSelector(estimator)
+
+    gates = circuit.topological()
+    backend, cost = selector.select(
+        gates,
+        num_qubits,
+        max_memory=max_memory,
+        max_time=max_time,
+        target_accuracy=target_accuracy,
+    )
+
+    subsystems = (tuple(range(num_qubits)),)
+    history = tuple(g.gate for g in gates)
+    partition = SSDPartition(
+        subsystems=subsystems,
+        history=history,
+        backend=backend,
+        cost=cost,
+        dependencies=(),
+    )
+    ssd = SSD([partition])
+    ssd.build_metadata()
+    return ssd
 
 
 def build_hierarchical_ssd(
