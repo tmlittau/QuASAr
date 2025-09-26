@@ -130,11 +130,29 @@ per-circuit summaries, derived speedup tables and comparative figures under
 python benchmarks/showcase_benchmarks.py --repetitions 3 --run-timeout 900
 ```
 
-Use `--circuits` to select a subset of workloads, `--qubits` to override the
-default width selections (e.g. `--qubits clustered_ghz_random=40:60:10`) and
-`--reuse-existing` to skip rerunning configurations with cached results.
-Pass `--workers <n>` to control how many threads execute circuit widths in
-parallel; omit the flag to let the runner auto-detect a sensible default.
+Use `--circuit <name>` (repeat the flag to add more) to benchmark individual
+workloads or `--group <name>` to run one of the curated circuit bundles.  Run
+`python benchmarks/showcase_benchmarks.py --list-groups` to discover the
+available groups.  The combined CSV/Markdown tables in
+`benchmarks/results/showcase/` are updated incrementally: re-running the helper
+with additional selections appends new measurements instead of overwriting the
+previous data.  This makes it practical to split long benchmark sessions across
+multiple invocations while keeping the aggregated tables up to date.
+
+For example, the commands below process the three predefined groups and yield
+the same combined results as a single full run:
+
+```bash
+python benchmarks/showcase_benchmarks.py --group clustered --repetitions 3 --run-timeout 900
+python benchmarks/showcase_benchmarks.py --group layered --repetitions 3 --run-timeout 900
+python benchmarks/showcase_benchmarks.py --group classical_control --repetitions 3 --run-timeout 900
+```
+
+The runner also accepts `--qubits` to override the default width selections
+(e.g. `--qubits clustered_ghz_random=40:60:10`), `--reuse-existing` to skip
+rerunning configurations with cached CSVs, and `--workers <n>` to control how
+many threads evaluate qubit widths in parallel.  Omitting `--workers` lets the
+script auto-detect a sensible default.
 
 ### Theoretical cost estimates
 
