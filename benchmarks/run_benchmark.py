@@ -15,7 +15,7 @@ Example
 -------
 Run the dual magic injection scenario with a custom memory cap::
 
-    python benchmarks/run_benchmarks.py \
+    python benchmarks/run_benchmark.py \
         --scenario dual_magic_injection \
         --repetitions 3 \
         --memory-bytes 2147483648 \
@@ -36,24 +36,38 @@ from typing import Any, Dict, Iterable, List
 
 import pandas as pd
 
-from benchmark_cli import parse_qubit_range, resolve_circuit
-from circuits import is_clifford, is_clifford_plus_t
-from plot_utils import compute_baseline_best
-from partitioning_workloads import SCENARIOS, WorkloadInstance, iter_scenario
-from runner import BenchmarkRunner
+try:  # shared utilities for both package and script execution
+    from .bench_utils.benchmark_cli import parse_qubit_range, resolve_circuit
+    from .bench_utils.circuits import is_clifford, is_clifford_plus_t
+    from .bench_utils.memory_utils import max_qubits_statevector
+    from .bench_utils.partitioning_workloads import (
+        SCENARIOS,
+        WorkloadInstance,
+        iter_scenario,
+    )
+    from .bench_utils.plot_utils import compute_baseline_best
+    from .bench_utils.progress import ProgressReporter
+    from .bench_utils.runner import BenchmarkRunner
+    from .bench_utils.ssd_metrics import partition_metrics_from_result
+    from .bench_utils.threading_utils import resolve_worker_count, thread_engine
+except ImportError:  # pragma: no cover - fallback when executed as a script
+    from bench_utils.benchmark_cli import parse_qubit_range, resolve_circuit  # type: ignore
+    from bench_utils.circuits import is_clifford, is_clifford_plus_t  # type: ignore
+    from bench_utils.memory_utils import max_qubits_statevector  # type: ignore
+    from bench_utils.partitioning_workloads import (  # type: ignore
+        SCENARIOS,
+        WorkloadInstance,
+        iter_scenario,
+    )
+    from bench_utils.plot_utils import compute_baseline_best  # type: ignore
+    from bench_utils.progress import ProgressReporter  # type: ignore
+    from bench_utils.runner import BenchmarkRunner  # type: ignore
+    from bench_utils.ssd_metrics import partition_metrics_from_result  # type: ignore
+    from bench_utils.threading_utils import resolve_worker_count, thread_engine  # type: ignore
+
 from quasar import SimulationEngine
 from quasar.cost import Backend
 from quasar.circuit import Circuit
-from memory_utils import max_qubits_statevector
-
-try:  # shared utilities for both package and script execution
-    from .progress import ProgressReporter
-    from .ssd_metrics import partition_metrics_from_result
-    from .threading_utils import resolve_worker_count, thread_engine
-except ImportError:  # pragma: no cover - fallback when executed as a script
-    from progress import ProgressReporter  # type: ignore
-    from ssd_metrics import partition_metrics_from_result  # type: ignore
-    from threading_utils import resolve_worker_count, thread_engine  # type: ignore
 
 
 BASELINE_BACKENDS: tuple[Backend, ...] = (
@@ -66,6 +80,18 @@ BASELINE_BACKENDS: tuple[Backend, ...] = (
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _thread_engine() -> SimulationEngine:
+    """Return a thread-local :class:`SimulationEngine` instance."""
+
+    return thread_engine()
+
+
+def _resolve_workers(max_workers: int | None, items: int) -> int:
+    """Proxy to :func:`resolve_worker_count` for legacy compatibility."""
+
+    return resolve_worker_count(max_workers, items)
 
 
 def _configure_logging(verbosity: int) -> None:
@@ -903,7 +929,10 @@ def main() -> None:  # pragma: no cover - CLI entry point
 
 
 # Import surface-code protected circuits so the CLI can discover them.
-from circuits import surface_corrected_qaoa_circuit  # noqa: E402,F401
+try:  # pragma: no cover - executed for script usage
+    from .bench_utils.circuits import surface_corrected_qaoa_circuit  # type: ignore  # noqa: E402,F401
+except ImportError:  # pragma: no cover - fallback when executed as a script
+    from bench_utils.circuits import surface_corrected_qaoa_circuit  # type: ignore  # noqa: E402,F401
 
 
 if __name__ == "__main__":

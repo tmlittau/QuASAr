@@ -154,15 +154,15 @@ outputs are shown below:
 The scenario registry in `benchmarks/partitioning_workloads.py` instantiates
 three deterministic sweeps that mirror the analytic boundary, rank, and
 sparsity studies from the notebooks. Each sweep is executed through
-`benchmarks/run_benchmarks.py` with a shared 256 MiB statevector budget and a
+`benchmarks/run_benchmark.py` with a shared 256 MiB statevector budget and a
 single timed repetition to keep QuASAr and the baseline simulators under the
 same resource constraints. The commands below regenerate the tables shipped
 with the repository:
 
 ```bash
-python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
-python benchmarks/run_benchmarks.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
-python benchmarks/run_benchmarks.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
+python benchmarks/run_benchmark.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
+python benchmarks/run_benchmark.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
+python benchmarks/run_benchmark.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
 ```
 
 The resulting CSV/JSON pairs capture the raw measurements while the Markdown
