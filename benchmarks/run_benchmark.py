@@ -73,6 +73,7 @@ LOGGER = logging.getLogger(__name__)
 __all__ = [
     "generate_theoretical_estimates",
     "run_showcase_suite",
+    "summarise_partitioning",
 ]
 
 
@@ -159,6 +160,148 @@ def generate_theoretical_estimates(
     detail = build_dataframe(records, throughput)
     summary = build_summary(detail)
     return detail, summary, throughput
+
+
+def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
+    """Return an aggregate table comparing QuASAr and baseline metrics."""
+
+    if df.empty:
+        return df
+
+    relevant = df[df["framework"].isin({"baseline_best", "quasar"})]
+    if relevant.empty:
+        return relevant
+
+    base_keys = [
+        column
+        for column in ("scenario", "variant", "circuit", "qubits")
+        if column in relevant.columns
+    ]
+    metadata_columns = [
+        column
+        for column in (
+            "boundary",
+            "schmidt_layers",
+            "cross_layers",
+            "suffix_sparsity",
+            "prefix_core_boundary",
+            "core_suffix_boundary",
+            "dense_qubits",
+            "clifford_qubits",
+            "core_qubits",
+            "suffix_qubits",
+            "total_qubits",
+            "patch_distance",
+            "boundary_width",
+            "gadget_width",
+            "stabilizer_rounds",
+            "gadget",
+            "scheme",
+            "chi_target",
+            "gadget_size",
+            "gadget_layers",
+            "dense_gadgets",
+            "gadget_spacing",
+            "ladder_layers",
+            "chain_length",
+            "w_state_width",
+            "oracle_layers",
+            "oracle_rotation_gate_count",
+            "oracle_rotation_unique",
+            "oracle_rotation_density",
+            "oracle_rotation_per_layer",
+            "oracle_parameterised_rotations",
+            "oracle_entangling_count",
+            "oracle_entangling_per_layer",
+            "oracle_sparsity",
+            "rotation_set",
+            "partition_count",
+            "partition_total_subsystems",
+            "partition_unique_backends",
+            "partition_max_multiplicity",
+            "partition_mean_multiplicity",
+            "partition_backend_breakdown",
+            "hierarchy_available",
+        )
+        if column in relevant.columns
+    ]
+
+    rows: list[dict[str, object]] = []
+    baseline_frameworks = {
+        backend.value for backend in showcase_benchmarks.BASELINE_BACKENDS
+    }
+
+    for keys, group in relevant.groupby(base_keys, dropna=False):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        row = dict(zip(base_keys, keys))
+
+        quasar_rows = group[group["framework"] == "quasar"]
+        meta_source = quasar_rows if not quasar_rows.empty else group
+        if not meta_source.empty:
+            head = meta_source.iloc[0]
+            for column in metadata_columns:
+                row.setdefault(column, head.get(column))
+
+        baseline_rows = group[group["framework"] == "baseline_best"]
+        if not baseline_rows.empty:
+            baseline_entry = baseline_rows.iloc[0]
+            row["baseline_runtime_mean"] = baseline_entry.get("run_time_mean")
+            row["baseline_backend"] = baseline_entry.get("backend")
+            peak_memory = baseline_entry.get("run_peak_memory_mean")
+            if pd.isna(peak_memory):
+                mask = df["framework"].isin(baseline_frameworks)
+                for name, value in zip(base_keys, keys):
+                    mask &= df[name] == value
+                candidates = df[mask]
+                if (
+                    not candidates.empty
+                    and "run_time_mean" in candidates.columns
+                    and "run_peak_memory_mean" in candidates.columns
+                ):
+                    idx = candidates["run_time_mean"].idxmin()
+                    peak_memory = candidates.loc[idx, "run_peak_memory_mean"]
+            row["baseline_peak_memory_mean"] = peak_memory
+        else:
+            row["baseline_runtime_mean"] = None
+            row["baseline_peak_memory_mean"] = None
+            row["baseline_backend"] = None
+
+        if not quasar_rows.empty:
+            quasar_entry = quasar_rows.iloc[0]
+            row["quasar_runtime_mean"] = quasar_entry.get("run_time_mean")
+            row["quasar_peak_memory_mean"] = quasar_entry.get("run_peak_memory_mean")
+            row["quasar_backend"] = quasar_entry.get("backend")
+            row["quasar_conversions"] = quasar_entry.get("conversion_count")
+            row["quasar_boundary_mean"] = quasar_entry.get("conversion_boundary_mean")
+            row["quasar_rank_mean"] = quasar_entry.get("conversion_rank_mean")
+            row["quasar_frontier_mean"] = quasar_entry.get("conversion_frontier_mean")
+            row["quasar_conversion_primitives"] = quasar_entry.get(
+                "conversion_primitive_summary"
+            )
+        else:
+            row["quasar_runtime_mean"] = None
+            row["quasar_peak_memory_mean"] = None
+            row["quasar_backend"] = None
+            row["quasar_conversions"] = None
+            row["quasar_boundary_mean"] = None
+            row["quasar_rank_mean"] = None
+            row["quasar_frontier_mean"] = None
+            row["quasar_conversion_primitives"] = None
+
+        try:
+            runtime_baseline = row["baseline_runtime_mean"]
+            runtime_quasar = row["quasar_runtime_mean"]
+            if runtime_baseline and runtime_quasar:
+                row["runtime_speedup"] = runtime_baseline / runtime_quasar
+            else:
+                row["runtime_speedup"] = None
+        except ZeroDivisionError:
+            row["runtime_speedup"] = None
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
 
 
 def _run_theoretical_estimation(

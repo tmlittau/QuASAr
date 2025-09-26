@@ -81,6 +81,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--widths",
+        "--qubits",
+        dest="widths",
         type=parse_qubit_range,
         default=DEFAULT_WIDTHS,
         help="Qubit widths as start:end[:step] (default: %(default)s)",
