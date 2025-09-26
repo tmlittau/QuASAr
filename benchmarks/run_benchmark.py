@@ -27,6 +27,13 @@ import pandas as pd
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parent
 
+try:
+    from quasar.cost import Backend
+except ImportError:  # pragma: no cover - script execution fallback
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from quasar.cost import Backend  # type: ignore
+
 if __package__ in {None, ""}:  # pragma: no cover - script execution
     for path in (PACKAGE_ROOT, REPO_ROOT):
         if str(path) not in sys.path:
@@ -116,12 +123,18 @@ def run_showcase_suite(
     memory_bytes: int | None = None,
     classical_simplification: bool = False,
     workers: int | None = None,
+    include_baselines: bool = True,
+    baseline_backends: Iterable[Backend] | None = None,
+    quick: bool = False,
 ) -> pd.DataFrame:
     """Execute a subset of the showcase suite programmatically.
 
     This helper is primarily intended for tests and automation where callers
     require direct access to the raw measurements instead of the CSV/Markdown
-    artefacts produced by the CLI entry point.
+    artefacts produced by the CLI entry point.  Optional flags allow the
+    benchmark to skip baseline simulators (``include_baselines=False``), limit
+    the baseline set (``baseline_backends``) or force QuASAr's quick-path
+    execution (``quick=True``) which is useful for CI smoke tests.
     """
 
     if circuit not in showcase_benchmarks.SHOWCASE_CIRCUITS:
@@ -138,6 +151,9 @@ def run_showcase_suite(
         memory_bytes=memory_bytes,
         classical_simplification=classical_simplification,
         max_workers=workers,
+        include_baselines=include_baselines,
+        baseline_backends=baseline_backends,
+        quasar_quick=quick,
     )
 
 

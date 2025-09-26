@@ -78,6 +78,8 @@ def run_smoke_test(
         run_timeout=run_timeout,
         classical_simplification=enable_classical_simplification,
         workers=workers,
+        include_baselines=False,
+        quick=True,
     )
 
     base = output.with_suffix("")

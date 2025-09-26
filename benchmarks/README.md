@@ -69,8 +69,15 @@ df = run_showcase_suite(
     widths=(2,),
     repetitions=1,
     workers=1,
+    include_baselines=False,  # skip baseline simulators for quick smoke tests
+    quick=True,               # use QuASAr's quick-path execution
 )
 ```
+
+Use ``include_baselines=False`` in automation or CI environments to avoid
+running the slower baseline simulators.  Combine it with ``quick=True`` to
+exercise QuASAr's quick-path execution which greatly reduces runtime while
+still validating the planner and scheduler plumbing.
 
 ## Theoretical estimation
 
