@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import List
 
+import pandas as pd
+import pytest
+
+from benchmarks.bench_utils import showcase_benchmarks as sb
 from benchmarks.circuits import (
     CLIFFORD_GATES,
     classical_controlled_circuit,
@@ -105,3 +109,62 @@ def test_classical_controlled_circuit_enables_simplification():
     circuit.enable_classical_simplification()
     after = len(circuit.gates)
     assert after <= before
+
+
+def test_resolve_selected_defaults_to_all() -> None:
+    """When no selection is provided all showcase circuits are returned."""
+
+    expected = list(sb.SHOWCASE_CIRCUITS)
+    assert sb._resolve_selected_circuits(explicit=None, groups=None) == expected
+
+
+def test_resolve_selected_combines_groups_and_explicit() -> None:
+    """Explicit circuits and groups are merged without duplicates."""
+
+    explicit = ["classical_controlled_fanout"]
+    group = ["clustered"]
+    result = sb._resolve_selected_circuits(explicit=explicit, groups=group)
+    for name in sb.SHOWCASE_GROUPS["clustered"]:
+        assert name in result
+    assert result.count("classical_controlled_fanout") == 1
+
+
+def test_resolve_selected_unknown_group() -> None:
+    """An unknown group name raises ``SystemExit`` with a helpful message."""
+
+    with pytest.raises(SystemExit):
+        sb._resolve_selected_circuits(explicit=None, groups=["missing"])
+
+
+def test_merge_results_updates_existing(tmp_path) -> None:
+    """New measurements replace matching rows while preserving existing data."""
+
+    path = tmp_path / "data.csv"
+    existing = pd.DataFrame(
+        {
+            "circuit": ["clustered_ghz_random", "layered_clifford_ramp"],
+            "framework": ["quasar", "quasar"],
+            "qubits": [30, 40],
+            "run_time_mean": [1.0, 2.0],
+        }
+    )
+    existing.to_csv(path, index=False)
+
+    new_rows = pd.DataFrame(
+        {
+            "circuit": ["layered_clifford_ramp"],
+            "framework": ["quasar"],
+            "qubits": [40],
+            "run_time_mean": [3.5],
+        }
+    )
+
+    merged = sb._merge_results(
+        path,
+        new_rows,
+        key_columns=("circuit", "framework", "qubits"),
+        sort_columns=("circuit", "qubits"),
+    )
+
+    assert len(merged) == 2
+    assert merged.loc[merged["circuit"] == "layered_clifford_ramp", "run_time_mean"].item() == 3.5

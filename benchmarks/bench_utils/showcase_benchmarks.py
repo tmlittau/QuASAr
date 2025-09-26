@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -244,6 +245,119 @@ SHOWCASE_CIRCUITS: Mapping[str, ShowcaseCircuit] = {
         description="Classical controls with wide fan-out.",
     ),
 }
+
+
+SHOWCASE_GROUPS: Mapping[str, tuple[str, ...]] = {
+    "clustered": (
+        "clustered_ghz_random",
+        "clustered_w_random",
+        "clustered_ghz_qft",
+        "clustered_w_qft",
+        "clustered_ghz_random_qft",
+    ),
+    "layered": (
+        "layered_clifford_delayed_magic",
+        "layered_clifford_midpoint",
+        "layered_clifford_ramp",
+    ),
+    "classical_control": (
+        "classical_controlled",
+        "dynamic_classical_control",
+        "classical_controlled_fanout",
+    ),
+}
+
+
+class ExtendAction(argparse.Action):
+    """`argparse` action that accumulates values across multiple flags."""
+
+    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[override]
+        current = getattr(namespace, self.dest, None)
+        if current is None:
+            current = []
+        if isinstance(values, str):
+            current.append(values)
+        else:
+            current.extend(values)
+        setattr(namespace, self.dest, current)
+
+
+def _list_available_groups() -> str:
+    """Return a formatted description of available circuit groups."""
+
+    lines = ["Available groups:"]
+    for name in sorted(SHOWCASE_GROUPS):
+        circuits = ", ".join(SHOWCASE_GROUPS[name])
+        lines.append(f"  - {name}: {circuits}")
+    return "\n".join(lines)
+
+
+def _resolve_selected_circuits(
+    *,
+    explicit: Sequence[str] | None,
+    groups: Sequence[str] | None,
+) -> list[str]:
+    """Return the ordered list of circuits selected for this run."""
+
+    order = OrderedDict((name, None) for name in SHOWCASE_CIRCUITS)
+    selected = OrderedDict()
+
+    def _add(name: str) -> None:
+        if name not in SHOWCASE_CIRCUITS:
+            raise SystemExit(f"unknown circuit name '{name}'")
+        if name not in selected:
+            selected[name] = None
+
+    if explicit:
+        for name in explicit:
+            _add(name)
+
+    if groups:
+        for group in groups:
+            if group not in SHOWCASE_GROUPS:
+                raise SystemExit(
+                    f"unknown circuit group '{group}'.\n{_list_available_groups()}"
+                )
+            for name in SHOWCASE_GROUPS[group]:
+                _add(name)
+
+    if not selected:
+        return list(order)
+
+    ordered_selection = [name for name in order if name in selected]
+    missing = [name for name in selected if name not in order]
+    return ordered_selection + missing
+
+
+def _merge_results(
+    path: Path,
+    new_data: pd.DataFrame,
+    *,
+    key_columns: Sequence[str],
+    sort_columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Merge ``new_data`` with existing ``path`` contents, keeping latest rows."""
+
+    frames: list[pd.DataFrame] = []
+    if path.exists():
+        try:
+            existing = pd.read_csv(path)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            LOGGER.warning("Failed to read existing results from %s: %s", path, exc)
+        else:
+            if not existing.empty:
+                frames.append(existing)
+
+    frames.append(new_data)
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    subset = [col for col in key_columns if col in combined.columns]
+    if subset:
+        combined = combined.drop_duplicates(subset=subset, keep="last")
+    if sort_columns:
+        sortable = [col for col in sort_columns if col in combined.columns]
+        if sortable:
+            combined = combined.sort_values(sortable).reset_index(drop=True)
+    return combined
 
 
 def _configure_logging(verbosity: int) -> None:
@@ -542,10 +656,10 @@ def _export_plot(
 
 
 def run_showcase_benchmarks(args: argparse.Namespace) -> None:
-    selected_names = args.circuits or list(SHOWCASE_CIRCUITS)
-    unknown = [name for name in selected_names if name not in SHOWCASE_CIRCUITS]
-    if unknown:
-        raise SystemExit(f"unknown circuit names: {', '.join(sorted(unknown))}")
+    selected_names = _resolve_selected_circuits(
+        explicit=args.circuit_names,
+        groups=args.groups,
+    )
 
     qubit_overrides = _parse_qubit_overrides(args.qubits) if args.qubits else {}
 
@@ -646,16 +760,37 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
 
     if all_raw_frames:
         combined_raw = pd.concat(all_raw_frames, ignore_index=True)
-        combined_raw.to_csv(RESULTS_DIR / "showcase_raw.csv", index=False)
+        raw_path = RESULTS_DIR / "showcase_raw.csv"
+        combined_raw = _merge_results(
+            raw_path,
+            combined_raw,
+            key_columns=("circuit", "framework", "qubits"),
+            sort_columns=("circuit", "qubits", "framework"),
+        )
+        combined_raw.to_csv(raw_path, index=False)
 
     if all_summary_frames:
         combined_summary = pd.concat(all_summary_frames, ignore_index=True)
-        combined_summary.to_csv(RESULTS_DIR / "showcase_summary.csv", index=False)
+        summary_path = RESULTS_DIR / "showcase_summary.csv"
+        combined_summary = _merge_results(
+            summary_path,
+            combined_summary,
+            key_columns=("circuit", "framework", "qubits"),
+            sort_columns=("circuit", "qubits", "framework"),
+        )
+        combined_summary.to_csv(summary_path, index=False)
         _write_markdown(combined_summary, RESULTS_DIR / "showcase_summary.md")
 
     if all_speedups:
         combined_speedups = pd.concat(all_speedups, ignore_index=True)
-        combined_speedups.to_csv(RESULTS_DIR / "showcase_speedups.csv", index=False)
+        speedups_path = RESULTS_DIR / "showcase_speedups.csv"
+        combined_speedups = _merge_results(
+            speedups_path,
+            combined_speedups,
+            key_columns=("circuit", "baseline_backend", "qubits"),
+            sort_columns=("circuit", "qubits", "baseline_backend"),
+        )
+        combined_speedups.to_csv(speedups_path, index=False)
         _write_markdown(combined_speedups, RESULTS_DIR / "showcase_speedups.md")
 
 
@@ -664,9 +799,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Benchmark the showcase circuits on QuASAr and baseline backends.",
     )
     parser.add_argument(
+        "--circuit",
         "--circuits",
-        nargs="*",
-        help="Subset of showcase circuits to run (default: all).",
+        dest="circuit_names",
+        action=ExtendAction,
+        nargs="+",
+        metavar="NAME",
+        default=None,
+        help="Benchmark the specified circuit(s). Repeat the flag to add more.",
+    )
+    parser.add_argument(
+        "--group",
+        dest="groups",
+        action=ExtendAction,
+        nargs="+",
+        choices=sorted(SHOWCASE_GROUPS),
+        metavar="GROUP",
+        default=None,
+        help="Run all circuits belonging to the named group(s).",
+    )
+    parser.add_argument(
+        "--list-groups",
+        action="store_true",
+        help="List available circuit groups and exit.",
     )
     parser.add_argument(
         "--qubits",
@@ -728,6 +883,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "list_groups", False):
+        print(_list_available_groups())
+        return
     _configure_logging(args.verbose)
     run_showcase_benchmarks(args)
 
