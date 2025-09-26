@@ -86,13 +86,32 @@ runtime and memory predictions after executing the benchmarks.  Use
 ``--estimate-only`` to skip the simulator runs entirely.  The theoretical
 estimates reuse the cost-estimator helpers in
 ``benchmarks/bench_utils/theoretical_estimation_utils.py`` and produce CSV
-tables and figures in ``benchmarks/bench_utils/results``.
+tables and figures in ``benchmarks/bench_utils/results``.  By default the
+estimator analyses the paper circuits, but the CLI now accepts custom
+selections:
 
-Advanced flags:
-
+* ``--estimate-group`` – include one of the predefined estimation groups such as
+  ``paper`` or ``showcase`` (repeat to add more).
+* ``--estimate-circuit`` – add a custom circuit specification using the format
+  ``name[params]:q1,q2``.  Circuit builders come from
+  ``benchmarks/bench_utils/circuits.py`` and
+  ``benchmarks/bench_utils/large_scale_circuits.py``.  Parameters map to the
+  builder keywords, for example ``grover_circuit[n_iterations=2]:20``.
+* ``--list-estimate-groups`` / ``--list-estimate-circuits`` – display available
+  groups and builders.
 * ``--ops-per-second`` – set the conversion factor from model operations to
   seconds (use ``0`` to omit runtime conversion).
 * ``--calibration`` – provide a JSON file with calibrated cost coefficients.
+
+The standalone helper ``benchmarks/bench_utils/estimate_theoretical_requirements.py``
+offers the same flags when you only need analytical estimates.  For example:
+
+```bash
+python benchmarks/bench_utils/estimate_theoretical_requirements.py \
+  --group showcase \
+  --circuit qft_circuit:16,20 \
+  --circuit "grover_circuit[n_iterations=3]:12"
+```
 
 Programmatic access is exposed via
 :func:`benchmarks.run_benchmark.generate_theoretical_estimates`, which returns

@@ -44,6 +44,12 @@ try:  # package execution
     from .bench_utils import showcase_benchmarks
     from .bench_utils.showcase_benchmarks import RUN_TIMEOUT_DEFAULT_SECONDS
     from .bench_utils.theoretical_estimation_runner import collect_estimates
+    from .bench_utils.theoretical_estimation_selection import (
+        GROUPS as ESTIMATION_GROUPS,
+        format_available_circuits as format_estimation_circuits,
+        format_available_groups as format_estimation_groups,
+        resolve_requested_specs as resolve_estimation_specs,
+    )
     from .bench_utils.theoretical_estimation_utils import (
         OPS_PER_SECOND_DEFAULT,
         build_dataframe,
@@ -60,8 +66,12 @@ except ImportError:  # pragma: no cover - script execution fallback
     from bench_utils.showcase_benchmarks import (  # type: ignore
         RUN_TIMEOUT_DEFAULT_SECONDS,
     )
-    from bench_utils.theoretical_estimation_runner import (  # type: ignore
-        collect_estimates,
+    from bench_utils.theoretical_estimation_runner import collect_estimates  # type: ignore
+    from bench_utils.theoretical_estimation_selection import (  # type: ignore
+        GROUPS as ESTIMATION_GROUPS,
+        format_available_circuits as format_estimation_circuits,
+        format_available_groups as format_estimation_groups,
+        resolve_requested_specs as resolve_estimation_specs,
     )
     from bench_utils.theoretical_estimation_utils import (  # type: ignore
         OPS_PER_SECOND_DEFAULT,
@@ -162,13 +172,16 @@ def generate_theoretical_estimates(
     ops_per_second: float | None = OPS_PER_SECOND_DEFAULT,
     calibration: Path | None = None,
     workers: int | None = None,
+    circuits: Sequence[str] | None = None,
+    groups: Sequence[str] | None = None,
 ):
     """Return detailed and summary DataFrames for theoretical estimates."""
 
     throughput = ops_per_second if ops_per_second and ops_per_second > 0 else None
     estimator = load_estimator(calibration)
+    specs = resolve_estimation_specs(circuits, groups)
     records = collect_estimates(
-        paper_figures.CIRCUITS,
+        specs,
         paper_figures.BACKENDS,
         estimator,
         max_workers=workers,
@@ -325,6 +338,8 @@ def _run_theoretical_estimation(
     ops_per_second: float | None,
     calibration: Path | None,
     workers: int | None,
+    circuits: Sequence[str] | None,
+    groups: Sequence[str] | None,
 ) -> None:
     """Execute the theoretical estimation pipeline and export artefacts."""
 
@@ -332,6 +347,8 @@ def _run_theoretical_estimation(
         ops_per_second=ops_per_second,
         calibration=calibration,
         workers=workers,
+        circuits=circuits,
+        groups=groups,
     )
 
     write_tables(detail, summary)
@@ -356,6 +373,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--list-circuits",
         action="store_true",
         help="List available showcase circuits and exit.",
+    )
+    parser.add_argument(
+        "--list-estimate-groups",
+        action="store_true",
+        help="List available theoretical estimation groups and exit.",
+    )
+    parser.add_argument(
+        "--list-estimate-circuits",
+        action="store_true",
+        help="List theoretical estimation circuit builders and exit.",
     )
     parser.add_argument(
         "--estimate",
@@ -385,6 +412,26 @@ def _build_parser() -> argparse.ArgumentParser:
             " theoretical estimation."
         ),
     )
+    parser.add_argument(
+        "--estimate-group",
+        dest="estimate_groups",
+        action="append",
+        choices=sorted(ESTIMATION_GROUPS),
+        metavar="GROUP",
+        default=None,
+        help="Include an estimation group when generating theoretical results.",
+    )
+    parser.add_argument(
+        "--estimate-circuit",
+        dest="estimate_circuits",
+        action="append",
+        metavar="SPEC",
+        default=None,
+        help=(
+            "Custom circuit specification for estimation in the form"
+            " name[params]:q1,q2. Use --list-estimate-circuits for options."
+        ),
+    )
     return parser
 
 
@@ -395,6 +442,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
 
     if args.estimate_only:
+        args.estimate = True
+    if getattr(args, "estimate_circuits", None) or getattr(
+        args, "estimate_groups", None
+    ):
         args.estimate = True
 
     if args.workers is not None and args.workers <= 0:
@@ -415,6 +466,13 @@ def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
         print(_list_groups())
         return
 
+    if getattr(args, "list_estimate_groups", False):
+        print(format_estimation_groups())
+        return
+    if getattr(args, "list_estimate_circuits", False):
+        print(format_estimation_circuits())
+        return
+
     throughput = args.ops_per_second if args.ops_per_second > 0 else None
 
     if not args.estimate_only:
@@ -427,6 +485,8 @@ def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
             ops_per_second=throughput,
             calibration=args.calibration,
             workers=args.workers,
+            circuits=args.estimate_circuits,
+            groups=args.estimate_groups,
         )
 
 

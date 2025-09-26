@@ -20,6 +20,12 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
 
     importlib.import_module("quasar")
     from theoretical_estimation_runner import collect_estimates  # type: ignore[no-redef]
+    from theoretical_estimation_selection import (  # type: ignore[no-redef]
+        GROUPS as ESTIMATION_GROUPS,
+        format_available_circuits,
+        format_available_groups,
+        resolve_requested_specs,
+    )
     from theoretical_estimation_utils import (  # type: ignore[no-redef]
         OPS_PER_SECOND_DEFAULT,
         build_dataframe,
@@ -34,6 +40,12 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
 else:  # pragma: no cover - package import path
     from . import paper_figures
     from .theoretical_estimation_runner import collect_estimates
+    from .theoretical_estimation_selection import (
+        GROUPS as ESTIMATION_GROUPS,
+        format_available_circuits,
+        format_available_groups,
+        resolve_requested_specs,
+    )
     from .theoretical_estimation_utils import (
         OPS_PER_SECOND_DEFAULT,
         build_dataframe,
@@ -49,9 +61,41 @@ else:  # pragma: no cover - package import path
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Estimate theoretical runtime and memory requirements for the paper"
-            " benchmark circuits."
+            "Estimate theoretical runtime and memory requirements for the benchmark"
+            " circuits or custom selections."
         )
+    )
+    parser.add_argument(
+        "--group",
+        "--groups",
+        dest="groups",
+        action="append",
+        choices=sorted(ESTIMATION_GROUPS),
+        metavar="GROUP",
+        default=None,
+        help="Include all circuits from the named estimation group.",
+    )
+    parser.add_argument(
+        "--circuit",
+        "--circuits",
+        dest="circuits",
+        action="append",
+        metavar="SPEC",
+        default=None,
+        help=(
+            "Custom circuit specification in the form name[params]:q1,q2. "
+            "Use --list-circuits to discover available builders."
+        ),
+    )
+    parser.add_argument(
+        "--list-groups",
+        action="store_true",
+        help="List available estimation groups and exit.",
+    )
+    parser.add_argument(
+        "--list-circuits",
+        action="store_true",
+        help="List available estimation circuit builders and exit.",
     )
     parser.add_argument(
         "--ops-per-second",
@@ -82,11 +126,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
+
+    if args.list_groups:
+        print(format_available_groups())
+        return
+    if args.list_circuits:
+        print(format_available_circuits())
+        return
+
     ops_per_second = args.ops_per_second if args.ops_per_second > 0 else None
 
     estimator = load_estimator(args.calibration)
+    specs = resolve_requested_specs(args.circuits, args.groups)
     records = collect_estimates(
-        paper_figures.CIRCUITS,
+        specs,
         paper_figures.BACKENDS,
         estimator,
         max_workers=args.workers,
