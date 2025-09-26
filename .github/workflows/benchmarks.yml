@@ -19,13 +19,13 @@ jobs:
       - name: Run small benchmarks
         run: |
           mkdir benchmark-results
-          python benchmarks/run_benchmark_test.py --circuit w_state --qubits 4:4 --repetitions 1 --output benchmark-results/w_state
-          python benchmarks/run_benchmark_test.py --scenario tableau_boundary --repetitions 1 --output benchmark-results/tableau_boundary
+          python benchmarks/run_benchmark_test.py --circuit w_state --widths 4:4 --repetitions 1 --workers 1 --run-timeout 1 --output benchmark-results/w_state
+          python benchmarks/run_benchmark_test.py --circuit classical_controlled --widths 4:4 --repetitions 1 --workers 1 --run-timeout 1 --output benchmark-results/classical_controlled
       - name: Verify performance thresholds
         run: |
           python - <<'PY'
           import json, glob
-          thresholds = {"w_state": 0.5, "tableau_boundary": 1.0}
+          thresholds = {"w_state": 0.5, "classical_controlled": 1.0}
           for path in glob.glob("benchmark-results/*.json"):
             name = path.split("/")[-1].split(".")[0]
             if name not in thresholds:

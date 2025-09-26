@@ -388,13 +388,15 @@ def _run_backend_suite_for_width(
     run_timeout: float | None,
     memory_bytes: int | None,
     classical_simplification: bool,
+    baseline_backends: Iterable[Backend],
+    quasar_quick: bool,
 ) -> tuple[list[dict[str, object]], list[str]]:
     records: list[dict[str, object]] = []
     messages: list[str] = []
 
     LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
 
-    for backend in BASELINE_BACKENDS:
+    for backend in baseline_backends:
         circuit = _build_circuit(
             spec, width, classical_simplification=classical_simplification
         )
@@ -412,7 +414,7 @@ def _run_backend_suite_for_width(
                 engine,
                 backend=backend,
                 repetitions=repetitions,
-                quick=False,
+                quick=quasar_quick,
                 memory_bytes=memory_bytes,
                 run_timeout=run_timeout,
             )
@@ -466,7 +468,7 @@ def _run_backend_suite_for_width(
             circuit,
             engine,
             repetitions=repetitions,
-            quick=False,
+            quick=quasar_quick,
             memory_bytes=memory_bytes,
             run_timeout=run_timeout,
         )
@@ -518,6 +520,8 @@ def _run_backend_suite_for_width_worker(
     run_timeout: float | None,
     memory_bytes: int | None,
     classical_simplification: bool,
+    baseline_backends: Iterable[Backend],
+    quasar_quick: bool,
 ) -> tuple[list[dict[str, object]], list[str]]:
     engine = thread_engine()
     return _run_backend_suite_for_width(
@@ -528,6 +532,8 @@ def _run_backend_suite_for_width_worker(
         run_timeout=run_timeout,
         memory_bytes=memory_bytes,
         classical_simplification=classical_simplification,
+        baseline_backends=baseline_backends,
+        quasar_quick=quasar_quick,
     )
 
 
@@ -540,6 +546,9 @@ def _run_backend_suite(
     memory_bytes: int | None,
     classical_simplification: bool,
     max_workers: int | None = None,
+    include_baselines: bool = True,
+    baseline_backends: Iterable[Backend] | None = None,
+    quasar_quick: bool = False,
 ) -> pd.DataFrame:
     """Execute the benchmark for ``spec`` across the provided widths."""
 
@@ -547,7 +556,15 @@ def _run_backend_suite(
     if not width_list:
         return pd.DataFrame()
 
-    total_steps = len(width_list) * (len(BASELINE_BACKENDS) + 1)
+    baselines: tuple[Backend, ...]
+    if not include_baselines:
+        baselines = ()
+    elif baseline_backends is not None:
+        baselines = tuple(baseline_backends)
+    else:
+        baselines = tuple(BASELINE_BACKENDS)
+
+    total_steps = len(width_list) * (len(baselines) + 1)
     progress = ProgressReporter(total_steps, prefix=f"{spec.name} benchmark")
 
     worker_count = resolve_worker_count(max_workers, len(width_list))
@@ -567,6 +584,8 @@ def _run_backend_suite(
                     run_timeout=run_timeout,
                     memory_bytes=memory_bytes,
                     classical_simplification=classical_simplification,
+                    baseline_backends=baselines,
+                    quasar_quick=quasar_quick,
                 )
                 ordered[index] = recs
                 for message in messages:
@@ -583,6 +602,8 @@ def _run_backend_suite(
                         run_timeout=run_timeout,
                         memory_bytes=memory_bytes,
                         classical_simplification=classical_simplification,
+                        baseline_backends=baselines,
+                        quasar_quick=quasar_quick,
                     )
                     futures[future] = index
 

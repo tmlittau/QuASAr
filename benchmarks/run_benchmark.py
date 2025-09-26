@@ -1,97 +1,87 @@
-from __future__ import annotations
+"""Unified CLI for showcase benchmarks and theoretical estimates.
 
-"""Execute benchmark circuits and record baseline-best results.
+The script exposes the streamlined benchmarking workflow used throughout the
+project.  It delegates the heavy lifting to :mod:`benchmarks.bench_utils` so
+that the same helper functions power both programmatic usage and the command
+line interface.  The key entry points are:
 
-The script evaluates a parameterised circuit family across all single-method
-simulation backends provided by :class:`quasar.cost.Backend` and QuASAr's
-automatic scheduler.  For each configuration the fastest non-QuASAr backend is
-determined via :func:`compute_baseline_best` and only this aggregated
-"baseline_best" entry is stored alongside the QuASAr measurement.
+* Showcase benchmarks from :mod:`benchmarks.bench_utils.showcase_benchmarks`.
+  Users can benchmark a single circuit, selected groups or the entire suite.
+* Theoretical resource estimation via
+  :mod:`benchmarks.bench_utils.theoretical_estimation_runner`.
 
-Use the ``--verbose`` flag (repeat it for debug logging) to monitor progress
-while the CLI iterates over qubit widths, backends and scenario instances.
-
-Example
--------
-Run the dual magic injection scenario with a custom memory cap::
-
-    python benchmarks/run_benchmark.py \
-        --scenario dual_magic_injection \
-        --repetitions 3 \
-        --memory-bytes 2147483648 \
-        --output benchmarks/results/dual_magic_injection
+Both paths honour the ``--workers`` flag to keep the previous multithreading
+behaviour.
 """
 
+from __future__ import annotations
+
 import argparse
-import copy
 import logging
-import os
-import statistics
-import time
-import tracemalloc
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Iterable, Sequence
 
 import pandas as pd
 
-try:  # shared utilities for both package and script execution
-    from .bench_utils.benchmark_cli import parse_qubit_range, resolve_circuit
-    from .bench_utils.circuits import is_clifford, is_clifford_plus_t
-    from .bench_utils.memory_utils import max_qubits_statevector
-    from .bench_utils.partitioning_workloads import (
-        SCENARIOS,
-        WorkloadInstance,
-        iter_scenario,
+PACKAGE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = PACKAGE_ROOT.parent
+
+try:
+    from quasar.cost import Backend
+except ImportError:  # pragma: no cover - script execution fallback
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from quasar.cost import Backend  # type: ignore
+
+if __package__ in {None, ""}:  # pragma: no cover - script execution
+    for path in (PACKAGE_ROOT, REPO_ROOT):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+
+try:  # package execution
+    from .bench_utils import paper_figures
+    from .bench_utils import showcase_benchmarks
+    from .bench_utils.showcase_benchmarks import RUN_TIMEOUT_DEFAULT_SECONDS
+    from .bench_utils.theoretical_estimation_runner import collect_estimates
+    from .bench_utils.theoretical_estimation_utils import (
+        OPS_PER_SECOND_DEFAULT,
+        build_dataframe,
+        build_summary,
+        load_estimator,
+        plot_memory_ratio,
+        plot_runtime_speedups,
+        report_totals,
+        write_tables,
     )
-    from .bench_utils.plot_utils import compute_baseline_best
-    from .bench_utils.progress import ProgressReporter
-    from .bench_utils.runner import BenchmarkRunner
-    from .bench_utils.ssd_metrics import partition_metrics_from_result
-    from .bench_utils.threading_utils import resolve_worker_count, thread_engine
-except ImportError:  # pragma: no cover - fallback when executed as a script
-    from bench_utils.benchmark_cli import parse_qubit_range, resolve_circuit  # type: ignore
-    from bench_utils.circuits import is_clifford, is_clifford_plus_t  # type: ignore
-    from bench_utils.memory_utils import max_qubits_statevector  # type: ignore
-    from bench_utils.partitioning_workloads import (  # type: ignore
-        SCENARIOS,
-        WorkloadInstance,
-        iter_scenario,
+except ImportError:  # pragma: no cover - script execution fallback
+    from bench_utils import paper_figures  # type: ignore
+    from bench_utils import showcase_benchmarks  # type: ignore
+    from bench_utils.showcase_benchmarks import (  # type: ignore
+        RUN_TIMEOUT_DEFAULT_SECONDS,
     )
-    from bench_utils.plot_utils import compute_baseline_best  # type: ignore
-    from bench_utils.progress import ProgressReporter  # type: ignore
-    from bench_utils.runner import BenchmarkRunner  # type: ignore
-    from bench_utils.ssd_metrics import partition_metrics_from_result  # type: ignore
-    from bench_utils.threading_utils import resolve_worker_count, thread_engine  # type: ignore
-
-from quasar import SimulationEngine
-from quasar.cost import Backend
-from quasar.circuit import Circuit
-
-
-BASELINE_BACKENDS: tuple[Backend, ...] = (
-    Backend.STATEVECTOR,
-    Backend.EXTENDED_STABILIZER,
-    Backend.TABLEAU,
-    Backend.MPS,
-    Backend.DECISION_DIAGRAM,
-)
+    from bench_utils.theoretical_estimation_runner import (  # type: ignore
+        collect_estimates,
+    )
+    from bench_utils.theoretical_estimation_utils import (  # type: ignore
+        OPS_PER_SECOND_DEFAULT,
+        build_dataframe,
+        build_summary,
+        load_estimator,
+        plot_memory_ratio,
+        plot_runtime_speedups,
+        report_totals,
+        write_tables,
+    )
 
 
 LOGGER = logging.getLogger(__name__)
 
-
-def _thread_engine() -> SimulationEngine:
-    """Return a thread-local :class:`SimulationEngine` instance."""
-
-    return thread_engine()
-
-
-def _resolve_workers(max_workers: int | None, items: int) -> int:
-    """Proxy to :func:`resolve_worker_count` for legacy compatibility."""
-
-    return resolve_worker_count(max_workers, items)
+__all__ = [
+    "generate_theoretical_estimates",
+    "run_showcase_suite",
+    "summarise_partitioning",
+]
 
 
 def _configure_logging(verbosity: int) -> None:
@@ -105,578 +95,87 @@ def _configure_logging(verbosity: int) -> None:
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
-def _run_all_for_width(
-    engine: SimulationEngine,
-    circuit_fn,
-    n: int,
-    repetitions: int,
-    use_classical_simplification: bool,
-    memory_bytes: int | None,
-) -> tuple[list[dict[str, object]], list[str]]:
-    """Execute all baselines and QuASAr for a single circuit width."""
+def _list_circuits() -> str:
+    """Return a formatted list of available showcase circuits."""
 
-    runner = BenchmarkRunner()
-    records: list[dict[str, object]] = []
-    messages: list[str] = []
-
-    circuit = circuit_fn(n)
-    if use_classical_simplification:
-        enable = getattr(circuit, "enable_classical_simplification", None)
-        if callable(enable):
-            enable()
-        else:
-            circuit.use_classical_simplification = True
-    else:
-        circuit.use_classical_simplification = False
-
-    if is_clifford(circuit):
-        skip_msg = f"skip width {n} (Clifford)"
-        messages.extend([skip_msg] * (len(BASELINE_BACKENDS) + 1))
-        return records, messages
-
-    for backend in BASELINE_BACKENDS:
-        status_msg = f"{backend.value}@{n}"
-        if (
-            backend == Backend.EXTENDED_STABILIZER
-            and not is_clifford_plus_t(circuit)
-        ):
-            messages.append(f"{status_msg} (skipped)")
-            continue
-        circuit_copy = copy.deepcopy(circuit)
-        try:
-            rec = runner.run_quasar_multiple(
-                circuit_copy,
-                engine,
-                backend=backend,
-                repetitions=repetitions,
-                quick=False,
-                memory_bytes=memory_bytes,
-            )
-        except (RuntimeError, ValueError) as exc:
-            records.append(
-                {
-                    "circuit": circuit_fn.__name__,
-                    "qubits": n,
-                    "framework": backend.value,
-                    "backend": backend.value,
-                    "unsupported": True,
-                    "error": str(exc),
-                }
-            )
-            LOGGER.warning(
-                "Backend %s failed for width %s: %s",
-                backend.value,
-                n,
-                exc,
-            )
-        else:
-            result = rec.pop("result", None)
-            rec.update(partition_metrics_from_result(result))
-            rec.update(
-                {
-                    "circuit": circuit_fn.__name__,
-                    "qubits": n,
-                    "framework": backend.value,
-                    "backend": backend.value,
-                }
-            )
-            records.append(rec)
-            LOGGER.info("Completed backend %s for width %s", backend.value, n)
-        finally:
-            messages.append(status_msg)
-
-    quasar_status = f"quasar@{n}"
-    circuit_copy = copy.deepcopy(circuit)
-    try:
-        quasar_rec = runner.run_quasar_multiple(
-            circuit_copy,
-            engine,
-            repetitions=repetitions,
-            quick=False,
-            memory_bytes=memory_bytes,
-        )
-    finally:
-        messages.append(quasar_status)
-
-    result = quasar_rec.pop("result", None)
-    quasar_rec.update(partition_metrics_from_result(result))
-    backend_name = quasar_rec.get("backend")
-    if isinstance(backend_name, str) and backend_name in Backend.__members__:
-        quasar_rec["backend"] = Backend[backend_name].value
-    quasar_rec.update(
-        {"circuit": circuit_fn.__name__, "qubits": n, "framework": "quasar"}
-    )
-    records.append(quasar_rec)
-
-    return records, messages
+    lines = ["Available circuits:"]
+    for name, spec in sorted(showcase_benchmarks.SHOWCASE_CIRCUITS.items()):
+        lines.append(f"  - {name}: {spec.display_name}")
+    return "\n".join(lines)
 
 
-def _run_all_for_width_worker(
-    circuit_fn,
-    n: int,
-    repetitions: int,
-    use_classical_simplification: bool,
-    memory_bytes: int | None,
-) -> tuple[list[dict[str, object]], list[str]]:
-    engine = thread_engine()
-    return _run_all_for_width(
-        engine,
-        circuit_fn,
-        n,
-        repetitions,
-        use_classical_simplification,
-        memory_bytes,
-    )
+def _list_groups() -> str:
+    """Return a formatted list of available showcase circuit groups."""
+
+    lines = ["Available groups:"]
+    for name, members in sorted(showcase_benchmarks.SHOWCASE_GROUPS.items()):
+        circuits = ", ".join(members)
+        lines.append(f"  - {name}: {circuits}")
+    return "\n".join(lines)
 
 
-def _conversion_summary(layers: List[Any]) -> Dict[str, Any]:
-    summary: Dict[str, Any] = {
-        "conversion_count": len(layers),
-        "conversion_boundary_mean": None,
-        "conversion_rank_mean": None,
-        "conversion_frontier_mean": None,
-        "conversion_primitive_summary": None,
-    }
-    if not layers:
-        return summary
-    boundaries = [len(getattr(layer, "boundary", ())) for layer in layers]
-    ranks = [getattr(layer, "rank", None) for layer in layers]
-    frontiers = [getattr(layer, "frontier", None) for layer in layers]
-    primitives = Counter(getattr(layer, "primitive", None) for layer in layers)
-    if any(boundaries):
-        summary["conversion_boundary_mean"] = statistics.fmean(boundaries)
-    if any(ranks):
-        summary["conversion_rank_mean"] = statistics.fmean(
-            [r for r in ranks if r is not None]
-        )
-    if any(frontiers):
-        summary["conversion_frontier_mean"] = statistics.fmean(
-            [f for f in frontiers if f is not None]
-        )
-    if primitives:
-        parts = [
-            f"{name}:{count}"
-            for name, count in sorted(primitives.items())
-            if name
-        ]
-        summary["conversion_primitive_summary"] = ", ".join(parts) if parts else None
-    return summary
-
-
-def run_all(
-    circuit_fn,
-    qubits: Iterable[int],
-    repetitions: int,
+def run_showcase_suite(
+    circuit: str,
+    widths: Iterable[int],
     *,
-    use_classical_simplification: bool = True,
+    repetitions: int = 1,
+    run_timeout: float | None = None,
     memory_bytes: int | None = None,
-    max_workers: int | None = None,
+    classical_simplification: bool = False,
+    workers: int | None = None,
+    include_baselines: bool = True,
+    baseline_backends: Iterable[Backend] | None = None,
+    quick: bool = False,
 ) -> pd.DataFrame:
-    """Execute ``circuit_fn`` for each qubit count on all backends.
+    """Execute a subset of the showcase suite programmatically.
 
-    The function returns a :class:`pandas.DataFrame` containing one row per
-    configuration for QuASAr and the aggregated baseline best.
+    This helper is primarily intended for tests and automation where callers
+    require direct access to the raw measurements instead of the CSV/Markdown
+    artefacts produced by the CLI entry point.  Optional flags allow the
+    benchmark to skip baseline simulators (``include_baselines=False``), limit
+    the baseline set (``baseline_backends``) or force QuASAr's quick-path
+    execution (``quick=True``) which is useful for CI smoke tests.
     """
 
-    LOGGER.info(
-        "Running %s across %d repetition(s) with %s classical simplification",
-        getattr(circuit_fn, "__name__", circuit_fn),
-        repetitions,
-        "enabled" if use_classical_simplification else "disabled",
+    if circuit not in showcase_benchmarks.SHOWCASE_CIRCUITS:
+        raise ValueError(f"unknown showcase circuit '{circuit}'")
+    spec = showcase_benchmarks.SHOWCASE_CIRCUITS[circuit]
+    timeout = run_timeout
+    if timeout is None:
+        timeout = RUN_TIMEOUT_DEFAULT_SECONDS
+    return showcase_benchmarks._run_backend_suite(  # type: ignore[attr-defined]
+        spec,
+        widths,
+        repetitions=repetitions,
+        run_timeout=None if timeout <= 0 else timeout,
+        memory_bytes=memory_bytes,
+        classical_simplification=classical_simplification,
+        max_workers=workers,
+        include_baselines=include_baselines,
+        baseline_backends=baseline_backends,
+        quasar_quick=quick,
     )
 
-    records: list[dict[str, object]] = []
 
-    qubit_list = list(qubits)
-    if not qubit_list:
-        return pd.DataFrame()
-
-    total_steps = len(qubit_list) * (len(BASELINE_BACKENDS) + 1)
-    progress = ProgressReporter(total_steps, prefix="Circuit benchmark")
-    worker_count = resolve_worker_count(max_workers, len(qubit_list))
-
-    LOGGER.info("Using %d worker thread(s) for circuit benchmarks", worker_count)
-
-    try:
-        if worker_count <= 1:
-            engine = SimulationEngine()
-            for n in qubit_list:
-                LOGGER.info("Starting benchmarks for circuit width %s", n)
-                recs, messages = _run_all_for_width(
-                    engine,
-                    circuit_fn,
-                    n,
-                    repetitions,
-                    use_classical_simplification,
-                    memory_bytes,
-                )
-                records.extend(recs)
-                for msg in messages:
-                    progress.advance(msg)
-                LOGGER.info("Finished benchmarks for circuit width %s", n)
-        else:
-            futures: Dict[Any, int] = {}
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                for idx, n in enumerate(qubit_list):
-                    LOGGER.info("Submitting benchmarks for circuit width %s", n)
-                    future = executor.submit(
-                        _run_all_for_width_worker,
-                        circuit_fn,
-                        n,
-                        repetitions,
-                        use_classical_simplification,
-                        memory_bytes,
-                    )
-                    futures[future] = idx
-
-                ordered: Dict[int, list[dict[str, object]]] = {}
-                for future in as_completed(futures):
-                    idx = futures[future]
-                    n = qubit_list[idx]
-                    try:
-                        recs, messages = future.result()
-                    except Exception:
-                        progress.close()
-                        raise
-                    ordered[idx] = recs
-                    for msg in messages:
-                        progress.advance(msg)
-                    LOGGER.info("Completed benchmarks for circuit width %s", n)
-
-            for idx in range(len(qubit_list)):
-                records.extend(ordered.get(idx, []))
-    finally:
-        progress.close()
-
-    df = pd.DataFrame(records)
-    if df.empty or "framework" not in df.columns:
-        return df
-    try:
-        baseline_best = compute_baseline_best(
-            df,
-            metrics=(
-                "run_time_mean",
-                "total_time_mean",
-                "run_peak_memory_mean",
-            ),
-        )
-        quasar_df = df[df["framework"] == "quasar"]
-        return pd.concat([baseline_best, quasar_df], ignore_index=True)
-    except ValueError:
-        # All baselines failed or are unsupported; return QuASAr data only.
-        return df[df["framework"] == "quasar"].reset_index(drop=True)
-
-
-def _run_scenario_instance(
-    engine: SimulationEngine,
-    instance: WorkloadInstance,
-    memory_bytes: int | None,
-) -> tuple[list[dict[str, object]], list[str]]:
-    """Execute all baselines and QuASAr for a single workload instance."""
-
-    scheduler = getattr(engine, "scheduler", engine)
-    planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
-    instance_label = f"{instance.scenario}:{instance.variant}"
-    records: List[dict[str, object]] = []
-    messages: List[str] = []
-    metadata: Dict[str, object] = {}
-
-    def _build_circuit() -> Circuit:
-        circuit = instance.build()
-        meta = dict(getattr(circuit, "metadata", {}))
-        metadata.clear()
-        metadata.update(meta)
-        if instance.enable_classical_simplification:
-            enable = getattr(circuit, "enable_classical_simplification", None)
-            if callable(enable):
-                enable()
-            else:
-                circuit.use_classical_simplification = True
-        else:
-            circuit.use_classical_simplification = False
-        return circuit
-
-    def _execute_backend(backend: Backend | None) -> dict[str, object]:
-        circuit = _build_circuit()
-        total_qubits = metadata.get(
-            "total_qubits", getattr(circuit, "num_qubits", None)
-        )
-        if (
-            backend == Backend.STATEVECTOR
-            and total_qubits is not None
-            and total_qubits > max_qubits_statevector(memory_bytes)
-        ):
-            limit = max_qubits_statevector(memory_bytes)
-            LOGGER.info(
-                "Skipping backend %s for %s: width %s exceeds statevector limit %s",
-                backend.value if backend else Backend.STATEVECTOR.value,
-                instance_label,
-                total_qubits,
-                limit,
-            )
-            return {
-                "framework": backend.value if backend else "quasar",
-                "backend": backend.value if backend else Backend.STATEVECTOR.value,
-                "unsupported": True,
-                "comment": (
-                    f"circuit width {total_qubits} exceeds statevector limit {limit}"
-                ),
-            }
-
-        tracemalloc.start()
-        start_prepare = time.perf_counter()
-        try:
-            if planner is not None:
-                LOGGER.debug(
-                    "Preparing plan for %s using backend %s",
-                    instance_label,
-                    backend.value if backend else "auto",
-                )
-                plan = planner.plan(circuit, backend=backend)
-                plan = scheduler.prepare_run(circuit, plan, backend=backend)
-            else:
-                LOGGER.debug(
-                    "Preparing scheduler run for %s using backend %s",
-                    instance_label,
-                    backend.value if backend else "auto",
-                )
-                plan = scheduler.prepare_run(circuit, backend=backend)
-        except ValueError as exc:
-            tracemalloc.stop()
-            LOGGER.warning(
-                "Preparation failed for %s on backend %s: %s",
-                instance_label,
-                backend.value if backend else "auto",
-                exc,
-            )
-            return {
-                "framework": backend.value if backend else "quasar",
-                "backend": backend.value if backend else str(backend),
-                "unsupported": True,
-                "error": str(exc),
-            }
-        except Exception as exc:  # pragma: no cover - defensive guard
-            tracemalloc.stop()
-            LOGGER.warning(
-                "Preparation failed for %s on backend %s: %s",
-                instance_label,
-                backend.value if backend else "auto",
-                exc,
-            )
-            return {
-                "framework": backend.value if backend else "quasar",
-                "backend": backend.value if backend else str(backend),
-                "unsupported": True,
-                "error": str(exc),
-            }
-        prepare_time = time.perf_counter() - start_prepare
-        _, prepare_peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-
-        conversion_layers = list(getattr(plan, "conversions", []))
-        try:
-            LOGGER.info(
-                "Executing scheduler for %s on backend %s",
-                instance_label,
-                backend.value if backend else "auto",
-            )
-            result, metrics = scheduler.run(circuit, plan, instrument=True)
-        except Exception as exc:
-            LOGGER.warning(
-                "Execution failed for %s on backend %s: %s",
-                instance_label,
-                backend.value if backend else "auto",
-                exc,
-            )
-            return {
-                "framework": backend.value if backend else "quasar",
-                "backend": backend.value if backend else str(backend),
-                "failed": True,
-                "error": str(exc),
-            }
-        cost = getattr(metrics, "cost", metrics)
-        run_time = getattr(cost, "time", 0.0)
-        run_peak = int(getattr(cost, "memory", 0.0))
-        backend_choice = None
-        if backend is not None:
-            backend_choice = backend.value
-        elif hasattr(result, "partitions") and getattr(result, "partitions"):
-            backend_obj = result.partitions[0].backend
-            backend_choice = getattr(backend_obj, "value", str(backend_obj))
-        record = {
-            "framework": backend.value if backend is not None else "quasar",
-            "prepare_time_mean": prepare_time,
-            "prepare_time_std": 0.0,
-            "run_time_mean": run_time,
-            "run_time_std": 0.0,
-            "total_time_mean": prepare_time + run_time,
-            "total_time_std": 0.0,
-            "prepare_peak_memory_mean": int(prepare_peak),
-            "prepare_peak_memory_std": 0.0,
-            "run_peak_memory_mean": run_peak,
-            "run_peak_memory_std": 0.0,
-            "repetitions": 1,
-            "backend": backend_choice,
-            "result": result,
-            "failed": False,
-        }
-        record.update(_conversion_summary(conversion_layers))
-        record.update(partition_metrics_from_result(result))
-        if total_qubits is not None:
-            record["qubits"] = total_qubits
-        return record
-
-    for backend in BASELINE_BACKENDS:
-        LOGGER.info(
-            "Benchmarking backend %s for scenario %s",
-            backend.value,
-            instance_label,
-        )
-        status_msg = f"{instance_label} {backend.value}"
-        record = _execute_backend(backend)
-        record.update({"circuit": instance.builder.__name__, "framework": backend.value})
-        record.update(metadata)
-        record.pop("result", None)
-        records.append(record)
-        messages.append(status_msg)
-        LOGGER.info(
-            "Completed backend %s for scenario %s",
-            backend.value,
-            instance_label,
-        )
-
-    LOGGER.info("Benchmarking QuASAr for scenario %s", instance_label)
-    quasar_record = _execute_backend(None)
-    quasar_record.update({"circuit": instance.builder.__name__, "framework": "quasar"})
-    quasar_record.update(metadata)
-    quasar_record.pop("result", None)
-    records.append(quasar_record)
-    messages.append(f"{instance_label} quasar")
-    LOGGER.info("Completed QuASAr run for scenario %s", instance_label)
-
-    return records, messages
-
-
-def _run_scenario_instance_worker(
-    instance: WorkloadInstance,
-    memory_bytes: int | None,
-) -> tuple[list[dict[str, object]], list[str]]:
-    engine = _thread_engine()
-    return _run_scenario_instance(engine, instance, memory_bytes)
-
-
-def run_scenarios(
-    instances: Iterable[WorkloadInstance],
-    repetitions: int,
+def generate_theoretical_estimates(
     *,
-    memory_bytes: int | None = None,
-    max_workers: int | None = None,
-) -> pd.DataFrame:
-    """Execute scenario workloads across all backends."""
+    ops_per_second: float | None = OPS_PER_SECOND_DEFAULT,
+    calibration: Path | None = None,
+    workers: int | None = None,
+):
+    """Return detailed and summary DataFrames for theoretical estimates."""
 
-    LOGGER.info(
-        "Running partitioning scenarios for %d repetition(s)", repetitions
+    throughput = ops_per_second if ops_per_second and ops_per_second > 0 else None
+    estimator = load_estimator(calibration)
+    records = collect_estimates(
+        paper_figures.CIRCUITS,
+        paper_figures.BACKENDS,
+        estimator,
+        max_workers=workers,
     )
-
-    records: List[dict[str, object]] = []
-
-    instance_list = list(instances)
-    if not instance_list:
-        return pd.DataFrame()
-
-    total_steps = len(instance_list) * (len(BASELINE_BACKENDS) + 1)
-    progress = ProgressReporter(total_steps, prefix="Scenario benchmark")
-    worker_count = _resolve_workers(max_workers, len(instance_list))
-
-    LOGGER.info("Using %d worker thread(s) for scenario benchmarks", worker_count)
-
-    try:
-        if worker_count <= 1:
-            engine = SimulationEngine()
-            for instance in instance_list:
-                label = f"{instance.scenario}:{instance.variant}"
-                LOGGER.info("Starting scenario instance %s", label)
-                recs, messages = _run_scenario_instance(
-                    engine,
-                    instance,
-                    memory_bytes,
-                )
-                records.extend(recs)
-                for msg in messages:
-                    progress.advance(msg)
-                LOGGER.info("Completed scenario %s", label)
-        else:
-            futures: Dict[Any, int] = {}
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                for idx, instance in enumerate(instance_list):
-                    label = f"{instance.scenario}:{instance.variant}"
-                    LOGGER.info("Submitting scenario instance %s", label)
-                    future = executor.submit(
-                        _run_scenario_instance_worker,
-                        instance,
-                        memory_bytes,
-                    )
-                    futures[future] = idx
-
-                ordered: Dict[int, list[dict[str, object]]] = {}
-                for future in as_completed(futures):
-                    idx = futures[future]
-                    instance = instance_list[idx]
-                    label = f"{instance.scenario}:{instance.variant}"
-                    try:
-                        recs, messages = future.result()
-                    except Exception:
-                        progress.close()
-                        raise
-                    ordered[idx] = recs
-                    for msg in messages:
-                        progress.advance(msg)
-                    LOGGER.info("Completed scenario %s", label)
-
-            for idx in range(len(instance_list)):
-                records.extend(ordered.get(idx, []))
-    finally:
-        progress.close()
-
-    df = pd.DataFrame(records)
-    if df.empty or "framework" not in df.columns:
-        return df
-    try:
-        baseline_df = df
-        if "scenario" in df.columns:
-            w_mask = df["scenario"] == "w_state_oracle"
-            if w_mask.any():
-                allowed = {
-                    Backend.STATEVECTOR.value,
-                    Backend.DECISION_DIAGRAM.value,
-                    "quasar",
-                }
-                baseline_df = df[
-                    (~w_mask)
-                    | df["framework"].isin(allowed)
-                ].reset_index(drop=True)
-        baseline_best = compute_baseline_best(
-            baseline_df,
-            metrics=(
-                "run_time_mean",
-                "total_time_mean",
-                "run_peak_memory_mean",
-            ),
-        )
-        quasar_df = df[df["framework"] == "quasar"]
-        return pd.concat([baseline_best, quasar_df], ignore_index=True)
-    except ValueError:
-        return df[df["framework"] == "quasar"].reset_index(drop=True)
-
-def save_results(df: pd.DataFrame, output: Path) -> None:
-    """Persist ``df`` as CSV and JSON using ``output`` as base path."""
-
-    base = output.with_suffix("")
-    csv_path = base.with_suffix(".csv")
-    json_path = base.with_suffix(".json")
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(csv_path, index=False)
-    df.to_json(json_path, orient="records", indent=2)
+    detail = build_dataframe(records, throughput)
+    summary = build_summary(detail)
+    return detail, summary, throughput
 
 
 def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
@@ -690,13 +189,13 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
         return relevant
 
     base_keys = [
-        col
-        for col in ("scenario", "variant", "circuit", "qubits")
-        if col in relevant.columns
+        column
+        for column in ("scenario", "variant", "circuit", "qubits")
+        if column in relevant.columns
     ]
     metadata_columns = [
-        col
-        for col in (
+        column
+        for column in (
             "boundary",
             "schmidt_layers",
             "cross_layers",
@@ -740,30 +239,32 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             "partition_backend_breakdown",
             "hierarchy_available",
         )
-        if col in relevant.columns
+        if column in relevant.columns
     ]
-    rows: List[dict[str, object]] = []
 
-    baseline_frameworks = {backend.value for backend in BASELINE_BACKENDS}
+    rows: list[dict[str, object]] = []
+    baseline_frameworks = {
+        backend.value for backend in showcase_benchmarks.BASELINE_BACKENDS
+    }
 
     for keys, group in relevant.groupby(base_keys, dropna=False):
         if not isinstance(keys, tuple):
             keys = (keys,)
         row = dict(zip(base_keys, keys))
 
-        quasar = group[group["framework"] == "quasar"]
-        meta_source = quasar if not quasar.empty else group
+        quasar_rows = group[group["framework"] == "quasar"]
+        meta_source = quasar_rows if not quasar_rows.empty else group
         if not meta_source.empty:
             head = meta_source.iloc[0]
-            for col in metadata_columns:
-                row.setdefault(col, head.get(col))
+            for column in metadata_columns:
+                row.setdefault(column, head.get(column))
 
-        baseline = group[group["framework"] == "baseline_best"]
-        if not baseline.empty:
-            b = baseline.iloc[0]
-            row["baseline_runtime_mean"] = b.get("run_time_mean")
-            row["baseline_backend"] = b.get("backend")
-            peak_memory = b.get("run_peak_memory_mean")
+        baseline_rows = group[group["framework"] == "baseline_best"]
+        if not baseline_rows.empty:
+            baseline_entry = baseline_rows.iloc[0]
+            row["baseline_runtime_mean"] = baseline_entry.get("run_time_mean")
+            row["baseline_backend"] = baseline_entry.get("backend")
+            peak_memory = baseline_entry.get("run_peak_memory_mean")
             if pd.isna(peak_memory):
                 mask = df["framework"].isin(baseline_frameworks)
                 for name, value in zip(base_keys, keys):
@@ -782,16 +283,16 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             row["baseline_peak_memory_mean"] = None
             row["baseline_backend"] = None
 
-        if not quasar.empty:
-            q = quasar.iloc[0]
-            row["quasar_runtime_mean"] = q.get("run_time_mean")
-            row["quasar_peak_memory_mean"] = q.get("run_peak_memory_mean")
-            row["quasar_backend"] = q.get("backend")
-            row["quasar_conversions"] = q.get("conversion_count")
-            row["quasar_boundary_mean"] = q.get("conversion_boundary_mean")
-            row["quasar_rank_mean"] = q.get("conversion_rank_mean")
-            row["quasar_frontier_mean"] = q.get("conversion_frontier_mean")
-            row["quasar_conversion_primitives"] = q.get(
+        if not quasar_rows.empty:
+            quasar_entry = quasar_rows.iloc[0]
+            row["quasar_runtime_mean"] = quasar_entry.get("run_time_mean")
+            row["quasar_peak_memory_mean"] = quasar_entry.get("run_peak_memory_mean")
+            row["quasar_backend"] = quasar_entry.get("backend")
+            row["quasar_conversions"] = quasar_entry.get("conversion_count")
+            row["quasar_boundary_mean"] = quasar_entry.get("conversion_boundary_mean")
+            row["quasar_rank_mean"] = quasar_entry.get("conversion_rank_mean")
+            row["quasar_frontier_mean"] = quasar_entry.get("conversion_frontier_mean")
+            row["quasar_conversion_primitives"] = quasar_entry.get(
                 "conversion_primitive_summary"
             )
         else:
@@ -805,10 +306,10 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
             row["quasar_conversion_primitives"] = None
 
         try:
-            if row["baseline_runtime_mean"] and row["quasar_runtime_mean"]:
-                row["runtime_speedup"] = (
-                    row["baseline_runtime_mean"] / row["quasar_runtime_mean"]
-                )
+            runtime_baseline = row["baseline_runtime_mean"]
+            runtime_quasar = row["quasar_runtime_mean"]
+            if runtime_baseline and runtime_quasar:
+                row["runtime_speedup"] = runtime_baseline / runtime_quasar
             else:
                 row["runtime_speedup"] = None
         except ZeroDivisionError:
@@ -819,122 +320,116 @@ def summarise_partitioning(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def write_partitioning_tables(df: pd.DataFrame, output: Path) -> None:
-    """Create CSV and Markdown summaries for partitioning benchmarks."""
+def _run_theoretical_estimation(
+    *,
+    ops_per_second: float | None,
+    calibration: Path | None,
+    workers: int | None,
+) -> None:
+    """Execute the theoretical estimation pipeline and export artefacts."""
 
-    summary = summarise_partitioning(df)
-    if summary.empty:
-        return
-    base = output.with_suffix("")
-    summary_base = base.with_name(base.name + "_summary")
-    summary_csv = summary_base.with_suffix(".csv")
-    summary_md = summary_base.with_suffix(".md")
-    summary_csv.parent.mkdir(parents=True, exist_ok=True)
-    summary.to_csv(summary_csv, index=False)
-    try:
-        with summary_md.open("w", encoding="utf-8") as handle:
-            summary.to_markdown(handle, index=False)
-    except ImportError:
-        with summary_md.open("w", encoding="utf-8") as handle:
-            handle.write(summary.to_string(index=False))
-            handle.write("\n")
+    detail, summary, throughput = generate_theoretical_estimates(
+        ops_per_second=ops_per_second,
+        calibration=calibration,
+        workers=workers,
+    )
+
+    write_tables(detail, summary)
+    if throughput:
+        report_totals(detail)
+    if not summary.empty:
+        plot_runtime_speedups(summary)
+        plot_memory_ratio(summary)
+    else:
+        LOGGER.warning("No supported configurations found for summary plots.")
 
 
-def main() -> None:  # pragma: no cover - CLI entry point
-    parser = argparse.ArgumentParser(
-        description="Execute benchmark circuits and record baseline-best results"
-    )
-    parser.add_argument("--circuit", help="Circuit family name (e.g. ghz, qft)")
-    parser.add_argument(
-        "--scenario",
-        choices=sorted(SCENARIOS.keys()),
-        help=(
-            "Named partitioning scenario defined in partitioning_workloads "
-            "(e.g. dual_magic_injection)"
-        ),
+def _build_parser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser."""
+
+    parser = showcase_benchmarks.build_arg_parser()
+    parser.description = (
+        "Run QuASAr showcase benchmarks and optionally compute theoretical"
+        " resource estimates."
     )
     parser.add_argument(
-        "--qubits",
-        type=parse_qubit_range,
-        help="Qubit range as start:end[:step] (for --circuit runs)",
-    )
-    parser.add_argument(
-        "--repetitions",
-        type=int,
-        default=3,
-        help="Number of repetitions per configuration",
-    )
-    parser.add_argument(
-        "--output", required=True, type=Path, help="Output file path without extension"
-    )
-    parser.add_argument(
-        "--disable-classical-simplify",
+        "--list-circuits",
         action="store_true",
-        help="Disable classical control simplification",
+        help="List available showcase circuits and exit.",
     )
     parser.add_argument(
-        "--memory-bytes",
-        type=int,
-        help="Approximate peak memory budget per backend (bytes)",
+        "--estimate",
+        action="store_true",
+        help="Run theoretical estimation after executing the benchmarks.",
     )
     parser.add_argument(
-        "--workers",
-        type=int,
+        "--estimate-only",
+        action="store_true",
+        help="Run only the theoretical estimation pipeline and skip benchmarks.",
+    )
+    parser.add_argument(
+        "--ops-per-second",
+        type=float,
+        default=OPS_PER_SECOND_DEFAULT,
         help=(
-            "Maximum number of worker threads to use (default: auto detect)."
+            "Throughput used to convert cost-model operations to seconds when"
+            " running theoretical estimation (default: %(default)s)."
         ),
     )
     parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
+        "--calibration",
+        type=Path,
+        default=None,
         help=(
-            "Increase logging verbosity (use -vv for debug output)."
+            "Optional JSON file with calibrated cost coefficients used for"
+            " theoretical estimation."
         ),
     )
-    args = parser.parse_args()
+    return parser
 
-    _configure_logging(args.verbose)
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments using the combined showcase/estimate parser."""
+
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.estimate_only:
+        args.estimate = True
 
     if args.workers is not None and args.workers <= 0:
         parser.error("--workers must be a positive integer")
 
-    if bool(args.circuit) == bool(args.scenario):
-        parser.error("exactly one of --circuit or --scenario must be provided")
+    return args
 
-    if args.circuit:
-        if args.qubits is None:
-            parser.error("--qubits is required when --circuit is used")
-        circuit_fn = resolve_circuit(args.circuit)
-        df = run_all(
-            circuit_fn,
-            args.qubits,
-            args.repetitions,
-            use_classical_simplification=not args.disable_classical_simplify,
-            memory_bytes=args.memory_bytes,
-            max_workers=args.workers,
+
+def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
+    args = parse_args(argv)
+    _configure_logging(args.verbose)
+
+    if getattr(args, "list_circuits", False):
+        print(_list_circuits())
+        return
+
+    if getattr(args, "list_groups", False):
+        print(_list_groups())
+        return
+
+    throughput = args.ops_per_second if args.ops_per_second > 0 else None
+
+    if not args.estimate_only:
+        LOGGER.info("Running showcase benchmarks")
+        showcase_benchmarks.run_showcase_benchmarks(args)
+
+    if args.estimate:
+        LOGGER.info("Running theoretical estimation")
+        _run_theoretical_estimation(
+            ops_per_second=throughput,
+            calibration=args.calibration,
+            workers=args.workers,
         )
-        save_results(df, args.output)
-    else:
-        instances = iter_scenario(args.scenario)
-        df = run_scenarios(
-            instances,
-            args.repetitions,
-            memory_bytes=args.memory_bytes,
-            max_workers=args.workers,
-        )
-        save_results(df, args.output)
-        write_partitioning_tables(df, args.output)
 
 
-# Import surface-code protected circuits so the CLI can discover them.
-try:  # pragma: no cover - executed for script usage
-    from .bench_utils.circuits import surface_corrected_qaoa_circuit  # type: ignore  # noqa: E402,F401
-except ImportError:  # pragma: no cover - fallback when executed as a script
-    from bench_utils.circuits import surface_corrected_qaoa_circuit  # type: ignore  # noqa: E402,F401
-
-
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
     main()
 

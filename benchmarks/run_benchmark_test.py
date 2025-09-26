@@ -1,86 +1,104 @@
+"""Smoke test utilities for the streamlined benchmark runner."""
+
 from __future__ import annotations
-
-"""Quick smoke test runner for the benchmarking pipeline.
-
-The script executes a tiny benchmark configuration to confirm that the
-infrastructure works end-to-end without requiring the full benchmark sweep.
-"""
 
 import argparse
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import pandas as pd
 
 try:  # package execution
     from .run_benchmark import (
         _configure_logging,
-        run_all,
-        run_scenarios,
-        save_results,
+        generate_theoretical_estimates,
+        run_showcase_suite,
     )
-    from .bench_utils.benchmark_cli import parse_qubit_range, resolve_circuit
-    from .bench_utils.partitioning_workloads import iter_scenario
+    from .bench_utils import showcase_benchmarks
+    from .bench_utils.benchmark_cli import parse_qubit_range
 except ImportError:  # pragma: no cover - script execution fallback
     from run_benchmark import (  # type: ignore
         _configure_logging,
-        run_all,
-        run_scenarios,
-        save_results,
+        generate_theoretical_estimates,
+        run_showcase_suite,
     )
-    from bench_utils.benchmark_cli import parse_qubit_range, resolve_circuit  # type: ignore
-    from bench_utils.partitioning_workloads import iter_scenario  # type: ignore
+    from bench_utils import showcase_benchmarks  # type: ignore
+    from bench_utils.benchmark_cli import parse_qubit_range  # type: ignore
 
 
 DEFAULT_OUTPUT = Path("benchmarks/results/smoke_test")
-DEFAULT_CIRCUIT = "ghz"
-DEFAULT_QUBITS = (4, 6)
-def _limit(iterable: Iterable, count: int) -> list:
-    items = []
-    for idx, value in enumerate(iterable):
-        if idx >= count:
-            break
-        items.append(value)
-    return items
+DEFAULT_CIRCUIT = "classical_controlled"
+DEFAULT_WIDTHS = (2,)
+
+
+# Legacy CI pipelines invoked the original smoke test with circuit families such
+# as ``ghz`` or ``w_state`` that are no longer part of the showcase suite.  Map
+# those names to their closest showcase counterparts so that the lightweight
+# regression check keeps running without requiring changes to the pipeline
+# configuration.
+LEGACY_CIRCUIT_ALIASES: dict[str, str] = {
+    "ghz": "clustered_ghz_random",
+    "grover": "dynamic_classical_control",
+    "qft": "clustered_ghz_qft",
+    "w_state": "clustered_w_random",
+}
+
+
+def _resolve_circuit_name(name: str) -> str:
+    """Return a showcase circuit name, applying legacy aliases when needed."""
+
+    normalised = name.strip().lower()
+    canonical = LEGACY_CIRCUIT_ALIASES.get(normalised, normalised)
+    if canonical not in showcase_benchmarks.SHOWCASE_CIRCUITS:
+        available = ", ".join(sorted(showcase_benchmarks.SHOWCASE_CIRCUITS))
+        raise ValueError(
+            f"unknown showcase circuit '{name}'. Available circuits: {available}"
+        )
+    return canonical
 
 
 def run_smoke_test(
     *,
     output: Path,
     circuit: str = DEFAULT_CIRCUIT,
-    qubits: Iterable[int] = DEFAULT_QUBITS,
-    scenario: str | None = None,
+    widths: Iterable[int] = DEFAULT_WIDTHS,
     repetitions: int = 1,
-    memory_bytes: int | None = None,
-    max_workers: int | None = 1,
-    disable_classical_simplify: bool = False,
-) -> pd.DataFrame:
-    """Execute a minimal benchmark run and persist the results."""
+    workers: int | None = 1,
+    run_timeout: float | None = 0.0,
+    enable_classical_simplification: bool = False,
+    estimate: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Execute a minimal showcase benchmark and optionally estimate resources."""
 
-    if scenario:
-        instances = _limit(iter_scenario(scenario), 1)
-        df = run_scenarios(
-            instances,
-            repetitions,
-            memory_bytes=memory_bytes,
-            max_workers=max_workers,
-        )
-    else:
-        circuit_fn = resolve_circuit(circuit)
-        df = run_all(
-            circuit_fn,
-            qubits,
-            repetitions,
-            use_classical_simplification=not disable_classical_simplify,
-            memory_bytes=memory_bytes,
-            max_workers=max_workers,
-        )
-    save_results(df, output)
-    return df
+    showcase_circuit = _resolve_circuit_name(circuit)
+    df = run_showcase_suite(
+        showcase_circuit,
+        widths,
+        repetitions=repetitions,
+        run_timeout=run_timeout,
+        classical_simplification=enable_classical_simplification,
+        workers=workers,
+        include_baselines=False,
+        quick=True,
+    )
+
+    base = output.with_suffix("")
+    base.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(base.with_suffix(".csv"), index=False)
+    df.to_json(base.with_suffix(".json"), orient="records", indent=2)
+
+    summary: pd.DataFrame | None = None
+    if estimate:
+        detail, summary, _ = generate_theoretical_estimates(workers=workers)
+        detail.to_csv(base.with_name(base.name + "_estimate_detail.csv"), index=False)
+        summary.to_csv(base.with_name(base.name + "_estimate_summary.csv"), index=False)
+    return df, summary
 
 
-def main() -> None:  # pragma: no cover - CLI entry point
-    parser = argparse.ArgumentParser(description="Run a minimal benchmark smoke test")
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run a minimal showcase benchmark smoke test",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -90,66 +108,75 @@ def main() -> None:  # pragma: no cover - CLI entry point
     parser.add_argument(
         "--circuit",
         default=DEFAULT_CIRCUIT,
-        help="Circuit family name to benchmark (default: ghz)",
+        help="Showcase circuit name to benchmark (default: %(default)s)",
     )
     parser.add_argument(
+        "--widths",
         "--qubits",
+        dest="widths",
         type=parse_qubit_range,
-        default=DEFAULT_QUBITS,
-        help="Qubit range as start:end[:step] (default: 4,6)",
-    )
-    parser.add_argument(
-        "--scenario",
-        default=None,
-        help="Partitioning scenario to benchmark (default: none)",
+        default=DEFAULT_WIDTHS,
+        help="Qubit widths as start:end[:step] (default: %(default)s)",
     )
     parser.add_argument(
         "--repetitions",
         type=int,
         default=1,
-        help="Number of repetitions per configuration (default: 1)",
-    )
-    parser.add_argument(
-        "--memory-bytes",
-        type=int,
-        help="Approximate peak memory budget per backend (default: unlimited)",
+        help="Number of repetitions per configuration (default: %(default)s)",
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=1,
-        help="Maximum number of worker threads to use (default: 1)",
+        help="Maximum number of worker threads to use (default: %(default)s)",
     )
     parser.add_argument(
-        "--disable-classical-simplify",
+        "--run-timeout",
+        type=float,
+        default=0.0,
+        help="Per-run timeout in seconds (<= 0 disables the timeout)",
+    )
+    parser.add_argument(
+        "--enable-classical-simplification",
         action="store_true",
-        help="Disable classical control simplification",
+        help="Enable classical control simplification on the generated circuit",
+    )
+    parser.add_argument(
+        "--estimate",
+        action="store_true",
+        help="Generate theoretical estimates after the benchmark run",
     )
     parser.add_argument(
         "-v",
         "--verbose",
         action="count",
         default=0,
-        help="Increase logging verbosity (use -vv for debug output)",
+        help="Increase logging verbosity (use twice for debug output)",
     )
-    args = parser.parse_args()
+    return parser
 
-    _configure_logging(args.verbose)
+
+def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
+    parser = _build_parser()
+    args = parser.parse_args(argv)
 
     if args.workers is not None and args.workers <= 0:
         parser.error("--workers must be a positive integer")
 
+    _configure_logging(args.verbose)
+
     run_smoke_test(
         output=args.output,
         circuit=args.circuit,
-        qubits=args.qubits,
-        scenario=args.scenario,
+        widths=args.widths,
         repetitions=args.repetitions,
-        memory_bytes=args.memory_bytes,
-        max_workers=args.workers,
-        disable_classical_simplify=args.disable_classical_simplify,
+        workers=args.workers,
+        run_timeout=args.run_timeout,
+        enable_classical_simplification=args.enable_classical_simplification,
+        estimate=args.estimate,
     )
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
     main()
+
