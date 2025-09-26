@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, Iterable, List
 
 from quasar.circuit import Circuit
 
-try:  # Allow execution via `python benchmarks/run_benchmarks.py`
+try:  # Allow execution via `python benchmarks/run_benchmark.py`
     from .large_scale_circuits import (
         alternating_ladder_circuit,
         dense_to_clifford_partition_circuit,

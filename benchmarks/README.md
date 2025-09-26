@@ -3,6 +3,13 @@
 This directory provides utilities for measuring the performance of the
 various QuASAr simulation backends and conversion primitives.
 
+Most legacy helpers, notebooks and figure-generation scripts are grouped under
+[`bench_utils/`](bench_utils).  They remain importable and can be executed via
+`python benchmarks/bench_utils/<script>.py` when needed, while the top-level
+directory focuses on the primary benchmark entry points.  Subsequent references
+to helper modules (for example ``paper_figures.py`` or ``plot_utils.py``)
+implicitly live inside this ``bench_utils`` subdirectory.
+
 ## Installation
 
 The benchmarks require the core project dependencies plus a few optional
@@ -13,19 +20,19 @@ pip install -e .[test]
 pip install pandas jupyter
 ```
 
-## Running `run_benchmarks.py`
+## Running `run_benchmark.py`
 
-The `run_benchmarks.py` script executes parameterised circuit families on
+The `run_benchmark.py` script executes parameterised circuit families on
 QuASAr and all available single‑method simulators. For each configuration the
 fastest non‑QuASAr backend is determined and only this aggregate baseline is
 stored alongside the QuASAr result:
 
 ```bash
-python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 5 --output benchmarks/results/ghz
+python benchmarks/run_benchmark.py --circuit ghz --qubits 4:12:2 --repetitions 5 --output benchmarks/results/ghz
 ```
 
-- `--circuit` selects a family from [circuits.py](circuits.py) using the
-  `<name>_circuit` naming pattern.
+- `--circuit` selects a family from [`bench_utils/circuits.py`](bench_utils/circuits.py)
+  using the `<name>_circuit` naming pattern.
 - `--qubits` specifies a `start:end[:step]` range.
 - `--repetitions` repeats each configuration to compute a mean and variance.
 - `--output` is the base path for the generated `.json` and `.csv` files.
@@ -38,12 +45,12 @@ python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 
 
 The new `--scenario` flag drives the partitioning experiments derived from the
 `docs/partitioning_*.ipynb` notebooks.  Each scenario enumerates a deterministic
-parameter sweep defined in [`partitioning_workloads.py`](partitioning_workloads.py)
+parameter sweep defined in [`bench_utils/partitioning_workloads.py`](bench_utils/partitioning_workloads.py)
 and maps the settings onto the large-scale circuit generators.  For example,
 the boundary-width sweep is executed with:
 
 ```bash
-python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
+python benchmarks/run_benchmark.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
 ```
 
 Scenario runs emit two sets of artefacts: the raw measurement table
@@ -70,10 +77,25 @@ to 64 GiB (about 32 qubits). The resulting budget is cached by both the
 benchmark runner and the :class:`~quasar.simulation_engine.SimulationEngine`,
 ensuring the planner enforces the limit even when the quick path is bypassed.
 You can override the ceiling via the environment variable, the global
-``--memory-bytes`` flag on `run_benchmarks.py`, the ``memory_bytes`` keyword on
+``--memory-bytes`` flag on `run_benchmark.py`, the ``memory_bytes`` keyword on
 ``BenchmarkRunner.run_quasar``/``run_quasar_multiple``, or the
 ``SimulationEngine(memory_threshold=...)`` and ``simulate(memory_threshold=...)``
 APIs. Supplying a non-positive threshold disables the guard for that call.
+
+## Running `run_benchmark_test.py`
+
+Use `run_benchmark_test.py` to validate the benchmarking pipeline with a
+minimal configuration.  The script defaults to a GHZ circuit sweep over a small
+qubit range and writes the results to `benchmarks/results/smoke_test`:
+
+```bash
+python benchmarks/run_benchmark_test.py
+```
+
+Pass `--scenario <name>` to exercise a single partitioning workload instead of
+the default circuit family.  All command-line options mirror the primary
+benchmark runner but default to conservative values (one repetition, a single
+worker thread and classical simplification enabled).
 
 ### Showcase benchmark suites
 
@@ -150,7 +172,7 @@ value via `--ops-per-second` to reflect other hardware profiles.
 ### Reproducing paper figures
 
 Execute the commands below in order to rebuild every artefact used by
-[`paper_figures.py`](paper_figures.py). Check that each step produces the
+[`bench_utils/paper_figures.py`](bench_utils/paper_figures.py). Check that each step produces the
 described files before moving to the next command.
 The `--workers` flag mirrors the benchmark runner and enables threaded circuit
 execution for the forced/automatic comparisons.
@@ -159,9 +181,9 @@ execution for the forced/automatic comparisons.
    mainline runtime and memory figures:
 
    ```bash
-   python benchmarks/run_benchmarks.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
-   python benchmarks/run_benchmarks.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
-   python benchmarks/run_benchmarks.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
+   python benchmarks/run_benchmark.py --scenario tableau_boundary --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/tableau_boundary
+   python benchmarks/run_benchmark.py --scenario staged_rank --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_rank
+   python benchmarks/run_benchmark.py --scenario staged_sparsity --repetitions 1 --memory-bytes 268435456 --output benchmarks/results/staged_sparsity
    ```
 
    Each run emits `<scenario>.csv`, `<scenario>.json`, and
@@ -172,7 +194,7 @@ execution for the forced/automatic comparisons.
    speedup bar chart:
 
    ```bash
-   python benchmarks/quick_analysis_benchmark.py
+   python benchmarks/bench_utils/quick_analysis_benchmark.py
    ```
 
    This script saves `benchmarks/quick_analysis_results.csv` and displays a
@@ -181,7 +203,7 @@ execution for the forced/automatic comparisons.
 
 3. **Optional planner heatmap** – capture the plan-choice sweep used for the
    heatmap figure by executing the
-   [`notebooks/plan_choice_heatmap.ipynb`](notebooks/plan_choice_heatmap.ipynb)
+   [`bench_utils/notebooks/plan_choice_heatmap.ipynb`](bench_utils/notebooks/plan_choice_heatmap.ipynb)
    notebook. One way to run it non-interactively is:
 
    ```bash
@@ -197,7 +219,7 @@ execution for the forced/automatic comparisons.
    publication graphics and tables:
 
    ```bash
-   python benchmarks/paper_figures.py
+   python benchmarks/bench_utils/paper_figures.py
    ```
 
    The script collects the benchmark summaries into
@@ -230,13 +252,13 @@ reflects only the backend's execution.
 
 ## Comparing with baseline backends
 
-`run_benchmarks.py` already aggregates the baseline measurements into a single
+`run_benchmark.py` already aggregates the baseline measurements into a single
 "baseline_best" curve. The helper functions in
 [`plot_utils.py`](plot_utils.py) centralise the styling used throughout the
 paper and expose dedicated entry points for the common notebook figures:
 
 ```python
-from benchmarks.plot_utils import (
+from benchmarks.bench_utils.plot_utils import (
     setup_benchmark_style,
     plot_quasar_vs_baseline_best,
     plot_backend_timeseries,
@@ -307,7 +329,7 @@ partitioning notebooks.  Each entry specifies its parameter sweep directly in
 The configurations below assume the default repetition count of three runs per
 point and should be combined with `--memory-bytes` limits that keep statevector
 simulations feasible on the target hardware.  The script trims each sweep to
-widths supported by :func:`benchmarks.memory_utils.max_qubits_statevector`
+  widths supported by :func:`benchmarks.bench_utils.memory_utils.max_qubits_statevector`
 based on the smaller of ``QUASAR_STATEVECTOR_MAX_MEMORY_BYTES`` and the detected
 available memory.  A 25% headroom is reserved to keep the host responsive.  With
 the 64 GiB default the cap becomes 29 qubits on a machine with at least that
@@ -375,28 +397,29 @@ workloads have been generated:
 
 ## Using notebooks
 
-Benchmark results can be explored with the Jupyter notebooks in
-[notebooks/](notebooks):
+Benchmark results can be explored with the Jupyter notebook in
+[notebooks/](notebooks) and the supplementary studies archived under
+[`bench_utils/notebooks`](bench_utils/notebooks):
 
 ```bash
 jupyter notebook benchmarks/notebooks/comparison.ipynb
 ```
 
-- `partitioning_workloads_results.ipynb` regenerates the deterministic
+- `bench_utils/notebooks/partitioning_workloads_results.ipynb` regenerates the deterministic
   partitioning sweeps, persists the CSV/JSON artefacts, and produces the paper
   figures inline for quick inspection.
 
 ## Adding circuit families
 
 New circuit generators are added to
-[circuits.py](circuits.py).  Implement a function returning a
-`Circuit` object and follow the `<name>_circuit` convention so that the
-CLI can discover it automatically.  The existing functions, such as
-[`ghz_circuit`](circuits.py), illustrate the expected structure.
+[`bench_utils/circuits.py`](bench_utils/circuits.py).  Implement a function
+returning a `Circuit` object and follow the `<name>_circuit` convention so that
+the CLI can discover it automatically.  The existing functions, such as
+[`ghz_circuit`](bench_utils/circuits.py), illustrate the expected structure.
 
 ## Parallel subsystem templates
 
-[`parallel_circuits.py`](parallel_circuits.py) contains helpers for
+[`bench_utils/parallel_circuits.py`](bench_utils/parallel_circuits.py) contains helpers for
 benchmarks that emphasise independent subsystems.  The
 ``many_ghz_subsystems(num_groups, group_size)`` generator creates
 ``num_groups`` disjoint GHZ chains with ``group_size`` qubits each.  No
@@ -404,7 +427,7 @@ gates cross subsystem boundaries, allowing the planner and scheduler to
 identify parallel partitions immediately:
 
 ```python
-from benchmarks.parallel_circuits import many_ghz_subsystems
+from benchmarks.bench_utils.parallel_circuits import many_ghz_subsystems
 
 circuit = many_ghz_subsystems(num_groups=8, group_size=6)
 ```
@@ -416,13 +439,13 @@ larger disjoint systems.
 ## Running specific backends
 
 Benchmarks can force a particular simulator by selecting a QuASAr backend
-directly.  Invoke :func:`benchmarks.runner.BenchmarkRunner.run_quasar_multiple`
+directly.  Invoke :func:`benchmarks.bench_utils.runner.BenchmarkRunner.run_quasar_multiple`
 and pass the desired :class:`quasar.cost.Backend` value (for example,
 ``Backend.STATEVECTOR`` or ``Backend.TABLEAU``).  Set ``quick=True`` to bypass
 planning and execute immediately on the chosen backend:
 
 ```python
-from benchmarks.runner import BenchmarkRunner
+from benchmarks.bench_utils.runner import BenchmarkRunner
 from quasar import SimulationEngine
 from quasar.cost import Backend
 

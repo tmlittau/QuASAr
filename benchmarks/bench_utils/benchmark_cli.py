@@ -10,13 +10,24 @@ from pathlib import Path
 from typing import Iterable, List, Callable
 
 # Allow importing the project modules when executed as a script.
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+current_file = Path(__file__).resolve()
+benchmarks_root = current_file.parents[1]
+project_root = current_file.parents[2]
+if str(benchmarks_root) not in sys.path:
+    sys.path.append(str(benchmarks_root))
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
 
-from runner import BenchmarkRunner
+try:  # allow both package and script execution
+    from .runner import BenchmarkRunner
+    from . import circuits as circuit_lib  # type: ignore[no-redef]
+    from .circuits import is_clifford  # type: ignore[no-redef]
+except ImportError:  # pragma: no cover - script execution fallback
+    from bench_utils.runner import BenchmarkRunner  # type: ignore[no-redef]
+    from bench_utils import circuits as circuit_lib  # type: ignore[no-redef]
+    from bench_utils.circuits import is_clifford  # type: ignore[no-redef]
 from quasar import SimulationEngine
 from quasar.cost import Backend
-import circuits as circuit_lib
-from circuits import is_clifford
 
 if __package__ in {None, ""}:  # pragma: no cover - script execution
     from progress import ProgressReporter  # type: ignore[no-redef]

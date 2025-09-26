@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "benchmarks"))
-from run_benchmarks import summarise_partitioning  # type: ignore
+from run_benchmark import summarise_partitioning  # type: ignore
 
 
 def test_summarise_partitioning_merges_metadata() -> None:
