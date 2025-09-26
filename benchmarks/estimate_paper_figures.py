@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -44,6 +45,7 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
     )
     from quasar.cost import Backend, Cost, CostEstimator  # type: ignore[no-redef]
     from progress import ProgressReporter  # type: ignore[no-redef]
+    from threading_utils import resolve_worker_count  # type: ignore[no-redef]
 else:  # pragma: no cover - package import path
     from . import paper_figures
     from quasar.analyzer import CircuitAnalyzer
@@ -54,6 +56,7 @@ else:  # pragma: no cover - package import path
     )
     from quasar.cost import Backend, Cost, CostEstimator
     from .progress import ProgressReporter
+    from .threading_utils import resolve_worker_count
 
 
 OPS_PER_SECOND_DEFAULT = 1_000_000_000.0
@@ -153,6 +156,8 @@ def _estimate_forced(
     specs: Iterable[paper_figures.CircuitSpec],
     backends: Sequence[Backend],
     estimator: CostEstimator,
+    *,
+    max_workers: int | None = None,
 ) -> list[EstimateRecord]:
     """Return cost estimates for the forced backend runs."""
 
@@ -165,8 +170,9 @@ def _estimate_forced(
         else None
     )
 
-    records: list[EstimateRecord] = []
-    for spec in spec_list:
+    def _estimate_spec(spec: paper_figures.CircuitSpec) -> tuple[list[EstimateRecord], list[str]]:
+        records: list[EstimateRecord] = []
+        messages: list[str] = []
         for n in spec.qubits:
             circuit = paper_figures._build_circuit(
                 spec, n, use_classical_simplification=False
@@ -190,17 +196,53 @@ def _estimate_forced(
                         note=note,
                     )
                 )
-                if progress:
-                    progress.advance(f"{spec.name}@{n} {backend.name.lower()}")
+                messages.append(f"{spec.name}@{n} {backend.name.lower()}")
+        return records, messages
 
-    if progress:
-        progress.close()
+    worker_count = resolve_worker_count(max_workers, len(spec_list))
+    ordered: dict[int, list[EstimateRecord]] = {}
+
+    try:
+        if worker_count <= 1:
+            for index, spec in enumerate(spec_list):
+                spec_records, messages = _estimate_spec(spec)
+                ordered[index] = spec_records
+                if progress:
+                    for message in messages:
+                        progress.advance(message)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(_estimate_spec, spec): index
+                    for index, spec in enumerate(spec_list)
+                }
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        spec_records, messages = future.result()
+                    except Exception:
+                        if progress:
+                            progress.close()
+                        raise
+                    ordered[index] = spec_records
+                    if progress:
+                        for message in messages:
+                            progress.advance(message)
+    finally:
+        if progress:
+            progress.close()
+
+    records: list[EstimateRecord] = []
+    for index in range(len(spec_list)):
+        records.extend(ordered.get(index, []))
     return records
 
 
 def _estimate_auto(
     specs: Iterable[paper_figures.CircuitSpec],
     estimator: CostEstimator,
+    *,
+    max_workers: int | None = None,
 ) -> list[EstimateRecord]:
     """Return heuristic cost estimates for automatic scheduling runs."""
 
@@ -210,8 +252,9 @@ def _estimate_auto(
         ProgressReporter(total_steps, prefix="Auto estimates") if total_steps else None
     )
 
-    records: list[EstimateRecord] = []
-    for spec in spec_list:
+    def _estimate_spec(spec: paper_figures.CircuitSpec) -> tuple[list[EstimateRecord], list[str]]:
+        records: list[EstimateRecord] = []
+        messages: list[str] = []
         for n in spec.qubits:
             circuit = paper_figures._build_circuit(
                 spec, n, use_classical_simplification=True
@@ -234,27 +277,146 @@ def _estimate_auto(
                         note="no compatible backend available",
                     )
                 )
-                continue
-            backend, cost = min(supported, key=lambda item: item[1].time)
-            note = "single-backend approximation"
-            records.append(
-                EstimateRecord(
-                    circuit=spec.name,
-                    qubits=n,
-                    mode="auto",
-                    backend=backend.name.lower(),
-                    supported=True,
-                    cost=cost,
-                    note=note,
+            else:
+                backend, cost = min(supported, key=lambda item: item[1].time)
+                records.append(
+                    EstimateRecord(
+                        circuit=spec.name,
+                        qubits=n,
+                        mode="auto",
+                        backend=backend.name.lower(),
+                        supported=True,
+                        cost=cost,
+                        note="single-backend approximation",
+                    )
                 )
-            )
-            if progress:
-                progress.advance(f"{spec.name}@{n}")
+            messages.append(f"{spec.name}@{n}")
+        return records, messages
 
-    if progress:
-        progress.close()
+    worker_count = resolve_worker_count(max_workers, len(spec_list))
+    ordered: dict[int, list[EstimateRecord]] = {}
+
+    try:
+        if worker_count <= 1:
+            for index, spec in enumerate(spec_list):
+                spec_records, messages = _estimate_spec(spec)
+                ordered[index] = spec_records
+                if progress:
+                    for message in messages:
+                        progress.advance(message)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(_estimate_spec, spec): index
+                    for index, spec in enumerate(spec_list)
+                }
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        spec_records, messages = future.result()
+                    except Exception:
+                        if progress:
+                            progress.close()
+                        raise
+                    ordered[index] = spec_records
+                    if progress:
+                        for message in messages:
+                            progress.advance(message)
+    finally:
+        if progress:
+            progress.close()
+
+    records: list[EstimateRecord] = []
+    for index in range(len(spec_list)):
+        records.extend(ordered.get(index, []))
     return records
+(
+    specs: Iterable[paper_figures.CircuitSpec],
+    estimator: CostEstimator,
+    *,
+    max_workers: int | None = None,
+) -> list[EstimateRecord]:
+    """Return heuristic cost estimates for automatic scheduling runs."""
 
+    spec_list = list(specs)
+    total_steps = sum(len(spec.qubits) for spec in spec_list)
+    progress = (
+        ProgressReporter(total_steps, prefix="Auto estimates") if total_steps else None
+    )
+
+    def _estimate_spec(spec: paper_figures.CircuitSpec) -> tuple[list[EstimateRecord], list[str]]:
+        records: list[EstimateRecord] = []
+        messages: list[str] = []
+        for n in spec.qubits:
+            circuit = paper_figures._build_circuit(
+                spec, n, use_classical_simplification=True
+            )
+            analyzer = CircuitAnalyzer(circuit, estimator=estimator)
+            resources = analyzer.resource_estimates()
+            supported: list[tuple[Backend, Cost]] = []
+            for backend, cost in resources.items():
+                if paper_figures._supports_backend(circuit, backend):
+                    supported.append((backend, cost))
+            if not supported:
+                records.append(
+                    EstimateRecord(
+                        circuit=spec.name,
+                        qubits=n,
+                        mode="auto",
+                        backend="n/a",
+                        supported=False,
+                        cost=None,
+                        note="no compatible backend available",
+                    )
+                )
+            else:
+                backend, cost = min(supported, key=lambda item: item[1].time)
+                records.append(
+                    EstimateRecord(
+                        circuit=spec.name,
+                        qubits=n,
+                        mode="auto",
+                        backend=backend.name.lower(),
+                        supported=True,
+                        cost=cost,
+                        note="single-backend approximation",
+                    )
+                )
+            messages.append(f"{spec.name}@{n}")
+        return records, messages
+
+    worker_count = resolve_worker_count(max_workers, len(spec_list))
+    records: list[EstimateRecord] = []
+
+    try:
+        if worker_count <= 1:
+            for spec in spec_list:
+                spec_records, messages = _estimate_spec(spec)
+                records.extend(spec_records)
+                if progress:
+                    for message in messages:
+                        progress.advance(message)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(_estimate_spec, spec): spec for spec in spec_list
+                }
+                for future in as_completed(futures):
+                    try:
+                        spec_records, messages = future.result()
+                    except Exception:
+                        if progress:
+                            progress.close()
+                        raise
+                    records.extend(spec_records)
+                    if progress:
+                        for message in messages:
+                            progress.advance(message)
+    finally:
+        if progress:
+            progress.close()
+
+    return records
 
 def _print_records(
     title: str,
@@ -321,6 +483,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional path to store the raw estimate data as JSON.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of worker threads for estimate generation (default: auto).",
+    )
     return parser.parse_args(argv)
 
 
@@ -330,8 +498,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise SystemExit("--repetitions must be at least 1")
 
     estimator = _load_estimator(args.calibration)
-    forced = _estimate_forced(paper_figures.CIRCUITS, paper_figures.BACKENDS, estimator)
-    auto = _estimate_auto(paper_figures.CIRCUITS, estimator)
+    forced = _estimate_forced(
+        paper_figures.CIRCUITS,
+        paper_figures.BACKENDS,
+        estimator,
+        max_workers=args.workers,
+    )
+    auto = _estimate_auto(
+        paper_figures.CIRCUITS,
+        estimator,
+        max_workers=args.workers,
+    )
 
     ops_per_second = args.ops_per_second if args.ops_per_second > 0 else None
     if ops_per_second is None:

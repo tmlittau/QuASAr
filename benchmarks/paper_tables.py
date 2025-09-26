@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
@@ -28,9 +29,11 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(REPO_ROOT))
     from plot_utils import backend_labels, compute_baseline_best  # type: ignore[no-redef]
     from progress import ProgressReporter  # type: ignore[no-redef]
+    from threading_utils import resolve_worker_count  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
     from .plot_utils import backend_labels, compute_baseline_best
     from .progress import ProgressReporter
+    from .threading_utils import resolve_worker_count
 
 from quasar.cost import Backend
 
@@ -644,6 +647,7 @@ def generate_tables(
     results_dir: Path | None = None,
     output_dir: Path | None = None,
     tables: Iterable[str] | None = None,
+    max_workers: int | None = None,
 ) -> dict[str, Path]:
     """Generate LaTeX tables and return their file paths."""
 
@@ -659,47 +663,82 @@ def generate_tables(
         missing = sorted(selected.difference({spec.name for spec in target_specs}))
         if missing:
             LOGGER.warning("Unknown table(s) requested: %s", ", ".join(missing))
-    written: dict[str, Path] = {}
-    progress = (
-        ProgressReporter(len(target_specs), prefix="Table generation")
-        if target_specs
-        else None
-    )
-    for spec in target_specs:
-        status = spec.name
-        try:
-            table = spec.builder(base_results)
-        except FileNotFoundError as exc:
-            LOGGER.warning("Skipping %s: %s", spec.name, exc)
-            if progress:
-                progress.advance(f"{status} missing")
-            continue
-        except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.error("Failed to build table %s: %s", spec.name, exc)
-            if progress:
-                progress.advance(f"{status} error")
-            continue
-        if table.empty:
-            LOGGER.warning("Skipping %s: no rows to tabulate", spec.name)
-            if progress:
-                progress.advance(f"{status} empty")
-            continue
-        latex_path = base_output / f"{spec.name}.tex"
-        latex = _dataframe_to_latex(
-            table,
-            caption=spec.caption,
-            label=spec.label,
-            column_format=spec.column_format,
-        )
-        latex_path.write_text(latex, encoding="utf-8")
-        _log_written(latex_path)
-        written[spec.name] = latex_path
-        if progress:
-            progress.advance(status)
-    if progress:
-        progress.close()
-    return written
+    if not target_specs:
+        return {}
 
+    progress = ProgressReporter(len(target_specs), prefix="Table generation")
+    written: dict[str, Path] = {}
+
+    worker_count = resolve_worker_count(max_workers, len(target_specs))
+    LOGGER.info("Using %d worker thread(s) for table generation", worker_count)
+
+    try:
+        if worker_count <= 1:
+            for spec in target_specs:
+                status = spec.name
+                try:
+                    table = spec.builder(base_results)
+                except FileNotFoundError as exc:
+                    LOGGER.warning("Skipping %s: %s", spec.name, exc)
+                    progress.advance(f"{status} missing")
+                    continue
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.error("Failed to build table %s: %s", spec.name, exc)
+                    progress.advance(f"{status} error")
+                    continue
+                if table.empty:
+                    LOGGER.warning("Skipping %s: no rows to tabulate", spec.name)
+                    progress.advance(f"{status} empty")
+                    continue
+                latex_path = base_output / f"{spec.name}.tex"
+                latex = _dataframe_to_latex(
+                    table,
+                    caption=spec.caption,
+                    label=spec.label,
+                    column_format=spec.column_format,
+                )
+                latex_path.write_text(latex, encoding="utf-8")
+                _log_written(latex_path)
+                written[spec.name] = latex_path
+                progress.advance(status)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(spec.builder, base_results): spec
+                    for spec in target_specs
+                }
+                for future in as_completed(futures):
+                    spec = futures[future]
+                    status = spec.name
+                    try:
+                        table = future.result()
+                    except FileNotFoundError as exc:
+                        LOGGER.warning("Skipping %s: %s", spec.name, exc)
+                        progress.advance(f"{status} missing")
+                        continue
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.error("Failed to build table %s: %s", spec.name, exc)
+                        progress.advance(f"{status} error")
+                        continue
+                    if table.empty:
+                        LOGGER.warning("Skipping %s: no rows to tabulate", spec.name)
+                        progress.advance(f"{status} empty")
+                        continue
+                    latex_path = base_output / f"{spec.name}.tex"
+                    latex = _dataframe_to_latex(
+                        table,
+                        caption=spec.caption,
+                        label=spec.label,
+                        column_format=spec.column_format,
+                    )
+                    latex_path.write_text(latex, encoding="utf-8")
+                    _log_written(latex_path)
+                    written[spec.name] = latex_path
+                    progress.advance(status)
+    finally:
+        progress.close()
+
+    return written
 
 def _parse_tables(values: Sequence[str] | None) -> list[str] | None:
     if not values:
@@ -743,6 +782,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             "and may be provided multiple times."
         ),
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of worker threads for table generation (default: auto).",
+    )
     args = parser.parse_args(argv)
 
     _configure_logging(args.verbose)
@@ -751,6 +796,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         results_dir=args.results_dir,
         output_dir=args.output_dir,
         tables=_parse_tables(args.tables),
+        max_workers=args.workers,
     )
 
 

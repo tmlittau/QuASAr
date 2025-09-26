@@ -29,6 +29,9 @@ python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:12:2 --repetitions 
 - `--qubits` specifies a `start:end[:step]` range.
 - `--repetitions` repeats each configuration to compute a mean and variance.
 - `--output` is the base path for the generated `.json` and `.csv` files.
+- `--workers` bounds the number of worker threads used to benchmark qubit
+  widths and scenarios in parallel.  When omitted the script auto-detects a
+  suitable level of concurrency based on the available CPU cores.
 - Circuit families composed solely of Clifford gates (`H`, `S`, `CX`, `CZ`, etc.)
   are skipped to avoid benchmarking workloads that are trivial for stabiliser
   simulators.
@@ -108,12 +111,16 @@ python benchmarks/showcase_benchmarks.py --repetitions 3 --run-timeout 900
 Use `--circuits` to select a subset of workloads, `--qubits` to override the
 default width selections (e.g. `--qubits clustered_ghz_random=40:60:10`) and
 `--reuse-existing` to skip rerunning configurations with cached results.
+Pass `--workers <n>` to control how many threads execute circuit widths in
+parallel; omit the flag to let the runner auto-detect a sensible default.
 
 ### Reproducing paper figures
 
 Execute the commands below in order to rebuild every artefact used by
 [`paper_figures.py`](paper_figures.py). Check that each step produces the
 described files before moving to the next command.
+The `--workers` flag mirrors the benchmark runner and enables threaded circuit
+execution for the forced/automatic comparisons.
 
 1. **Partitioning sweeps** – regenerate the benchmark tables that back the
    mainline runtime and memory figures:

@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
@@ -60,9 +61,11 @@ from quasar.cost import Backend
 try:  # shared utilities for both package and script execution
     from .progress import ProgressReporter
     from .ssd_metrics import partition_metrics_from_result
+    from .threading_utils import resolve_worker_count, thread_engine
 except ImportError:  # pragma: no cover - fallback when executed as a script
     from progress import ProgressReporter  # type: ignore
     from ssd_metrics import partition_metrics_from_result  # type: ignore
+    from threading_utils import resolve_worker_count, thread_engine  # type: ignore
 
 
 LOGGER = logging.getLogger(__name__)
@@ -262,6 +265,158 @@ def _build_circuit(
     return circuit
 
 
+def _run_backend_suite_for_width(
+    engine: SimulationEngine,
+    spec: ShowcaseCircuit,
+    width: int,
+    *,
+    repetitions: int,
+    run_timeout: float | None,
+    memory_bytes: int | None,
+    classical_simplification: bool,
+) -> tuple[list[dict[str, object]], list[str]]:
+    records: list[dict[str, object]] = []
+    messages: list[str] = []
+
+    LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
+
+    for backend in BASELINE_BACKENDS:
+        circuit = _build_circuit(
+            spec, width, classical_simplification=classical_simplification
+        )
+        runner = BenchmarkRunner()
+        LOGGER.debug(
+            "Running baseline backend %s for %s qubits=%s",
+            backend.name,
+            spec.name,
+            width,
+        )
+        status_msg = f"{backend.name}@{width}"
+        try:
+            rec = runner.run_quasar_multiple(
+                circuit,
+                engine,
+                backend=backend,
+                repetitions=repetitions,
+                quick=False,
+                memory_bytes=memory_bytes,
+                run_timeout=run_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - backend implementation detail
+            LOGGER.warning(
+                "Backend %s failed for %s qubits=%s: %s",
+                backend.name,
+                spec.name,
+                width,
+                exc,
+            )
+            records.append(
+                {
+                    "circuit": spec.name,
+                    "qubits": width,
+                    "framework": backend.name,
+                    "backend": backend.name,
+                    "mode": "forced",
+                    "unsupported": True,
+                    "failed": True,
+                    "error": str(exc),
+                    "repetitions": 0,
+                }
+            )
+            messages.append(f"{status_msg} failed: {exc}")
+            continue
+
+        rec = dict(rec)
+        result = rec.pop("result", None)
+        rec.update(partition_metrics_from_result(result))
+        rec.update(
+            {
+                "circuit": spec.name,
+                "qubits": width,
+                "framework": backend.name,
+                "backend": backend.name,
+                "mode": "forced",
+            }
+        )
+        records.append(rec)
+        messages.append(status_msg)
+
+    circuit = _build_circuit(
+        spec, width, classical_simplification=classical_simplification
+    )
+    runner = BenchmarkRunner()
+    LOGGER.debug("Running QuASAr for %s qubits=%s", spec.name, width)
+    quasar_status = f"quasar@{width}"
+    try:
+        rec = runner.run_quasar_multiple(
+            circuit,
+            engine,
+            repetitions=repetitions,
+            quick=False,
+            memory_bytes=memory_bytes,
+            run_timeout=run_timeout,
+        )
+    except Exception as exc:  # pragma: no cover - scheduler limitations
+        LOGGER.warning(
+            "QuASAr failed for %s qubits=%s: %s", spec.name, width, exc
+        )
+        records.append(
+            {
+                "circuit": spec.name,
+                "qubits": width,
+                "framework": "quasar",
+                "backend": None,
+                "mode": "auto",
+                "unsupported": True,
+                "failed": True,
+                "error": str(exc),
+                "repetitions": 0,
+            }
+        )
+        messages.append(f"{quasar_status} failed: {exc}")
+    else:
+        rec = dict(rec)
+        result = rec.pop("result", None)
+        rec.update(partition_metrics_from_result(result))
+        backend_choice = rec.get("backend")
+        if isinstance(backend_choice, Backend):
+            rec["backend"] = backend_choice.name
+        rec.update(
+            {
+                "circuit": spec.name,
+                "qubits": width,
+                "framework": "quasar",
+                "mode": "auto",
+            }
+        )
+        records.append(rec)
+        messages.append(quasar_status)
+
+    LOGGER.info("Completed benchmarks for %s qubits=%s", spec.name, width)
+    return records, messages
+
+
+def _run_backend_suite_for_width_worker(
+    spec: ShowcaseCircuit,
+    width: int,
+    *,
+    repetitions: int,
+    run_timeout: float | None,
+    memory_bytes: int | None,
+    classical_simplification: bool,
+) -> tuple[list[dict[str, object]], list[str]]:
+    engine = thread_engine()
+    return _run_backend_suite_for_width(
+        engine,
+        spec,
+        width,
+        repetitions=repetitions,
+        run_timeout=run_timeout,
+        memory_bytes=memory_bytes,
+        classical_simplification=classical_simplification,
+    )
+
+
 def _run_backend_suite(
     spec: ShowcaseCircuit,
     widths: Iterable[int],
@@ -270,11 +425,9 @@ def _run_backend_suite(
     run_timeout: float | None,
     memory_bytes: int | None,
     classical_simplification: bool,
+    max_workers: int | None = None,
 ) -> pd.DataFrame:
     """Execute the benchmark for ``spec`` across the provided widths."""
-
-    engine = SimulationEngine()
-    records: list[dict[str, object]] = []
 
     width_list = list(widths)
     if not width_list:
@@ -283,125 +436,59 @@ def _run_backend_suite(
     total_steps = len(width_list) * (len(BASELINE_BACKENDS) + 1)
     progress = ProgressReporter(total_steps, prefix=f"{spec.name} benchmark")
 
-    for width in width_list:
-        LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
+    worker_count = resolve_worker_count(max_workers, len(width_list))
+    LOGGER.info("Using %d worker thread(s) for showcase circuit %s", worker_count, spec.name)
 
-        for backend in BASELINE_BACKENDS:
-            circuit = _build_circuit(
-                spec, width, classical_simplification=classical_simplification
-            )
-            runner = BenchmarkRunner()
-            LOGGER.debug(
-                "Running baseline backend %s for %s qubits=%s",
-                backend.name,
-                spec.name,
-                width,
-            )
-            status_msg = f"{backend.name}@{width}"
-            try:
-                rec = runner.run_quasar_multiple(
-                    circuit,
+    ordered: dict[int, list[dict[str, object]]] = {}
+
+    try:
+        if worker_count <= 1:
+            engine = SimulationEngine()
+            for index, width in enumerate(width_list):
+                recs, messages = _run_backend_suite_for_width(
                     engine,
-                    backend=backend,
-                    repetitions=repetitions,
-                    quick=False,
-                    memory_bytes=memory_bytes,
-                    run_timeout=run_timeout,
-                )
-            except Exception as exc:  # pragma: no cover - backend implementation detail
-                LOGGER.warning(
-                    "Backend %s failed for %s qubits=%s: %s",
-                    backend.name,
-                    spec.name,
+                    spec,
                     width,
-                    exc,
+                    repetitions=repetitions,
+                    run_timeout=run_timeout,
+                    memory_bytes=memory_bytes,
+                    classical_simplification=classical_simplification,
                 )
-                records.append(
-                    {
-                        "circuit": spec.name,
-                        "qubits": width,
-                        "framework": backend.name,
-                        "backend": backend.name,
-                        "mode": "forced",
-                        "unsupported": True,
-                        "failed": True,
-                        "error": str(exc),
-                        "repetitions": 0,
-                    }
-                )
-            else:
-                rec = dict(rec)
-                result = rec.pop("result", None)
-                rec.update(partition_metrics_from_result(result))
-                rec.update(
-                    {
-                        "circuit": spec.name,
-                        "qubits": width,
-                        "framework": backend.name,
-                        "backend": backend.name,
-                        "mode": "forced",
-                    }
-                )
-                records.append(rec)
-            finally:
-                progress.advance(status_msg)
-
-        circuit = _build_circuit(
-            spec, width, classical_simplification=classical_simplification
-        )
-        runner = BenchmarkRunner()
-        LOGGER.debug("Running QuASAr for %s qubits=%s", spec.name, width)
-        quasar_status = f"quasar@{width}"
-        try:
-            rec = runner.run_quasar_multiple(
-                circuit,
-                engine,
-                repetitions=repetitions,
-                quick=False,
-                memory_bytes=memory_bytes,
-                run_timeout=run_timeout,
-            )
-        except Exception as exc:  # pragma: no cover - scheduler limitations
-            LOGGER.warning(
-                "QuASAr failed for %s qubits=%s: %s", spec.name, width, exc
-            )
-            records.append(
-                {
-                    "circuit": spec.name,
-                    "qubits": width,
-                    "framework": "quasar",
-                    "backend": None,
-                    "mode": "auto",
-                    "unsupported": True,
-                    "failed": True,
-                    "error": str(exc),
-                    "repetitions": 0,
-                }
-            )
+                ordered[index] = recs
+                for message in messages:
+                    progress.advance(message)
         else:
-            rec = dict(rec)
-            result = rec.pop("result", None)
-            rec.update(partition_metrics_from_result(result))
-            backend_choice = rec.get("backend")
-            if isinstance(backend_choice, Backend):
-                rec["backend"] = backend_choice.name
-            rec.update(
-                {
-                    "circuit": spec.name,
-                    "qubits": width,
-                    "framework": "quasar",
-                    "mode": "auto",
-                }
-            )
-            records.append(rec)
-        finally:
-            progress.advance(quasar_status)
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures: dict[object, int] = {}
+                for index, width in enumerate(width_list):
+                    future = executor.submit(
+                        _run_backend_suite_for_width_worker,
+                        spec,
+                        width,
+                        repetitions=repetitions,
+                        run_timeout=run_timeout,
+                        memory_bytes=memory_bytes,
+                        classical_simplification=classical_simplification,
+                    )
+                    futures[future] = index
 
-        LOGGER.info("Completed benchmarks for %s qubits=%s", spec.name, width)
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        recs, messages = future.result()
+                    except Exception:
+                        progress.close()
+                        raise
+                    ordered[index] = recs
+                    for message in messages:
+                        progress.advance(message)
+    finally:
+        progress.close()
 
-    progress.close()
+    records: list[dict[str, object]] = []
+    for index in range(len(width_list)):
+        records.extend(ordered.get(index, []))
     return pd.DataFrame(records)
-
 
 def _write_markdown(df: pd.DataFrame, path: Path) -> None:
     try:
@@ -492,6 +579,7 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
                 run_timeout=run_timeout,
                 memory_bytes=memory_bytes,
                 classical_simplification=classical_simplification,
+                max_workers=args.workers,
             )
             raw_df.to_csv(raw_path, index=False)
             metadata = {
@@ -620,6 +708,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--reuse-existing",
         action="store_true",
         help="Reuse existing CSV outputs instead of rerunning benchmarks.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of worker threads for circuit execution (default: auto).",
     )
     parser.add_argument(
         "-v",
