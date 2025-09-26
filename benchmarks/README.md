@@ -46,6 +46,12 @@ flags include:
   simplification for all generated circuits.
 * ``--estimate`` – generate theoretical estimates after the showcase run.
 
+Legacy automation (including the CI smoke test) previously targeted circuit
+families such as ``ghz`` or ``w_state``.  The smoke-test wrapper now maps those
+names to the closest showcase circuits so that existing pipelines keep
+functioning while the main CLI only advertises the curated showcase set.  Use
+``--list-circuits`` to discover the canonical identifiers.
+
 When no circuits or groups are specified the full suite is executed.  Reuse the
 ``--reuse-existing`` flag to skip recomputation if the CSV files already exist.
 

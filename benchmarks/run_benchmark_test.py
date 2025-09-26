@@ -14,6 +14,7 @@ try:  # package execution
         generate_theoretical_estimates,
         run_showcase_suite,
     )
+    from .bench_utils import showcase_benchmarks
     from .bench_utils.benchmark_cli import parse_qubit_range
 except ImportError:  # pragma: no cover - script execution fallback
     from run_benchmark import (  # type: ignore
@@ -21,12 +22,39 @@ except ImportError:  # pragma: no cover - script execution fallback
         generate_theoretical_estimates,
         run_showcase_suite,
     )
+    from bench_utils import showcase_benchmarks  # type: ignore
     from bench_utils.benchmark_cli import parse_qubit_range  # type: ignore
 
 
 DEFAULT_OUTPUT = Path("benchmarks/results/smoke_test")
 DEFAULT_CIRCUIT = "classical_controlled"
 DEFAULT_WIDTHS = (2,)
+
+
+# Legacy CI pipelines invoked the original smoke test with circuit families such
+# as ``ghz`` or ``w_state`` that are no longer part of the showcase suite.  Map
+# those names to their closest showcase counterparts so that the lightweight
+# regression check keeps running without requiring changes to the pipeline
+# configuration.
+LEGACY_CIRCUIT_ALIASES: dict[str, str] = {
+    "ghz": "clustered_ghz_random",
+    "grover": "dynamic_classical_control",
+    "qft": "clustered_ghz_qft",
+    "w_state": "clustered_w_random",
+}
+
+
+def _resolve_circuit_name(name: str) -> str:
+    """Return a showcase circuit name, applying legacy aliases when needed."""
+
+    normalised = name.strip().lower()
+    canonical = LEGACY_CIRCUIT_ALIASES.get(normalised, normalised)
+    if canonical not in showcase_benchmarks.SHOWCASE_CIRCUITS:
+        available = ", ".join(sorted(showcase_benchmarks.SHOWCASE_CIRCUITS))
+        raise ValueError(
+            f"unknown showcase circuit '{name}'. Available circuits: {available}"
+        )
+    return canonical
 
 
 def run_smoke_test(
@@ -42,8 +70,9 @@ def run_smoke_test(
 ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Execute a minimal showcase benchmark and optionally estimate resources."""
 
+    showcase_circuit = _resolve_circuit_name(circuit)
     df = run_showcase_suite(
-        circuit,
+        showcase_circuit,
         widths,
         repetitions=repetitions,
         run_timeout=run_timeout,
