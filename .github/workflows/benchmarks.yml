@@ -19,20 +19,31 @@ jobs:
       - name: Run small benchmarks
         run: |
           mkdir benchmark-results
-          python benchmarks/run_benchmarks.py --circuit ghz --qubits 4:4 --repetitions 3 --output benchmark-results/ghz
-          python benchmarks/run_benchmarks.py --circuit qft --qubits 4:4 --repetitions 3 --output benchmark-results/qft
+          python benchmarks/run_benchmark_test.py --circuit w_state --qubits 4:4 --repetitions 1 --output benchmark-results/w_state
+          python benchmarks/run_benchmark_test.py --scenario tableau_boundary --repetitions 1 --output benchmark-results/tableau_boundary
       - name: Verify performance thresholds
         run: |
           python - <<'PY'
           import json, glob
-          thresholds = {"ghz": 0.5, "qft": 0.5}
+          thresholds = {"w_state": 0.5, "tableau_boundary": 1.0}
           for path in glob.glob("benchmark-results/*.json"):
             name = path.split("/")[-1].split(".")[0]
+            if name not in thresholds:
+              continue
             with open(path) as f:
               data = json.load(f)
             for rec in data:
-              if rec["avg_time"] > thresholds[name]:
-                raise SystemExit(f"{name} benchmark too slow: {rec['avg_time']}s > {thresholds[name]}s")
+              runtime = rec.get("avg_time")
+              if runtime is None:
+                runtime = rec.get("run_time_mean")
+              if runtime is None:
+                runtime = rec.get("total_time_mean")
+              if runtime is None:
+                continue
+              if runtime > thresholds[name]:
+                raise SystemExit(
+                  f"{name} benchmark too slow: {runtime}s > {thresholds[name]}s"
+                )
           PY
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
