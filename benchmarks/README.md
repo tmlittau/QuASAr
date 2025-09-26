@@ -114,6 +114,39 @@ default width selections (e.g. `--qubits clustered_ghz_random=40:60:10`) and
 Pass `--workers <n>` to control how many threads execute circuit widths in
 parallel; omit the flag to let the runner auto-detect a sensible default.
 
+### Theoretical cost estimates
+
+When empirical benchmarking is too time-consuming you can approximate the
+runtime and memory requirements of the paper circuits via
+[`estimate_theoretical_requirements.py`](estimate_theoretical_requirements.py).
+The helper relies purely on QuASAr's static cost model and therefore finishes
+within seconds even for large workloads:
+
+```bash
+python benchmarks/estimate_theoretical_requirements.py --workers 8
+```
+
+The script produces two CSV tables under `benchmarks/results/` and companion
+bar charts in `benchmarks/figures/` contrasting QuASAr with the best single
+backend.  Use `--ops-per-second` to supply a custom throughput for converting
+cost-model operations into wall-clock seconds and `--calibration` to point at a
+specific coefficient file.
+
+#### Benchmark hardware and throughput reference
+
+All empirical experiments and theoretical projections referenced in this
+directory were produced on a workstation equipped with:
+
+- **CPU:** Intel i9-13900K
+- **GPU:** NVIDIA RTX 4090
+- **Memory:** 64 GB RAM
+
+The theoretical estimator uses a default throughput of `1e9` primitive
+operations per second when converting cost-model operation counts into
+wall-clock time.  This constant mirrors the sustained performance observed for
+QuASAr's GPU-accelerated simulator on the workstation above; pass a different
+value via `--ops-per-second` to reflect other hardware profiles.
+
 ### Reproducing paper figures
 
 Execute the commands below in order to rebuild every artefact used by
