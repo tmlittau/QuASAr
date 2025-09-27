@@ -16,6 +16,7 @@ try:  # package execution
     )
     from .bench_utils import showcase_benchmarks
     from .bench_utils.benchmark_cli import parse_qubit_range
+    from .bench_utils.database import open_database
 except ImportError:  # pragma: no cover - script execution fallback
     from run_benchmark import (  # type: ignore
         _configure_logging,
@@ -24,6 +25,7 @@ except ImportError:  # pragma: no cover - script execution fallback
     )
     from bench_utils import showcase_benchmarks  # type: ignore
     from bench_utils.benchmark_cli import parse_qubit_range  # type: ignore
+    from bench_utils.database import open_database  # type: ignore
 
 
 DEFAULT_OUTPUT = Path("benchmarks/results/smoke_test")
@@ -71,27 +73,27 @@ def run_smoke_test(
     """Execute a minimal showcase benchmark and optionally estimate resources."""
 
     showcase_circuit = _resolve_circuit_name(circuit)
-    df = run_showcase_suite(
-        showcase_circuit,
-        widths,
-        repetitions=repetitions,
-        run_timeout=run_timeout,
-        classical_simplification=enable_classical_simplification,
-        workers=workers,
-        include_baselines=False,
-        quick=True,
-    )
-
     base = output.with_suffix("")
-    base.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(base.with_suffix(".csv"), index=False)
-    df.to_json(base.with_suffix(".json"), orient="records", indent=2)
+    database_path = base.with_suffix(".sqlite")
 
-    summary: pd.DataFrame | None = None
-    if estimate:
-        detail, summary, _ = generate_theoretical_estimates(workers=workers)
-        detail.to_csv(base.with_name(base.name + "_estimate_detail.csv"), index=False)
-        summary.to_csv(base.with_name(base.name + "_estimate_summary.csv"), index=False)
+    with open_database(database_path) as database:
+        df = run_showcase_suite(
+            showcase_circuit,
+            widths,
+            repetitions=repetitions,
+            run_timeout=run_timeout,
+            classical_simplification=enable_classical_simplification,
+            workers=workers,
+            include_baselines=False,
+            quick=True,
+            database=database,
+        )
+
+        summary: pd.DataFrame | None = None
+        if estimate:
+            detail, summary, _ = generate_theoretical_estimates(
+                workers=workers, database=database
+            )
     return df, summary
 
 

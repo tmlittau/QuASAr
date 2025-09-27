@@ -60,6 +60,7 @@ try:  # package execution
         report_totals,
         write_tables,
     )
+    from .bench_utils.database import BenchmarkDatabase, BenchmarkRun, open_database
 except ImportError:  # pragma: no cover - script execution fallback
     from bench_utils import paper_figures  # type: ignore
     from bench_utils import showcase_benchmarks  # type: ignore
@@ -82,6 +83,11 @@ except ImportError:  # pragma: no cover - script execution fallback
         plot_runtime_speedups,
         report_totals,
         write_tables,
+    )
+    from bench_utils.database import (  # type: ignore
+        BenchmarkDatabase,
+        BenchmarkRun,
+        open_database,
     )
 
 
@@ -136,6 +142,9 @@ def run_showcase_suite(
     include_baselines: bool = True,
     baseline_backends: Iterable[Backend] | None = None,
     quick: bool = False,
+    database: BenchmarkDatabase | None = None,
+    run: BenchmarkRun | None = None,
+    database_path: Path | None = None,
 ) -> pd.DataFrame:
     """Execute a subset of the showcase suite programmatically.
 
@@ -153,18 +162,28 @@ def run_showcase_suite(
     timeout = run_timeout
     if timeout is None:
         timeout = RUN_TIMEOUT_DEFAULT_SECONDS
-    return showcase_benchmarks._run_backend_suite(  # type: ignore[attr-defined]
-        spec,
-        widths,
-        repetitions=repetitions,
-        run_timeout=None if timeout <= 0 else timeout,
-        memory_bytes=memory_bytes,
-        classical_simplification=classical_simplification,
-        max_workers=workers,
-        include_baselines=include_baselines,
-        baseline_backends=baseline_backends,
-        quasar_quick=quick,
-    )
+    managed_db: BenchmarkDatabase | None = None
+    if database is None and database_path is not None:
+        managed_db = BenchmarkDatabase(database_path)
+        database = managed_db
+    try:
+        return showcase_benchmarks._run_backend_suite(  # type: ignore[attr-defined]
+            spec,
+            widths,
+            repetitions=repetitions,
+            run_timeout=None if timeout <= 0 else timeout,
+            memory_bytes=memory_bytes,
+            classical_simplification=classical_simplification,
+            max_workers=workers,
+            include_baselines=include_baselines,
+            baseline_backends=baseline_backends,
+            quasar_quick=quick,
+            database=database,
+            run=run,
+        )
+    finally:
+        if managed_db is not None:
+            managed_db.close()
 
 
 def generate_theoretical_estimates(
@@ -174,6 +193,7 @@ def generate_theoretical_estimates(
     workers: int | None = None,
     circuits: Sequence[str] | None = None,
     groups: Sequence[str] | None = None,
+    database: BenchmarkDatabase | None = None,
 ):
     """Return detailed and summary DataFrames for theoretical estimates."""
 
@@ -188,6 +208,23 @@ def generate_theoretical_estimates(
     )
     detail = build_dataframe(records, throughput)
     summary = build_summary(detail)
+    if database is not None:
+        method = "theoretical_estimate"
+        for rec in records:
+            database.insert_estimation(
+                record={
+                    "circuit": rec.circuit,
+                    "qubits": rec.qubits,
+                    "framework": rec.framework,
+                    "backend": rec.backend,
+                    "supported": rec.supported,
+                    "time_ops": rec.time_ops,
+                    "approx_seconds": rec.approx_seconds(throughput),
+                    "memory_bytes": rec.memory_bytes,
+                    "note": rec.note,
+                },
+                method=method,
+            )
     return detail, summary, throughput
 
 
@@ -340,16 +377,28 @@ def _run_theoretical_estimation(
     workers: int | None,
     circuits: Sequence[str] | None,
     groups: Sequence[str] | None,
+    database_path: Path | None = None,
 ) -> None:
     """Execute the theoretical estimation pipeline and export artefacts."""
 
-    detail, summary, throughput = generate_theoretical_estimates(
-        ops_per_second=ops_per_second,
-        calibration=calibration,
-        workers=workers,
-        circuits=circuits,
-        groups=groups,
-    )
+    if database_path is not None:
+        with open_database(database_path) as database:
+            detail, summary, throughput = generate_theoretical_estimates(
+                ops_per_second=ops_per_second,
+                calibration=calibration,
+                workers=workers,
+                circuits=circuits,
+                groups=groups,
+                database=database,
+            )
+    else:
+        detail, summary, throughput = generate_theoretical_estimates(
+            ops_per_second=ops_per_second,
+            calibration=calibration,
+            workers=workers,
+            circuits=circuits,
+            groups=groups,
+        )
 
     write_tables(detail, summary)
     if throughput:
@@ -487,6 +536,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
             workers=args.workers,
             circuits=args.estimate_circuits,
             groups=args.estimate_groups,
+            database_path=getattr(args, "database", None),
         )
 
 
