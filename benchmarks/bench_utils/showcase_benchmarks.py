@@ -62,10 +62,12 @@ from quasar import SimulationEngine
 from quasar.cost import Backend
 
 try:  # shared utilities for both package and script execution
+    from .memory_utils import max_qubits_statevector
     from .progress import ProgressReporter
     from .ssd_metrics import partition_metrics_from_result
     from .threading_utils import resolve_worker_count, thread_engine
 except ImportError:  # pragma: no cover - fallback when executed as a script
+    from memory_utils import max_qubits_statevector  # type: ignore
     from progress import ProgressReporter  # type: ignore
     from ssd_metrics import partition_metrics_from_result  # type: ignore
     from threading_utils import resolve_worker_count, thread_engine  # type: ignore
@@ -213,77 +215,77 @@ SHOWCASE_CIRCUITS: Mapping[str, ShowcaseCircuit] = {
         name="clustered_ghz_random",
         display_name="Clustered GHZ + random",
         constructor=circuit_lib.clustered_ghz_random_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="GHZ blocks followed by deep random hybrid layers.",
     ),
     "clustered_w_random": ShowcaseCircuit(
         name="clustered_w_random",
         display_name="Clustered W + random",
         constructor=circuit_lib.clustered_w_random_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="W-state clusters followed by random hybrid layers.",
     ),
     "clustered_ghz_qft": ShowcaseCircuit(
         name="clustered_ghz_qft",
         display_name="Clustered GHZ + QFT",
         constructor=circuit_lib.clustered_ghz_qft_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="GHZ clusters with a global QFT tail.",
     ),
     "clustered_w_qft": ShowcaseCircuit(
         name="clustered_w_qft",
         display_name="Clustered W + QFT",
         constructor=circuit_lib.clustered_w_qft_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="W-state clusters with a global QFT tail.",
     ),
     "clustered_ghz_random_qft": ShowcaseCircuit(
         name="clustered_ghz_random_qft",
         display_name="Clustered GHZ + random + QFT",
         constructor=circuit_lib.clustered_ghz_random_qft_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="GHZ clusters, random evolution and a final QFT.",
     ),
     "layered_clifford_delayed_magic": ShowcaseCircuit(
         name="layered_clifford_delayed_magic",
         display_name="Layered Clifford (delayed magic)",
         constructor=circuit_lib.layered_clifford_delayed_magic_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="Clifford prefix with late non-Clifford transition.",
     ),
     "layered_clifford_midpoint": ShowcaseCircuit(
         name="layered_clifford_midpoint",
         display_name="Layered Clifford (midpoint)",
         constructor=circuit_lib.layered_clifford_midpoint_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="Clifford to non-Clifford switch halfway through.",
     ),
     "layered_clifford_ramp": ShowcaseCircuit(
         name="layered_clifford_ramp",
         display_name="Layered Clifford ramp",
         constructor=circuit_lib.layered_clifford_ramp_circuit,
-        default_qubits=(30, 40, 50),
+        default_qubits=(24, 32, 40),
         description="Gradual increase of non-Clifford density.",
     ),
     "classical_controlled": ShowcaseCircuit(
         name="classical_controlled",
         display_name="Classical-controlled",
         constructor=circuit_lib.classical_controlled_circuit,
-        default_qubits=(20, 28, 36),
+        default_qubits=(16, 22, 28),
         description="Classical control regions with moderate fan-out.",
     ),
     "dynamic_classical_control": ShowcaseCircuit(
         name="dynamic_classical_control",
         display_name="Dynamic classical control",
         constructor=circuit_lib.dynamic_classical_control_circuit,
-        default_qubits=(20, 28, 36),
+        default_qubits=(16, 22, 28),
         description="Classical controls that toggle frequently.",
     ),
     "classical_controlled_fanout": ShowcaseCircuit(
         name="classical_controlled_fanout",
         display_name="Classical control fan-out",
         constructor=circuit_lib.classical_controlled_fanout_circuit,
-        default_qubits=(20, 28, 36),
+        default_qubits=(16, 22, 28),
         description="Classical controls with wide fan-out.",
     ),
 }
@@ -421,6 +423,40 @@ def _build_circuit(
     return circuit
 
 
+def _baseline_support_status(
+    backend: Backend,
+    *,
+    width: int,
+    circuit: object | None,
+    memory_bytes: int | None,
+) -> tuple[bool, str | None]:
+    """Return whether ``backend`` can execute ``circuit`` and a skip reason."""
+
+    if backend == Backend.STATEVECTOR:
+        limit = max_qubits_statevector(memory_bytes)
+        if width > limit:
+            return (
+                False,
+                f"circuit width {width} exceeds statevector limit of {limit} qubits",
+            )
+
+    if backend == Backend.TABLEAU and circuit is not None:
+        gates = getattr(circuit, "gates", ())
+        forbidden = {"CCX", "CCZ", "MCX", "CSWAP"}
+        for gate in gates:
+            name = getattr(gate, "gate", "").upper()
+            if name in forbidden:
+                return False, f"{name} gate is unsupported by the tableau backend"
+        try:
+            is_clifford = circuit_lib.is_clifford(circuit)
+        except Exception:  # pragma: no cover - defensive
+            is_clifford = False
+        if not is_clifford:
+            return False, "non-Clifford gates are unsupported by the tableau backend"
+
+    return True, None
+
+
 def _run_backend_suite_for_width(
     engine: SimulationEngine,
     spec: ShowcaseCircuit,
@@ -438,10 +474,83 @@ def _run_backend_suite_for_width(
 
     LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
 
+    built_circuit: object | None = None
+
+    def _ensure_circuit() -> object:
+        nonlocal built_circuit
+        if built_circuit is None:
+            built_circuit = _build_circuit(
+                spec, width, classical_simplification=classical_simplification
+            )
+        return built_circuit
+
     for backend in baseline_backends:
-        circuit = _build_circuit(
-            spec, width, classical_simplification=classical_simplification
+        status_msg = f"{backend.name}@{width}"
+        supported, reason = _baseline_support_status(
+            backend,
+            width=width,
+            circuit=None,
+            memory_bytes=memory_bytes,
         )
+        if not supported:
+            LOGGER.info(
+                "Skipping backend %s for %s qubits=%s: %s",
+                backend.name,
+                spec.name,
+                width,
+                reason,
+            )
+            record = _finalise_record(
+                {
+                    "unsupported": True,
+                    "failed": False,
+                    "comment": reason,
+                    "repetitions": 0,
+                    "result": None,
+                },
+                spec=spec,
+                width=width,
+                framework=backend.name,
+                backend=backend.name,
+                mode="forced",
+            )
+            records.append(record)
+            messages.append(f"{status_msg} skipped: {reason}")
+            continue
+
+        circuit = _ensure_circuit()
+        supported, reason = _baseline_support_status(
+            backend,
+            width=width,
+            circuit=circuit,
+            memory_bytes=memory_bytes,
+        )
+        if not supported:
+            LOGGER.info(
+                "Skipping backend %s for %s qubits=%s: %s",
+                backend.name,
+                spec.name,
+                width,
+                reason,
+            )
+            record = _finalise_record(
+                {
+                    "unsupported": True,
+                    "failed": False,
+                    "comment": reason,
+                    "repetitions": 0,
+                    "result": None,
+                },
+                spec=spec,
+                width=width,
+                framework=backend.name,
+                backend=backend.name,
+                mode="forced",
+            )
+            records.append(record)
+            messages.append(f"{status_msg} skipped: {reason}")
+            continue
+
         runner = BenchmarkRunner()
         LOGGER.debug(
             "Running baseline backend %s for %s qubits=%s",
@@ -449,7 +558,6 @@ def _run_backend_suite_for_width(
             spec.name,
             width,
         )
-        status_msg = f"{backend.name}@{width}"
         try:
             rec = runner.run_quasar_multiple(
                 circuit,
@@ -496,9 +604,7 @@ def _run_backend_suite_for_width(
         records.append(record)
         messages.append(status_msg)
 
-    circuit = _build_circuit(
-        spec, width, classical_simplification=classical_simplification
-    )
+    circuit = _ensure_circuit()
     runner = BenchmarkRunner()
     LOGGER.debug("Running QuASAr for %s qubits=%s", spec.name, width)
     quasar_status = f"quasar@{width}"

@@ -36,6 +36,13 @@ The command iterates over all showcase circuits defined in
 summaries and figures to ``benchmarks/bench_utils/results/showcase``.  Useful
 flags include:
 
+*By default the suite now uses narrower qubit ranges (24–40 qubits for the
+clustered and layered families, 16–28 qubits for the classical-control
+workloads) and shallower random sections to keep workstation runs under the
+timeout budget while preserving the characteristic gate patterns.*
+
+Useful flags include:
+
 * ``--circuit <name>`` – run a single circuit (repeat the flag to add more).
 * ``--group <name>`` – run every circuit in the named group.
 * ``--list-circuits`` / ``--list-groups`` – inspect available names and exit.
