@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import List
 
 import pandas as pd
@@ -15,6 +16,8 @@ from benchmarks.circuits import (
     layered_clifford_nonclifford_circuit,
     layered_clifford_ramp_circuit,
 )
+from quasar.circuit import Circuit, Gate
+from quasar.cost import Backend
 
 
 def _layer_gates(circuit, layer_offsets: List[int], layer: int):
@@ -135,6 +138,136 @@ def test_resolve_selected_unknown_group() -> None:
     with pytest.raises(SystemExit):
         sb._resolve_selected_circuits(explicit=None, groups=["missing"])
 
+
+def test_statevector_support_respects_memory_budget() -> None:
+    supported, reason = sb._baseline_support_status(
+        Backend.STATEVECTOR,
+        width=3,
+        circuit=None,
+        memory_bytes=64,
+    )
+    assert not supported
+    assert reason and "statevector" in reason
+
+
+def test_tableau_support_rejects_non_clifford() -> None:
+    circuit = Circuit([Gate("H", [0]), Gate("T", [0])])
+    supported, reason = sb._baseline_support_status(
+        Backend.TABLEAU,
+        width=circuit.num_qubits,
+        circuit=circuit,
+        memory_bytes=None,
+    )
+    assert not supported
+    assert reason and "non-Clifford" in reason
+
+
+def test_tableau_support_rejects_forbidden_gates() -> None:
+    circuit = Circuit([Gate("H", [0]), Gate("CCX", [0, 1, 2])])
+    supported, reason = sb._baseline_support_status(
+        Backend.TABLEAU,
+        width=circuit.num_qubits,
+        circuit=circuit,
+        memory_bytes=None,
+    )
+    assert not supported
+    assert reason and "unsupported" in reason
+
+
+def test_backend_suite_reuses_single_built_circuit(monkeypatch) -> None:
+    spec = sb.ShowcaseCircuit(
+        name="dummy",
+        display_name="Dummy",
+        constructor=lambda width: SimpleNamespace(num_qubits=width, gates=()),
+        default_qubits=(4,),
+        description="",
+    )
+
+    builds: list[SimpleNamespace] = []
+    support_calls: list[tuple[Backend, object | None]] = []
+    runner_calls: list[tuple[Backend | None, object]] = []
+
+    def fake_build(
+        spec_arg: sb.ShowcaseCircuit,
+        width: int,
+        *,
+        classical_simplification: bool,
+    ) -> SimpleNamespace:
+        assert spec_arg == spec
+        circuit = SimpleNamespace(num_qubits=width, gates=())
+        builds.append(circuit)
+        return circuit
+
+    def fake_support(
+        backend: Backend,
+        *,
+        width: int,
+        circuit: object | None,
+        memory_bytes: int | None,
+    ) -> tuple[bool, str | None]:
+        support_calls.append((backend, circuit))
+        return True, None
+
+    class DummyRunner:
+        def run_quasar_multiple(
+            self,
+            circuit: object,
+            engine: object,
+            *,
+            backend: Backend | None = None,
+            repetitions: int,
+            quick: bool,
+            memory_bytes: int | None,
+            run_timeout: float | None,
+        ) -> dict[str, object]:
+            runner_calls.append((backend, circuit))
+            backend_name = backend.name if backend is not None else "quasar"
+            return {
+                "framework": backend_name,
+                "backend": backend_name,
+                "prepare_time_mean": 0.0,
+                "prepare_time_std": 0.0,
+                "run_time_mean": 0.0,
+                "run_time_std": 0.0,
+                "total_time_mean": 0.0,
+                "total_time_std": 0.0,
+                "prepare_peak_memory_mean": 0,
+                "prepare_peak_memory_std": 0.0,
+                "run_peak_memory_mean": 0,
+                "run_peak_memory_std": 0.0,
+                "repetitions": repetitions,
+                "failed": False,
+                "unsupported": False,
+                "result": None,
+            }
+
+    monkeypatch.setattr(sb, "_build_circuit", fake_build)
+    monkeypatch.setattr(sb, "_baseline_support_status", fake_support)
+    monkeypatch.setattr(sb, "BenchmarkRunner", lambda: DummyRunner())
+
+    records, messages = sb._run_backend_suite_for_width(
+        engine=object(),
+        spec=spec,
+        width=4,
+        repetitions=1,
+        run_timeout=None,
+        memory_bytes=None,
+        classical_simplification=False,
+        baseline_backends=(Backend.STATEVECTOR, Backend.MPS),
+        quasar_quick=False,
+    )
+
+    assert len(builds) == 1
+    built = builds[0]
+    assert support_calls == [
+        (Backend.STATEVECTOR, None),
+        (Backend.STATEVECTOR, built),
+        (Backend.MPS, None),
+        (Backend.MPS, built),
+    ]
+    assert {id(call[1]) for call in runner_calls} == {id(built)}
+    assert len(records) == 3
+    assert len(messages) == 3
 
 def test_merge_results_updates_existing(tmp_path) -> None:
     """New measurements replace matching rows while preserving existing data."""

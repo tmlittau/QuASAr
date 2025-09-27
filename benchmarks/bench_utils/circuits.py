@@ -1115,7 +1115,7 @@ def clustered_ghz_random_circuit(num_qubits: int) -> Circuit:
         block_size=5,
         state="ghz",
         entangler="random",
-        depth=1000,
+        depth=600,
     )
 
 
@@ -1139,7 +1139,7 @@ def clustered_w_random_circuit(num_qubits: int) -> Circuit:
         block_size=5,
         state="w",
         entangler="random",
-        depth=1000,
+        depth=600,
     )
 
 
@@ -1163,13 +1163,13 @@ def clustered_ghz_random_qft_circuit(num_qubits: int) -> Circuit:
         block_size=5,
         state="ghz",
         entangler="random+qft",
-        depth=800,
+        depth=600,
     )
 
 
 def layered_clifford_nonclifford_circuit(
     num_qubits: int,
-    depth: int = 5000,
+    depth: int = 2000,
     fraction_clifford: float = 0.8,
     *,
     seed: int | None = 2025,
@@ -1205,7 +1205,7 @@ def layered_clifford_midpoint_circuit(num_qubits: int) -> Circuit:
     """Transition to non-Clifford gates halfway through the depth."""
 
     return layered_clifford_nonclifford_circuit(
-        num_qubits, depth=5000, fraction_clifford=0.6
+        num_qubits, depth=2000, fraction_clifford=0.6
     )
 
 
@@ -1213,13 +1213,13 @@ def layered_clifford_delayed_magic_circuit(num_qubits: int) -> Circuit:
     """Delay the introduction of non-Clifford gates to late layers."""
 
     return layered_clifford_nonclifford_circuit(
-        num_qubits, depth=5000, fraction_clifford=0.8
+        num_qubits, depth=2000, fraction_clifford=0.8
     )
 
 
 def layered_clifford_ramp_circuit(
     num_qubits: int,
-    depth: int = 5000,
+    depth: int = 2000,
     ramp_start_fraction: float = 0.5,
     ramp_end_fraction: float = 0.9,
     *,
@@ -1290,7 +1290,7 @@ def _normalise_classical_qubits(
 
 def classical_controlled_circuit(
     num_qubits: int,
-    depth: int = 3000,
+    depth: int = 1500,
     classical_qubits: int | Iterable[int] = 8,
     *,
     toggle_period: int = 64,
@@ -1364,7 +1364,7 @@ def dynamic_classical_control_circuit(num_qubits: int) -> Circuit:
     classical_count = max(4, num_qubits // 3)
     return classical_controlled_circuit(
         num_qubits,
-        depth=3000,
+        depth=1500,
         classical_qubits=classical_count,
         toggle_period=32,
         fanout=3,
@@ -1377,7 +1377,7 @@ def classical_controlled_fanout_circuit(num_qubits: int) -> Circuit:
     classical_count = max(6, num_qubits // 2)
     return classical_controlled_circuit(
         num_qubits,
-        depth=3000,
+        depth=1500,
         classical_qubits=classical_count,
         toggle_period=96,
         fanout=4,
