@@ -21,7 +21,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -44,6 +44,7 @@ if __package__ in {None, ""}:
     )
     from runner import BenchmarkRunner  # type: ignore[no-redef]
     import circuits as circuit_lib  # type: ignore[no-redef]
+    from database import BenchmarkDatabase, BenchmarkRun, open_database  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised when imported as a package module
     from .plot_utils import (
         backend_labels,
@@ -55,6 +56,7 @@ else:  # pragma: no cover - exercised when imported as a package module
     )
     from .runner import BenchmarkRunner
     from . import circuits as circuit_lib
+    from .database import BenchmarkDatabase, BenchmarkRun, open_database
 
 from quasar import SimulationEngine
 from quasar.cost import Backend
@@ -73,7 +75,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 FIGURES_DIR = PACKAGE_ROOT / "figures" / "showcase"
-RESULTS_DIR = PACKAGE_ROOT / "results" / "showcase"
+DATABASE_PATH = PACKAGE_ROOT / "results" / "benchmarks.sqlite"
 
 
 RUN_TIMEOUT_DEFAULT_SECONDS = 1800
@@ -86,6 +88,46 @@ BASELINE_BACKENDS: tuple[Backend, ...] = (
     Backend.MPS,
     Backend.DECISION_DIAGRAM,
 )
+
+
+def _result_to_json(result: Any) -> str | None:
+    if result is None:
+        return None
+    try:
+        return json.dumps(result)
+    except TypeError:
+        return json.dumps({"repr": repr(result)})
+
+
+def _finalise_record(
+    record: Mapping[str, Any],
+    *,
+    spec: circuit_lib.ShowcaseCircuit,
+    width: int,
+    framework: str,
+    backend: str | None,
+    mode: str,
+) -> dict[str, Any]:
+    result = record.get("result")
+    normalised = dict(record)
+    normalised.pop("result", None)
+    normalised.update(partition_metrics_from_result(result))
+    normalised["result_json"] = _result_to_json(result)
+    backend_name: str | None
+    if isinstance(backend, Backend):
+        backend_name = backend.name
+    else:
+        backend_name = str(backend) if backend is not None else None
+    normalised.update(
+        {
+            "circuit": spec.name,
+            "qubits": width,
+            "framework": framework,
+            "backend": backend_name,
+            "mode": mode,
+        }
+    )
+    return normalised
 
 
 def _parse_range_expression(expr: str) -> list[int]:
@@ -426,35 +468,32 @@ def _run_backend_suite_for_width(
                 width,
                 exc,
             )
-            records.append(
+            record = _finalise_record(
                 {
-                    "circuit": spec.name,
-                    "qubits": width,
-                    "framework": backend.name,
-                    "backend": backend.name,
-                    "mode": "forced",
                     "unsupported": True,
                     "failed": True,
                     "error": str(exc),
                     "repetitions": 0,
-                }
+                },
+                spec=spec,
+                width=width,
+                framework=backend.name,
+                backend=backend.name,
+                mode="forced",
             )
+            records.append(record)
             messages.append(f"{status_msg} failed: {exc}")
             continue
 
-        rec = dict(rec)
-        result = rec.pop("result", None)
-        rec.update(partition_metrics_from_result(result))
-        rec.update(
-            {
-                "circuit": spec.name,
-                "qubits": width,
-                "framework": backend.name,
-                "backend": backend.name,
-                "mode": "forced",
-            }
+        record = _finalise_record(
+            rec,
+            spec=spec,
+            width=width,
+            framework=backend.name,
+            backend=backend.name,
+            mode="forced",
         )
-        records.append(rec)
+        records.append(record)
         messages.append(status_msg)
 
     circuit = _build_circuit(
@@ -476,36 +515,34 @@ def _run_backend_suite_for_width(
         LOGGER.warning(
             "QuASAr failed for %s qubits=%s: %s", spec.name, width, exc
         )
-        records.append(
+        record = _finalise_record(
             {
-                "circuit": spec.name,
-                "qubits": width,
-                "framework": "quasar",
-                "backend": None,
-                "mode": "auto",
                 "unsupported": True,
                 "failed": True,
                 "error": str(exc),
                 "repetitions": 0,
-            }
+            },
+            spec=spec,
+            width=width,
+            framework="quasar",
+            backend=None,
+            mode="auto",
         )
+        records.append(record)
         messages.append(f"{quasar_status} failed: {exc}")
     else:
-        rec = dict(rec)
-        result = rec.pop("result", None)
-        rec.update(partition_metrics_from_result(result))
         backend_choice = rec.get("backend")
         if isinstance(backend_choice, Backend):
             rec["backend"] = backend_choice.name
-        rec.update(
-            {
-                "circuit": spec.name,
-                "qubits": width,
-                "framework": "quasar",
-                "mode": "auto",
-            }
+        record = _finalise_record(
+            rec,
+            spec=spec,
+            width=width,
+            framework="quasar",
+            backend=rec.get("backend"),
+            mode="auto",
         )
-        records.append(rec)
+        records.append(record)
         messages.append(quasar_status)
 
     LOGGER.info("Completed benchmarks for %s qubits=%s", spec.name, width)
@@ -549,6 +586,8 @@ def _run_backend_suite(
     include_baselines: bool = True,
     baseline_backends: Iterable[Backend] | None = None,
     quasar_quick: bool = False,
+    database: BenchmarkDatabase | None = None,
+    run: BenchmarkRun | None = None,
 ) -> pd.DataFrame:
     """Execute the benchmark for ``spec`` across the provided widths."""
 
@@ -571,11 +610,44 @@ def _run_backend_suite(
     LOGGER.info("Using %d worker thread(s) for showcase circuit %s", worker_count, spec.name)
 
     ordered: dict[int, list[dict[str, object]]] = {}
+    benchmark_run = run
+    if database is not None and benchmark_run is None:
+        benchmark_run = database.start_run(
+            description=f"showcase:{spec.name}",
+            parameters={
+                "circuit": spec.name,
+                "repetitions": repetitions,
+                "run_timeout": run_timeout,
+                "memory_bytes": memory_bytes,
+                "classical_simplification": classical_simplification,
+                "include_baselines": include_baselines,
+                "quasar_quick": quasar_quick,
+            },
+        )
 
     try:
         if worker_count <= 1:
             engine = SimulationEngine()
             for index, width in enumerate(width_list):
+                benchmark_id: int | None = None
+                if database is not None and benchmark_run is not None:
+                    benchmark_id = database.create_benchmark(
+                        benchmark_run,
+                        circuit_id=spec.name,
+                        circuit_display_name=spec.display_name,
+                        repetitions=repetitions,
+                        qubits=width,
+                        run_timeout=run_timeout,
+                        memory_bytes=memory_bytes,
+                        classical_simplification=classical_simplification,
+                        include_baselines=include_baselines,
+                        quick=quasar_quick,
+                        baseline_backends=[backend.name for backend in baselines],
+                        workers=worker_count,
+                        metadata={
+                            "description": spec.description,
+                        },
+                    )
                 recs, messages = _run_backend_suite_for_width(
                     engine,
                     spec,
@@ -588,12 +660,36 @@ def _run_backend_suite(
                     quasar_quick=quasar_quick,
                 )
                 ordered[index] = recs
+                if database is not None and benchmark_id is not None:
+                    for record in recs:
+                        database.insert_simulation_run(benchmark_id, record, qubits=width)
                 for message in messages:
                     progress.advance(message)
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 futures: dict[object, int] = {}
+                benchmark_ids: dict[int, int | None] = {}
                 for index, width in enumerate(width_list):
+                    benchmark_id: int | None = None
+                    if database is not None and benchmark_run is not None:
+                        benchmark_id = database.create_benchmark(
+                            benchmark_run,
+                            circuit_id=spec.name,
+                            circuit_display_name=spec.display_name,
+                            repetitions=repetitions,
+                            qubits=width,
+                            run_timeout=run_timeout,
+                            memory_bytes=memory_bytes,
+                            classical_simplification=classical_simplification,
+                            include_baselines=include_baselines,
+                            quick=quasar_quick,
+                            baseline_backends=[backend.name for backend in baselines],
+                            workers=worker_count,
+                            metadata={
+                                "description": spec.description,
+                            },
+                        )
+                    benchmark_ids[index] = benchmark_id
                     future = executor.submit(
                         _run_backend_suite_for_width_worker,
                         spec,
@@ -615,6 +711,10 @@ def _run_backend_suite(
                         progress.close()
                         raise
                     ordered[index] = recs
+                    benchmark_id = benchmark_ids.get(index)
+                    if database is not None and benchmark_id is not None:
+                        for record in recs:
+                            database.insert_simulation_run(benchmark_id, record, qubits=width)
                     for message in messages:
                         progress.advance(message)
     finally:
@@ -688,25 +788,30 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
     memory_bytes = args.memory_bytes if args.memory_bytes and args.memory_bytes > 0 else None
     classical_simplification = args.enable_classical_simplification
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    all_raw_frames: list[pd.DataFrame] = []
-    all_summary_frames: list[pd.DataFrame] = []
-    all_speedups: list[pd.DataFrame] = []
+    database_path = Path(getattr(args, "database", DATABASE_PATH))
+    LOGGER.info("Recording benchmark results in %s", database_path)
 
-    for name in selected_names:
-        spec = SHOWCASE_CIRCUITS[name]
-        widths = qubit_overrides.get(name, spec.default_qubits)
-        LOGGER.info("Benchmarking %s across widths: %s", name, widths)
+    with open_database(database_path) as database:
+        run = database.start_run(
+            description="showcase_cli",
+            parameters={
+                "circuits": selected_names,
+                "repetitions": args.repetitions,
+                "workers": args.workers,
+                "run_timeout": run_timeout,
+                "memory_bytes": memory_bytes,
+                "classical_simplification": classical_simplification,
+                "metric": args.metric,
+            },
+        )
 
-        raw_path = RESULTS_DIR / f"{name}_raw.csv"
-        metadata_path = RESULTS_DIR / f"{name}_meta.json"
-        reuse_existing = args.reuse_existing and raw_path.exists()
-        if reuse_existing:
-            LOGGER.info("Reusing existing results from %s", raw_path)
-            raw_df = pd.read_csv(raw_path)
-        else:
+        for name in selected_names:
+            spec = SHOWCASE_CIRCUITS[name]
+            widths = qubit_overrides.get(name, spec.default_qubits)
+            LOGGER.info("Benchmarking %s across widths: %s", name, widths)
+
             raw_df = _run_backend_suite(
                 spec,
                 widths,
@@ -715,104 +820,45 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
                 memory_bytes=memory_bytes,
                 classical_simplification=classical_simplification,
                 max_workers=args.workers,
+                database=database,
+                run=run,
             )
-            raw_df.to_csv(raw_path, index=False)
-            metadata = {
-                "circuit": spec.name,
-                "display_name": spec.display_name,
-                "description": spec.description,
-                "qubits": list(widths),
-                "repetitions": args.repetitions,
-                "run_timeout_seconds": run_timeout,
-                "memory_bytes": memory_bytes,
-                "classical_simplification": classical_simplification,
-            }
-            metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
-        if raw_df.empty:
-            LOGGER.warning("No results recorded for %s; skipping summary", name)
-            continue
+            if raw_df.empty:
+                LOGGER.warning("No results recorded for %s; skipping summary", name)
+                continue
 
-        all_raw_frames.append(raw_df.assign(display_name=spec.display_name))
+            try:
+                baseline_best = compute_baseline_best(
+                    raw_df,
+                    metrics=("run_time_mean", "total_time_mean", "run_peak_memory_mean"),
+                )
+            except ValueError:
+                LOGGER.warning("No feasible baseline measurements for %s", name)
+                baseline_best = pd.DataFrame()
 
-        try:
-            baseline_best = compute_baseline_best(
-                raw_df,
-                metrics=("run_time_mean", "total_time_mean", "run_peak_memory_mean"),
+            quasar_df = raw_df[raw_df["framework"] == "quasar"].copy()
+            if not quasar_df.empty:
+                quasar_df["framework"] = "quasar"
+            summary_frames = [frame for frame in (baseline_best, quasar_df) if not frame.empty]
+            if not summary_frames:
+                LOGGER.warning("Skipping summary export for %s due to missing data", name)
+                continue
+
+            summary_df = pd.concat(summary_frames, ignore_index=True)
+            summary_df["circuit"] = spec.name
+            summary_df["display_name"] = spec.display_name
+
+            speedups, figure_path = _export_plot(
+                summary_df,
+                spec,
+                figures_dir=FIGURES_DIR,
+                metric=args.metric,
             )
-        except ValueError:
-            LOGGER.warning("No feasible baseline measurements for %s", name)
-            baseline_best = pd.DataFrame()
-
-        quasar_df = raw_df[raw_df["framework"] == "quasar"].copy()
-        if not quasar_df.empty:
-            quasar_df["framework"] = "quasar"
-        summary_frames = [frame for frame in (baseline_best, quasar_df) if not frame.empty]
-        if not summary_frames:
-            LOGGER.warning("Skipping summary export for %s due to missing data", name)
-            continue
-
-        summary_df = pd.concat(summary_frames, ignore_index=True)
-        summary_df["circuit"] = spec.name
-        summary_df["display_name"] = spec.display_name
-
-        summary_path = RESULTS_DIR / f"{name}_summary.csv"
-        summary_df.to_csv(summary_path, index=False)
-        markdown_path = RESULTS_DIR / f"{name}_summary.md"
-        _write_markdown(summary_df, markdown_path)
-
-        speedups, figure_path = _export_plot(
-            summary_df,
-            spec,
-            figures_dir=FIGURES_DIR,
-            metric=args.metric,
-        )
-        if speedups is not None and not speedups.empty:
-            speedups["circuit"] = spec.name
-            speedups_path = RESULTS_DIR / f"{name}_speedups.csv"
-            speedups.to_csv(speedups_path, index=False)
-            _write_markdown(speedups, RESULTS_DIR / f"{name}_speedups.md")
-            all_speedups.append(speedups.assign(display_name=spec.display_name))
-
-        if figure_path is not None:
-            LOGGER.info("Saved figure for %s to %s", name, figure_path)
-
-        all_summary_frames.append(summary_df)
-
-    if all_raw_frames:
-        combined_raw = pd.concat(all_raw_frames, ignore_index=True)
-        raw_path = RESULTS_DIR / "showcase_raw.csv"
-        combined_raw = _merge_results(
-            raw_path,
-            combined_raw,
-            key_columns=("circuit", "framework", "qubits"),
-            sort_columns=("circuit", "qubits", "framework"),
-        )
-        combined_raw.to_csv(raw_path, index=False)
-
-    if all_summary_frames:
-        combined_summary = pd.concat(all_summary_frames, ignore_index=True)
-        summary_path = RESULTS_DIR / "showcase_summary.csv"
-        combined_summary = _merge_results(
-            summary_path,
-            combined_summary,
-            key_columns=("circuit", "framework", "qubits"),
-            sort_columns=("circuit", "qubits", "framework"),
-        )
-        combined_summary.to_csv(summary_path, index=False)
-        _write_markdown(combined_summary, RESULTS_DIR / "showcase_summary.md")
-
-    if all_speedups:
-        combined_speedups = pd.concat(all_speedups, ignore_index=True)
-        speedups_path = RESULTS_DIR / "showcase_speedups.csv"
-        combined_speedups = _merge_results(
-            speedups_path,
-            combined_speedups,
-            key_columns=("circuit", "baseline_backend", "qubits"),
-            sort_columns=("circuit", "qubits", "baseline_backend"),
-        )
-        combined_speedups.to_csv(speedups_path, index=False)
-        _write_markdown(combined_speedups, RESULTS_DIR / "showcase_speedups.md")
+            if speedups is not None and not speedups.empty:
+                speedups["circuit"] = spec.name
+            if figure_path is not None:
+                LOGGER.info("Saved figure for %s to %s", name, figure_path)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -881,15 +927,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Enable classical control simplification in the generated circuits.",
     )
     parser.add_argument(
-        "--reuse-existing",
-        action="store_true",
-        help="Reuse existing CSV outputs instead of rerunning benchmarks.",
-    )
-    parser.add_argument(
         "--workers",
         type=int,
         default=None,
         help="Number of worker threads for circuit execution (default: auto).",
+    )
+    parser.add_argument(
+        "--database",
+        type=Path,
+        default=DATABASE_PATH,
+        help="Path to the SQLite database storing benchmark results (default: %(default)s)",
     )
     parser.add_argument(
         "-v",
