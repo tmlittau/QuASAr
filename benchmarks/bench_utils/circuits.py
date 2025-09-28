@@ -948,41 +948,70 @@ def _random_two_qubit_gate(
 
 
 def _random_layer(
-    num_qubits: int, rng: Random, *, include_non_clifford: bool
+    num_qubits: int,
+    rng: Random,
+    *,
+    include_non_clifford: bool,
+    blocks: Sequence[Sequence[int]] | None = None,
 ) -> List[Gate]:
-    """Return a depth-one layer of random single- and two-qubit gates."""
+    """Return a depth-one layer of random gates confined to ``blocks``."""
 
+    if blocks is None:
+        blocks = (tuple(range(num_qubits)),)
     layer: List[Gate] = []
-    for qubit in range(num_qubits):
-        layer.append(
-            _random_single_qubit_gate(
-                qubit, rng, include_non_clifford=include_non_clifford
+    for block in blocks:
+        if not block:
+            continue
+        for qubit in block:
+            layer.append(
+                _random_single_qubit_gate(
+                    qubit, rng, include_non_clifford=include_non_clifford
+                )
             )
-        )
-    order = list(range(num_qubits))
-    rng.shuffle(order)
-    for a, b in zip(order[::2], order[1::2]):
-        layer.append(
-            _random_two_qubit_gate(
-                a, b, rng, include_non_clifford=include_non_clifford
+        order = list(block)
+        rng.shuffle(order)
+        for a, b in zip(order[::2], order[1::2]):
+            layer.append(
+                _random_two_qubit_gate(
+                    a, b, rng, include_non_clifford=include_non_clifford
+                )
             )
-        )
     return layer
 
 
 def _build_layers_from_flags(
-    num_qubits: int, include_non_clifford: Sequence[bool], rng: Random
+    num_qubits: int,
+    include_non_clifford: Sequence[bool],
+    rng: Random,
+    *,
+    blocks: Sequence[Sequence[int]] | None = None,
 ) -> Tuple[List[Gate], List[int], List[bool]]:
     """Return random layers and metadata for the given include flags."""
 
     gates: List[Gate] = []
     offsets: List[int] = []
     non_clifford_layers: List[bool] = []
+    if blocks is None:
+        block_layout: Sequence[Sequence[int]] | None = None
+        available_qubits = list(range(num_qubits))
+    else:
+        block_layout = [tuple(block) for block in blocks]
+        available_qubits = [q for block in block_layout for q in block]
+
     for flag in include_non_clifford:
         offsets.append(len(gates))
-        layer = _random_layer(num_qubits, rng, include_non_clifford=flag)
-        if flag and all(g.gate in CLIFFORD_GATES for g in layer) and num_qubits > 0:
-            target = rng.randrange(num_qubits)
+        layer = _random_layer(
+            num_qubits,
+            rng,
+            include_non_clifford=flag,
+            blocks=block_layout,
+        )
+        if (
+            flag
+            and all(g.gate in CLIFFORD_GATES for g in layer)
+            and available_qubits
+        ):
+            target = rng.choice(available_qubits)
             layer.append(Gate("T", [target]))
         gates.extend(layer)
         non_clifford_layers.append(
@@ -1060,7 +1089,10 @@ def clustered_entanglement_circuit(
             random_index += 1
             include_flags = [True] * stage_depth
             stage_gates, offsets, non_flags = _build_layers_from_flags(
-                num_qubits, include_flags, rng
+                num_qubits,
+                include_flags,
+                rng,
+                blocks=blocks,
             )
             layer_offsets.extend(stage_start + offset for offset in offsets)
             summary.update(

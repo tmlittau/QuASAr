@@ -13,17 +13,27 @@ from benchmarks.circuits import (
     CLIFFORD_GATES,
     classical_controlled_circuit,
     clustered_entanglement_circuit,
+    clustered_ghz_random_circuit,
     layered_clifford_nonclifford_circuit,
     layered_clifford_ramp_circuit,
 )
 from quasar.circuit import Circuit, Gate
 from quasar.cost import Backend
+from quasar.partitioner import Partitioner
 
 
 def _layer_gates(circuit, layer_offsets: List[int], layer: int):
     start = layer_offsets[layer]
     end = layer_offsets[layer + 1] if layer + 1 < len(layer_offsets) else len(circuit.gates)
     return circuit.gates[start:end]
+
+
+def _cluster_blocks(num_qubits: int, block_size: int) -> list[tuple[int, ...]]:
+    return [
+        tuple(range(start, min(start + block_size, num_qubits)))
+        for start in range(0, num_qubits, block_size)
+        if start < num_qubits
+    ]
 
 
 def test_clustered_entanglement_prep_blocks():
@@ -63,6 +73,30 @@ def test_clustered_entanglement_random_layer_metadata():
     for block in range(metadata["num_blocks"]):
         qubit = block * metadata["block_size"]
         assert any(g.gate == "X" and g.qubits == [qubit] for g in circuit.gates)
+
+
+def test_clustered_ghz_random_stays_within_blocks():
+    circuit = clustered_ghz_random_circuit(15)
+    metadata = circuit.metadata
+    blocks = _cluster_blocks(circuit.num_qubits, metadata["block_size"])
+    qubit_to_block = {q: idx for idx, block in enumerate(blocks) for q in block}
+
+    for gate in circuit.gates:
+        clusters = {qubit_to_block[q] for q in gate.qubits}
+        assert len(clusters) == 1
+
+
+def test_clustered_ghz_random_parallel_groups_match_blocks():
+    circuit = clustered_ghz_random_circuit(15)
+    metadata = circuit.metadata
+    blocks = [block for block in _cluster_blocks(circuit.num_qubits, metadata["block_size"]) if block]
+
+    partitioner = Partitioner()
+    groups = partitioner.parallel_groups(list(circuit.gates))
+
+    observed = sorted(tuple(sorted(qubits)) for qubits, _ in groups if qubits)
+    expected = sorted(tuple(block) for block in blocks)
+    assert observed == expected
 
 
 def test_layered_clifford_transition_delays_magic():
