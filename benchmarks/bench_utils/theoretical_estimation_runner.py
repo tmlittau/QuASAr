@@ -29,15 +29,176 @@ else:  # pragma: no cover - package import path
 
 from quasar.analyzer import CircuitAnalyzer
 from quasar.cost import Backend, Cost, CostEstimator
+from quasar.partitioner import Partitioner
+from quasar.planner import (
+    Planner,
+    _add_cost,
+    _circuit_depth,
+    _parallel_simulation_cost,
+    _simulation_cost,
+)
 
 from .theoretical_estimation_utils import EstimateRecord
 
+
+def _format_backend_sequence(steps) -> str:
+    """Return a human-readable description of backend usage."""
+
+    sequence: list[str] = []
+    previous: str | None = None
+    for step in steps:
+        name = step.backend.name
+        if name != previous:
+            sequence.append(name)
+            previous = name
+    return " → ".join(sequence) if sequence else "n/a"
+
+
+def _estimate_plan_cost(planner: Planner, plan) -> tuple[Cost, bool, int]:
+    """Return the aggregated cost of ``plan`` along with metadata.
+
+    The helper replays the plan's segments, accounting for independent
+    parallel groups and any conversion layers.  It returns the cumulative
+    cost, a flag indicating whether parallel execution was exploited and
+    the number of conversion layers encountered.
+    """
+
+    estimator = planner.estimator
+    part = Partitioner()
+    gates = list(plan.gates)
+    steps = list(plan.steps)
+    total = Cost(time=0.0, memory=0.0)
+    used_parallel = False
+
+    for step in steps:
+        segment = gates[step.start : step.end]
+        if not segment:
+            continue
+        groups = part.parallel_groups(segment)
+        if len(groups) > 1:
+            cost = _parallel_simulation_cost(estimator, step.backend, groups)
+            used_parallel = True
+        else:
+            num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
+            num_1q = sum(
+                1
+                for g in segment
+                if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            )
+            num_2q = len(segment) - num_1q - num_meas
+            num_qubits = len({q for gate in segment for q in gate.qubits})
+            num_t = sum(1 for g in segment if g.gate.upper() in {"T", "TDG"})
+            depth = _circuit_depth(segment)
+            cost = _simulation_cost(
+                estimator,
+                step.backend,
+                num_qubits,
+                num_1q,
+                num_2q,
+                num_meas,
+                num_t_gates=num_t,
+                depth=depth,
+            )
+        total = _add_cost(total, cost)
+
+    conversion_count = 0
+    for layer in getattr(plan, "conversions", []):
+        total = _add_cost(total, layer.cost)
+        conversion_count += 1
+
+    return total, used_parallel, conversion_count
+
+
+def _estimate_quasar_record(
+    *, planner: Planner, circuit, spec: paper_figures.CircuitSpec, n_qubits: int
+) -> EstimateRecord:
+    """Return the QuASAr estimate for ``circuit`` using ``planner``."""
+
+    if circuit is None:
+        return EstimateRecord(
+            circuit=spec.name,
+            qubits=n_qubits,
+            framework="quasar",
+            backend="n/a",
+            supported=False,
+            time_ops=None,
+            memory_bytes=None,
+            note="circuit construction failed",
+        )
+
+    try:
+        plan = planner.plan(circuit, use_cache=False)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        analyzer = CircuitAnalyzer(circuit, estimator=planner.estimator)
+        resources = analyzer.resource_estimates()
+        candidates = [
+            (backend, cost)
+            for backend, cost in resources.items()
+            if paper_figures._supports_backend(circuit, backend)
+        ]
+        if not candidates:
+            return EstimateRecord(
+                circuit=spec.name,
+                qubits=n_qubits,
+                framework="quasar",
+                backend="n/a",
+                supported=False,
+                time_ops=None,
+                memory_bytes=None,
+                note=f"planner failed: {exc}",
+            )
+        backend, cost = min(candidates, key=lambda item: item[1].time)
+        return EstimateRecord(
+            circuit=spec.name,
+            qubits=n_qubits,
+            framework="quasar",
+            backend=backend.name,
+            supported=True,
+            time_ops=cost.time,
+            memory_bytes=cost.memory,
+            note=f"planner fallback to single backend ({exc})",
+        )
+
+    steps = list(plan.steps)
+    if not steps:
+        return EstimateRecord(
+            circuit=spec.name,
+            qubits=n_qubits,
+            framework="quasar",
+            backend="n/a",
+            supported=False,
+            time_ops=None,
+            memory_bytes=None,
+            note="planner produced empty plan",
+        )
+
+    total_cost, used_parallel, conversion_count = _estimate_plan_cost(planner, plan)
+    backend_label = _format_backend_sequence(steps)
+
+    notes: list[str] = [f"{len(steps)} segment plan"]
+    if conversion_count:
+        plural = "s" if conversion_count != 1 else ""
+        notes.append(f"{conversion_count} conversion{plural}")
+    if used_parallel:
+        notes.append("parallel execution")
+
+    return EstimateRecord(
+        circuit=spec.name,
+        qubits=n_qubits,
+        framework="quasar",
+        backend=backend_label,
+        supported=True,
+        time_ops=total_cost.time,
+        memory_bytes=total_cost.memory,
+        note="; ".join(notes),
+    )
 
 def estimate_circuit(
     spec: paper_figures.CircuitSpec,
     n_qubits: int,
     estimator: CostEstimator,
     backends: Sequence[Backend],
+    planner: Planner,
 ) -> list[EstimateRecord]:
     """Return records for ``spec`` at ``n_qubits`` covering baselines and QuASAr."""
 
@@ -98,40 +259,13 @@ def estimate_circuit(
             )
         )
 
-    auto_analyzer = CircuitAnalyzer(auto, estimator=estimator)
-    auto_resources = auto_analyzer.resource_estimates()
-    supported_backends: list[tuple[Backend, Cost]] = []
-    for backend, cost in auto_resources.items():
-        if paper_figures._supports_backend(auto, backend):
-            supported_backends.append((backend, cost))
-
-    if not supported_backends:
-        records.append(
-            EstimateRecord(
-                circuit=spec.name,
-                qubits=n_qubits,
-                framework="quasar",
-                backend="n/a",
-                supported=False,
-                time_ops=None,
-                memory_bytes=None,
-                note="no compatible backend available",
-            )
-        )
-    else:
-        backend, cost = min(supported_backends, key=lambda item: item[1].time)
-        records.append(
-            EstimateRecord(
-                circuit=spec.name,
-                qubits=n_qubits,
-                framework="quasar",
-                backend=backend.name,
-                supported=True,
-                time_ops=cost.time,
-                memory_bytes=cost.memory,
-                note="automatic planner (single-backend approximation)",
-            )
-        )
+    quasar_record = _estimate_quasar_record(
+        planner=planner,
+        circuit=auto,
+        spec=spec,
+        n_qubits=n_qubits,
+    )
+    records.append(quasar_record)
 
     return records
 
@@ -153,8 +287,15 @@ def collect_estimates(
     def _estimate(spec: paper_figures.CircuitSpec) -> tuple[list[EstimateRecord], list[str]]:
         spec_records: list[EstimateRecord] = []
         messages: list[str] = []
+        planner = Planner(estimator=estimator, perf_prio="time")
         for width in spec.qubits:
-            width_records = estimate_circuit(spec, width, estimator, backends)
+            width_records = estimate_circuit(
+                spec,
+                width,
+                estimator,
+                backends,
+                planner,
+            )
             spec_records.extend(width_records)
             for rec in width_records:
                 label = f"{rec.circuit}@{rec.qubits} {rec.framework.lower()}"
