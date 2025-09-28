@@ -132,6 +132,70 @@ def test_compute_baseline_best_records_unavailable_baselines():
     assert "TABLEAU" in row["status"]
 
 
+def test_compute_baseline_best_handles_missing_baseline_with_quasar_runs():
+    df = pd.DataFrame(
+        [
+            {
+                "framework": "quasar",
+                "backend": "quasar-sim",
+                "circuit": "qft",
+                "qubits": 6,
+                "run_time_mean": 0.42,
+                "run_time_std": 0.03,
+            }
+        ]
+    )
+
+    result = compute_baseline_best(df, metrics=["run_time_mean"])
+
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["framework"] == "baseline_best"
+    assert row["backend"] == "unavailable"
+    assert np.isnan(row["run_time_mean"])
+    assert row["status"] == "no baseline measurement available"
+    assert bool(row["failed"]) is False
+    assert bool(row["unsupported"]) is True
+
+
+def test_plot_quasar_vs_baseline_best_handles_missing_baseline():
+    df = pd.DataFrame(
+        [
+            {
+                "framework": "quasar",
+                "backend": "quasar-sim",
+                "circuit": "qft",
+                "qubits": 3,
+                "run_time_mean": 0.5,
+                "run_time_std": 0.02,
+            },
+            {
+                "framework": "quasar",
+                "backend": "quasar-sim",
+                "circuit": "qft",
+                "qubits": 5,
+                "run_time_mean": 0.8,
+                "run_time_std": 0.05,
+            },
+        ]
+    )
+
+    ax, summary = plot_quasar_vs_baseline_best(
+        df,
+        return_table=True,
+        show_speedup_table=True,
+        log_scale=False,
+    )
+    try:
+        assert isinstance(summary, pd.DataFrame)
+        if not summary.empty:
+            assert "run_time_mean_baseline" in summary.columns
+            assert "baseline_backend" in summary.columns
+            assert summary["baseline_backend"].iloc[0] == "unavailable"
+    finally:
+        plt.close(ax.figure)
+
+
 def test_backend_annotations_collapse_per_circuit():
     df = pd.DataFrame(
         [

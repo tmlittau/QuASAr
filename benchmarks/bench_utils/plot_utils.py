@@ -716,10 +716,6 @@ def compute_baseline_best(
     if "framework" not in df.columns:
         raise ValueError("results DataFrame lacks 'framework' column")
 
-    baselines = df[df["framework"] != "quasar"]
-    if baselines.empty:
-        raise ValueError("no baseline entries in results")
-
     metrics = list(metrics)
     if not metrics:
         raise ValueError("no metrics provided for baseline comparison")
@@ -729,19 +725,38 @@ def compute_baseline_best(
         for c in ("circuit", "qubits", "scenario", "variant")
         if c in df.columns
     ]
-    extra_cols = [c for c in ("repetitions",) if c in baselines.columns]
+    baselines = df[df["framework"] != "quasar"]
+    data_columns = baselines.columns if not baselines.empty else df.columns
+    extra_cols = [c for c in ("repetitions",) if c in data_columns]
+
+    std_columns: list[str] = []
+    for metric in metrics:
+        std_col = metric.replace("_mean", "_std")
+        if std_col in data_columns and std_col not in std_columns:
+            std_columns.append(std_col)
+
+    if baselines.empty:
+        missing_metrics = [metric for metric in metrics if metric not in df.columns]
+        if missing_metrics:
+            raise ValueError(
+                "results DataFrame lacks required metric columns: "
+                + ", ".join(missing_metrics)
+            )
+
+        quasar = df[df["framework"] == "quasar"]
+        return _summarise_missing_baseline(
+            quasar,
+            metrics=metrics,
+            group_cols=group_cols,
+            extra_cols=extra_cols,
+            std_columns=std_columns,
+        )
 
     filtered = baselines
     if "unsupported" in filtered.columns:
         unsupported = filtered["unsupported"].astype("boolean", copy=False)
         mask = unsupported.fillna(False)
         filtered = filtered[~mask.to_numpy(dtype=bool)]
-
-    std_columns: list[str] = []
-    for metric in metrics:
-        std_col = metric.replace("_mean", "_std")
-        if std_col in baselines.columns and std_col not in std_columns:
-            std_columns.append(std_col)
 
     if filtered.empty:
         return _summarise_unavailable_baselines(
@@ -892,6 +907,105 @@ def _summarise_unavailable_baselines(
         placeholder["unsupported"] = placeholder["unsupported"].fillna(True)
     if "status" not in placeholder.columns:
         placeholder["status"] = ""
+    placeholder["framework"] = "baseline_best"
+
+    ordered_columns = list(
+        dict.fromkeys(
+            [
+                *group_cols,
+                *extra_cols,
+                *metrics,
+                *std_columns,
+                "backend",
+                "status",
+                "failed",
+                "unsupported",
+                "framework",
+            ]
+        )
+    )
+    return placeholder.reindex(columns=ordered_columns)
+
+
+def _summarise_missing_baseline(
+    quasar: pd.DataFrame,
+    *,
+    metrics: Sequence[str],
+    group_cols: Sequence[str],
+    extra_cols: Sequence[str],
+    std_columns: Sequence[str],
+) -> pd.DataFrame:
+    """Return placeholder rows when no baseline measurements exist at all."""
+
+    status_message = "no baseline measurement available"
+
+    rows: list[dict[str, object]] = []
+    if not quasar.empty:
+        try:
+            groups = quasar.groupby(group_cols, dropna=False) if group_cols else [((), quasar)]
+        except TypeError:  # pragma: no cover - compatibility with older pandas
+            groups = quasar.groupby(group_cols) if group_cols else [((), quasar)]
+
+        for keys, group in groups:
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            row = dict(zip(group_cols, keys))
+            for col in extra_cols:
+                if col in group.columns:
+                    row[col] = group[col].iloc[0]
+            for metric in metrics:
+                row[metric] = float("nan")
+                std_col = metric.replace("_mean", "_std")
+                if std_col in std_columns:
+                    row[std_col] = float("nan")
+            row["backend"] = "unavailable"
+            row["status"] = status_message
+            row["failed"] = False
+            row["unsupported"] = True
+            rows.append(row)
+
+    placeholder = pd.DataFrame(rows)
+    if placeholder.empty:
+        columns = list(
+            dict.fromkeys(
+                [
+                    *group_cols,
+                    *extra_cols,
+                    *metrics,
+                    *std_columns,
+                    "backend",
+                    "status",
+                    "failed",
+                    "unsupported",
+                    "framework",
+                ]
+            )
+        )
+        placeholder = pd.DataFrame(columns=columns)
+
+    for metric in metrics:
+        if metric not in placeholder.columns:
+            placeholder[metric] = float("nan")
+        std_col = metric.replace("_mean", "_std")
+        if std_col in std_columns and std_col not in placeholder.columns:
+            placeholder[std_col] = float("nan")
+    if "backend" not in placeholder.columns:
+        placeholder["backend"] = "unavailable"
+    else:
+        placeholder["backend"] = placeholder["backend"].fillna("unavailable")
+    if "status" not in placeholder.columns:
+        placeholder["status"] = status_message
+    else:
+        placeholder["status"] = placeholder["status"].fillna(status_message)
+    if "failed" not in placeholder.columns:
+        placeholder["failed"] = False
+    else:
+        placeholder["failed"] = placeholder["failed"].fillna(False)
+    if "unsupported" not in placeholder.columns:
+        placeholder["unsupported"] = True
+    else:
+        placeholder["unsupported"] = placeholder["unsupported"].fillna(True)
+
     placeholder["framework"] = "baseline_best"
 
     ordered_columns = list(
