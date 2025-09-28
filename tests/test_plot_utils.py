@@ -95,6 +95,43 @@ def test_compute_baseline_best_handles_all_nan_metrics():
     assert "backend" in result.columns
 
 
+def test_compute_baseline_best_records_unavailable_baselines():
+    df = pd.DataFrame(
+        [
+            {
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "circuit": "qft",
+                "qubits": 5,
+                "unsupported": True,
+                "failed": False,
+                "comment": "requires >8GB",
+            },
+            {
+                "framework": "TABLEAU",
+                "backend": "TABLEAU",
+                "circuit": "qft",
+                "qubits": 5,
+                "unsupported": True,
+                "failed": True,
+                "error": "timeout",
+            },
+        ]
+    )
+
+    result = compute_baseline_best(df, metrics=["run_time_mean"])
+
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["framework"] == "baseline_best"
+    assert row["backend"] == "unavailable"
+    assert np.isnan(row["run_time_mean"])
+    assert bool(row["failed"]) is True
+    assert bool(row["unsupported"]) is True
+    assert "STATEVECTOR" in row["status"]
+    assert "TABLEAU" in row["status"]
+
+
 def test_backend_annotations_collapse_per_circuit():
     df = pd.DataFrame(
         [
