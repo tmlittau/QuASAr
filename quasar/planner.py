@@ -240,6 +240,25 @@ def _add_cost(a: Cost, b: Cost, *, parallel: bool = False) -> Cost:
     )
 
 
+def _remap_gates_to_dense_indices(
+    gates: Iterable["Gate"],
+) -> tuple[list["Gate"], int]:
+    """Return a copy of ``gates`` with qubit indices remapped to start at zero."""
+
+    gate_list = list(gates)
+    if not gate_list:
+        return [], 0
+    qubit_order = sorted({q for gate in gate_list for q in gate.qubits})
+    index_map = {qubit: idx for idx, qubit in enumerate(qubit_order)}
+    if all(index_map[q] == q for q in index_map):
+        return list(gate_list), len(qubit_order)
+    remapped = [
+        Gate(gate.gate, [index_map[q] for q in gate.qubits], params=dict(gate.params))
+        for gate in gate_list
+    ]
+    return remapped, len(qubit_order)
+
+
 def _better(
     a: Cost,
     b: Cost,
@@ -350,7 +369,7 @@ def _supported_backends(
     names = [g.gate.upper() for g in gates]
     num_gates = len(gates)
     qubits = {q for g in gates for q in g.qubits}
-    num_qubits = (max(qubits) + 1) if qubits else 0
+    num_qubits = len(qubits)
 
     clifford = names and all(name in CLIFFORD_GATES for name in names)
     if allow_tableau and clifford:
@@ -1271,10 +1290,9 @@ class Planner:
             If no backend satisfies the provided resource constraints.
         """
 
-        qubits = {q for g in gates for q in g.qubits}
-        num_qubits = len(qubits)
+        remapped_gates, num_qubits = _remap_gates_to_dense_indices(gates)
         backend, cost = self.selector.select(
-            gates,
+            remapped_gates,
             num_qubits,
             sparsity=sparsity,
             phase_rotation_diversity=phase_rotation_diversity,
@@ -1385,8 +1403,9 @@ class Planner:
                 if target_accuracy is not None
                 else config.DEFAULT.mps_target_fidelity
             )
+            remapped_gates, estimator_qubits = _remap_gates_to_dense_indices(gates)
             chi_cap = self.estimator.chi_for_constraints(
-                num_qubits, gates, fidelity, threshold
+                estimator_qubits, remapped_gates, fidelity, threshold
             )
             self.estimator.chi_max = chi_cap if chi_cap > 0 else None
 
@@ -1404,9 +1423,10 @@ class Planner:
             selection_trace: dict[str, Any] | None = None
             if diagnostics is not None or config.DEFAULT.verbose_selection:
                 selection_trace = {}
+            selector_gates, selector_qubits = _remap_gates_to_dense_indices(gates)
             self.selector.select(
-                gates,
-                num_qubits,
+                selector_gates,
+                selector_qubits,
                 sparsity=circuit.sparsity,
                 phase_rotation_diversity=circuit.phase_rotation_diversity,
                 amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
@@ -1461,17 +1481,23 @@ class Planner:
         single_selection: dict[str, Any] | None = None
         if diagnostics is not None or config.DEFAULT.verbose_selection:
             single_selection = {}
-        single_backend_choice, single_cost = self._single_backend(
-            gates,
-            threshold,
-            sparsity=circuit.sparsity,
-            phase_rotation_diversity=circuit.phase_rotation_diversity,
-            amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
-            allow_tableau=allow_tableau,
-            target_accuracy=target_accuracy,
-            max_time=max_time,
-            selection_diagnostics=single_selection,
-        )
+        single_backend_choice: Backend | None = None
+        single_cost = Cost(float("inf"), float("inf"))
+        try:
+            single_backend_choice, single_cost = self._single_backend(
+                gates,
+                threshold,
+                sparsity=circuit.sparsity,
+                phase_rotation_diversity=circuit.phase_rotation_diversity,
+                amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
+                allow_tableau=allow_tableau,
+                target_accuracy=target_accuracy,
+                max_time=max_time,
+                selection_diagnostics=single_selection,
+            )
+        except NoFeasibleBackendError as exc:
+            if single_selection is not None:
+                single_selection["error"] = str(exc)
         if single_selection is not None:
             if diagnostics is not None:
                 diagnostics.backend_selection["single"] = single_selection
@@ -1479,7 +1505,7 @@ class Planner:
 
         part = Partitioner()
         groups = part.parallel_groups(gates) if num_qubits > 1 else []
-        if len(groups) > 1:
+        if single_backend_choice is not None and len(groups) > 1:
             par_cost = _parallel_simulation_cost(
                 self.estimator, single_backend_choice, groups
             )
@@ -1489,7 +1515,7 @@ class Planner:
             diagnostics.single_backend = single_backend_choice
             diagnostics.single_cost = single_cost
 
-        quick = True
+        quick = single_backend_choice is not None
         if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
             quick = False
         if self.quick_max_gates is not None and num_gates > self.quick_max_gates:
@@ -1553,9 +1579,12 @@ class Planner:
         if diagnostics is not None:
             diagnostics.pre_cost = pre_cost
             diagnostics.pre_overhead = overhead
-        if _better(single_cost, _add_cost(pre_cost, overhead), perf_prio) and (
-            threshold is None or single_cost.memory <= threshold
-        ) and (max_time is None or single_cost.time <= max_time):
+        if (
+            single_backend_choice is not None
+            and _better(single_cost, _add_cost(pre_cost, overhead), perf_prio)
+            and (threshold is None or single_cost.memory <= threshold)
+            and (max_time is None or single_cost.time <= max_time)
+        ):
             part = Partitioner()
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
@@ -1612,9 +1641,12 @@ class Planner:
         if diagnostics is not None:
             diagnostics.dp_cost = dp_cost
 
-        if _better(single_cost, dp_cost, perf_prio) and (
-            threshold is None or single_cost.memory <= threshold
-        ) and (max_time is None or single_cost.time <= max_time):
+        if (
+            single_backend_choice is not None
+            and _better(single_cost, dp_cost, perf_prio)
+            and (threshold is None or single_cost.memory <= threshold)
+            and (max_time is None or single_cost.time <= max_time)
+        ):
             part = Partitioner()
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()

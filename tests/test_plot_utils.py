@@ -88,11 +88,12 @@ def test_compute_baseline_best_handles_all_nan_metrics():
     result = compute_baseline_best(df, metrics=["run_time_mean"])
 
     assert isinstance(result, pd.DataFrame)
-    assert result.empty
-    assert isinstance(result.index, pd.RangeIndex)
-    assert "run_time_mean" in result.columns
-    assert "framework" in result.columns
-    assert "backend" in result.columns
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["framework"] == "baseline_best"
+    assert np.isnan(row["run_time_mean"])
+    assert row["backend"] == "unavailable"
+    assert row["status"]
 
 
 def test_compute_baseline_best_records_unavailable_baselines():
@@ -156,6 +157,27 @@ def test_compute_baseline_best_handles_missing_baseline_with_quasar_runs():
     assert row["status"] == "no baseline measurement available"
     assert bool(row["failed"]) is False
     assert bool(row["unsupported"]) is True
+
+
+def test_compute_baseline_best_fills_missing_metric_columns():
+    df = pd.DataFrame(
+        [
+            {
+                "framework": "STATEVECTOR",
+                "backend": "STATEVECTOR",
+                "circuit": "qft",
+                "qubits": 4,
+            }
+        ]
+    )
+
+    result = compute_baseline_best(df, metrics=["run_time_mean"])
+
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["framework"] == "baseline_best"
+    assert np.isnan(row["run_time_mean"])
+    assert row["backend"] == "unavailable"
 
 
 def test_plot_quasar_vs_baseline_best_handles_missing_baseline():
