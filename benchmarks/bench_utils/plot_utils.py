@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Utilities for visualising benchmark results."""
 
+import logging
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence, Literal, overload
 
@@ -20,6 +21,9 @@ try:  # ``Backend`` is optional when plotting cached CSV results.
     from quasar.cost import Backend as _BackendEnum
 except Exception:  # pragma: no cover - avoid import errors when running standalone
     _BackendEnum = None
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -716,9 +720,22 @@ def compute_baseline_best(
     if "framework" not in df.columns:
         raise ValueError("results DataFrame lacks 'framework' column")
 
+    df = df.copy()
+
     metrics = list(metrics)
     if not metrics:
         raise ValueError("no metrics provided for baseline comparison")
+
+    missing_in_frame: list[str] = []
+    for metric in metrics:
+        if metric not in df.columns:
+            df[metric] = float("nan")
+            missing_in_frame.append(metric)
+    if missing_in_frame:
+        LOGGER.warning(
+            "results DataFrame missing metric columns %s; inserting NaN placeholders",
+            ", ".join(missing_in_frame),
+        )
 
     group_cols = [
         c
@@ -736,13 +753,6 @@ def compute_baseline_best(
             std_columns.append(std_col)
 
     if baselines.empty:
-        missing_metrics = [metric for metric in metrics if metric not in df.columns]
-        if missing_metrics:
-            raise ValueError(
-                "results DataFrame lacks required metric columns: "
-                + ", ".join(missing_metrics)
-            )
-
         quasar = df[df["framework"] == "quasar"]
         return _summarise_missing_baseline(
             quasar,
@@ -769,8 +779,12 @@ def compute_baseline_best(
 
     missing_metrics = [metric for metric in metrics if metric not in filtered.columns]
     if missing_metrics:
-        raise ValueError(
-            "results DataFrame lacks required metric columns: " + ", ".join(missing_metrics)
+        filtered = filtered.copy()
+        for metric in missing_metrics:
+            filtered[metric] = float("nan")
+        LOGGER.warning(
+            "baseline results missing metric columns %s; using NaN placeholders",
+            ", ".join(missing_metrics),
         )
 
     numeric_metrics = filtered[metrics].apply(pd.to_numeric, errors="coerce")
@@ -780,6 +794,15 @@ def compute_baseline_best(
     else:  # pragma: no cover - ``metrics`` contains a single column producing a Series
         valid_rows = finite_mask
     baselines = filtered[valid_rows.to_numpy(dtype=bool)]
+
+    if baselines.empty:
+        return _summarise_unavailable_baselines(
+            filtered,
+            metrics=metrics,
+            group_cols=group_cols,
+            extra_cols=extra_cols,
+            std_columns=std_columns,
+        )
 
     if group_cols:
         try:

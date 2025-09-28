@@ -1,5 +1,6 @@
 import pytest
 
+from benchmarks.circuits import clustered_entanglement_circuit
 from quasar import (
     Planner,
     Circuit,
@@ -32,6 +33,65 @@ def test_planner_selects_backend_when_memory_sufficient():
     circuit = _t_gate_circuit()
     result = planner.plan(circuit, max_memory=10**8)
     assert result.steps[0].backend == Backend.STATEVECTOR
+
+
+def test_planner_identifies_parallel_clusters():
+    planner = Planner()
+    circuit = clustered_entanglement_circuit(
+        10,
+        block_size=5,
+        state="ghz",
+        entangler="random",
+        depth=5,
+        seed=123,
+    )
+
+    result = planner.plan(circuit)
+
+    steps = result.steps
+    assert steps, "expected plan to contain at least one step"
+    groups = {group for step in steps for group in step.parallel if group}
+    assert (0, 1, 2, 3, 4) in groups
+    assert (5, 6, 7, 8, 9) in groups
+    assert all(len(group) == 5 for group in groups)
+
+
+def test_planner_handles_sparse_qubits_under_memory_limit():
+    planner = Planner()
+    circuit = Circuit(
+        [
+            Gate("H", [5]),
+            Gate("CX", [5, 6]),
+            Gate("T", [5]),
+        ],
+        use_classical_simplification=False,
+    )
+
+    result = planner.plan(circuit, max_memory=87_000)
+
+    assert result.steps
+    assert isinstance(result.steps[0].backend, Backend)
+
+
+def test_planner_forced_backend_handles_sparse_qubits():
+    planner = Planner()
+    circuit = Circuit(
+        [
+            Gate("H", [5]),
+            Gate("CX", [5, 6]),
+            Gate("T", [5]),
+        ],
+        use_classical_simplification=False,
+    )
+
+    result = planner.plan(
+        circuit,
+        backend=Backend.STATEVECTOR,
+        max_memory=87_000,
+    )
+
+    assert result.steps
+    assert all(step.backend == Backend.STATEVECTOR for step in result.steps)
 
 
 def test_simulation_engine_respects_detected_memory_limit(monkeypatch):
