@@ -613,10 +613,10 @@ def _run_backend_suite_for_width(
 
     circuit = _ensure_circuit()
     runner = BenchmarkRunner()
+    quasar_status = f"quasar@{width}"
     if step_callback is not None:
         step_callback(quasar_status)
     LOGGER.info("Running QuASAr for %s qubits=%s", spec.name, width)
-    quasar_status = f"quasar@{width}"
     try:
         rec = runner.run_quasar_multiple(
             circuit,
