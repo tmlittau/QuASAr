@@ -32,6 +32,7 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
         build_summary,
         load_estimator,
         plot_memory_ratio,
+        plot_relative_speedups,
         plot_runtime_speedups,
         report_totals,
         write_tables,
@@ -52,6 +53,7 @@ else:  # pragma: no cover - package import path
         build_summary,
         load_estimator,
         plot_memory_ratio,
+        plot_relative_speedups,
         plot_runtime_speedups,
         report_totals,
         write_tables,
@@ -137,7 +139,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     ops_per_second = args.ops_per_second if args.ops_per_second > 0 else None
 
     estimator = load_estimator(args.calibration)
-    specs = resolve_requested_specs(args.circuits, args.groups)
+    specs = resolve_requested_specs(args.circuits, args.groups, default_group="showcase")
     records = collect_estimates(
         specs,
         paper_figures.BACKENDS,
@@ -154,6 +156,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     if not summary.empty:
         plot_runtime_speedups(summary)
+        plot_relative_speedups(summary)
         plot_memory_ratio(summary)
     else:
         print("No supported configurations found for summary plots.")

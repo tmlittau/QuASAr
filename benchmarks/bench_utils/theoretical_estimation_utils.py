@@ -33,9 +33,11 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
         latest_coefficients,
         load_coefficients,
     )
+    from showcase_benchmarks import SHOWCASE_CIRCUITS  # type: ignore[no-redef]
 else:  # pragma: no cover - package import path
     from .plot_utils import plot_speedup_bars, setup_benchmark_style
     from quasar.calibration import apply_calibration, latest_coefficients, load_coefficients
+    from .showcase_benchmarks import SHOWCASE_CIRCUITS
 
 from quasar.cost import CostEstimator
 
@@ -44,6 +46,39 @@ FIGURES_DIR = PACKAGE_ROOT / "figures"
 RESULTS_DIR = PACKAGE_ROOT / "results"
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+_SHOWCASE_CIRCUITS = globals().get("SHOWCASE_CIRCUITS", {})
+SHOWCASE_DISPLAY_NAMES = {
+    name: getattr(spec, "display_name", name)
+    for name, spec in _SHOWCASE_CIRCUITS.items()
+    if getattr(spec, "display_name", None)
+}
+
+
+def _format_circuit_name(circuit: str) -> str:
+    """Return a human-friendly display name for ``circuit``."""
+
+    if circuit in SHOWCASE_DISPLAY_NAMES:
+        return SHOWCASE_DISPLAY_NAMES[circuit]
+    return circuit.replace("_", " ")
+
+
+def _format_speedup_label(circuit: str, qubits: object) -> str:
+    """Return descriptive label for speedup plots."""
+
+    base = _format_circuit_name(circuit)
+    if qubits is None:
+        return base
+    try:
+        numeric = float(qubits)
+    except (TypeError, ValueError):
+        return base
+    if not math.isfinite(numeric):
+        return base
+    if abs(numeric - round(numeric)) < 1e-9:
+        numeric = round(numeric)
+    return f"{base} ({numeric:g}q)"
 
 
 OPS_PER_SECOND_DEFAULT = 1_000_000_000.0
@@ -283,9 +318,10 @@ def plot_runtime_speedups(summary: pd.DataFrame) -> None:
     valid = summary.dropna(subset=["speedup"])
     if valid.empty:
         return
-    labels = [f"{row.circuit}@{row.qubits}" for row in valid.itertuples()]
-    values = valid["speedup"].to_list()
-    data = dict(zip(labels, values))
+    data: dict[str, float] = {}
+    for row in valid.itertuples():
+        label = _format_speedup_label(row.circuit, row.qubits)
+        data[label] = float(row.speedup)
 
     ax = plot_speedup_bars(data, sort=False)
     ax.set_title("Estimated runtime speedup (baseline best ÷ QuASAr)")
@@ -295,6 +331,54 @@ def plot_runtime_speedups(summary: pd.DataFrame) -> None:
     fig.savefig(path)
     plt.close(fig)
     print(f"Wrote {path}")
+
+
+def plot_relative_speedups(summary: pd.DataFrame) -> None:
+    """Persist the relative speedup figure mirroring benchmark outputs."""
+
+    valid = summary.dropna(subset=["speedup"])
+    if valid.empty:
+        return
+
+    records: list[dict[str, object]] = []
+    data: dict[str, float] = {}
+    for row in valid.itertuples():
+        label = _format_speedup_label(row.circuit, row.qubits)
+        speedup = float(row.speedup)
+        data[label] = speedup
+
+        width: object = row.qubits
+        if width is not None and pd.notna(width):
+            try:
+                width = int(width)
+            except (TypeError, ValueError):
+                width = float(width)
+
+        records.append(
+            {
+                "circuit": row.circuit,
+                "qubits": width,
+                "label": label,
+                "speedup": speedup,
+            }
+        )
+
+    ax = plot_speedup_bars(data, sort=True)
+    ax.set_title("Relative speedups (baseline best ÷ QuASAr)")
+    fig = ax.figure
+    png_path = FIGURES_DIR / "theoretical_relative_speedups.png"
+    pdf_path = FIGURES_DIR / "theoretical_relative_speedups.pdf"
+    fig.savefig(png_path)
+    fig.savefig(pdf_path)
+    plt.close(fig)
+    print(f"Wrote {png_path}")
+    print(f"Wrote {pdf_path}")
+
+    export = pd.DataFrame.from_records(records)
+    export.sort_values("speedup", ascending=False, inplace=True)
+    csv_path = RESULTS_DIR / "theoretical_relative_speedups.csv"
+    export.to_csv(csv_path, index=False)
+    print(f"Wrote {csv_path}")
 
 
 def plot_memory_ratio(summary: pd.DataFrame) -> None:
@@ -350,6 +434,7 @@ __all__ = [
     "format_seconds",
     "load_estimator",
     "plot_memory_ratio",
+    "plot_relative_speedups",
     "plot_runtime_speedups",
     "report_totals",
     "write_tables",

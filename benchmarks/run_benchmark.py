@@ -56,6 +56,7 @@ try:  # package execution
         build_summary,
         load_estimator,
         plot_memory_ratio,
+        plot_relative_speedups,
         plot_runtime_speedups,
         report_totals,
         write_tables,
@@ -80,6 +81,7 @@ except ImportError:  # pragma: no cover - script execution fallback
         build_summary,
         load_estimator,
         plot_memory_ratio,
+        plot_relative_speedups,
         plot_runtime_speedups,
         report_totals,
         write_tables,
@@ -199,7 +201,7 @@ def generate_theoretical_estimates(
 
     throughput = ops_per_second if ops_per_second and ops_per_second > 0 else None
     estimator = load_estimator(calibration)
-    specs = resolve_estimation_specs(circuits, groups)
+    specs = resolve_estimation_specs(circuits, groups, default_group="showcase")
     records = collect_estimates(
         specs,
         paper_figures.BACKENDS,
@@ -405,6 +407,7 @@ def _run_theoretical_estimation(
         report_totals(detail)
     if not summary.empty:
         plot_runtime_speedups(summary)
+        plot_relative_speedups(summary)
         plot_memory_ratio(summary)
     else:
         LOGGER.warning("No supported configurations found for summary plots.")
