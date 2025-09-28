@@ -33,6 +33,12 @@ class ProgressReporter:
         self._render(message, done=done)
 
     # ------------------------------------------------------------------
+    def announce(self, message: str = "") -> None:
+        """Display ``message`` without advancing the progress counter."""
+
+        self._render(message, done=False)
+
+    # ------------------------------------------------------------------
     def _render(self, message: str, *, done: bool) -> None:
         fraction = min(self._count / self.total, 1.0)
         filled = int(self.bar_width * fraction)
