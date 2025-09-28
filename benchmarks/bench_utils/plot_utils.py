@@ -717,10 +717,6 @@ def compute_baseline_best(
         raise ValueError("results DataFrame lacks 'framework' column")
 
     baselines = df[df["framework"] != "quasar"]
-    if "unsupported" in baselines.columns:
-        unsupported = baselines["unsupported"].astype("boolean", copy=False)
-        mask = unsupported.fillna(False)
-        baselines = baselines[~mask.to_numpy(dtype=bool)]
     if baselines.empty:
         raise ValueError("no baseline entries in results")
 
@@ -728,31 +724,47 @@ def compute_baseline_best(
     if not metrics:
         raise ValueError("no metrics provided for baseline comparison")
 
-    missing_metrics = [metric for metric in metrics if metric not in baselines.columns]
-    if missing_metrics:
-        raise ValueError(
-            "results DataFrame lacks required metric columns: " + ", ".join(missing_metrics)
-        )
-
-    numeric_metrics = baselines[metrics].apply(pd.to_numeric, errors="coerce")
-    finite_mask = np.isfinite(numeric_metrics)
-    if isinstance(finite_mask, pd.DataFrame):
-        valid_rows = finite_mask.all(axis=1)
-    else:  # pragma: no cover - ``metrics`` contains a single column producing a Series
-        valid_rows = finite_mask
-    baselines = baselines[valid_rows.to_numpy(dtype=bool)]
-
     group_cols = [
         c
         for c in ("circuit", "qubits", "scenario", "variant")
         if c in df.columns
     ]
     extra_cols = [c for c in ("repetitions",) if c in baselines.columns]
-    std_columns = []
+
+    filtered = baselines
+    if "unsupported" in filtered.columns:
+        unsupported = filtered["unsupported"].astype("boolean", copy=False)
+        mask = unsupported.fillna(False)
+        filtered = filtered[~mask.to_numpy(dtype=bool)]
+
+    std_columns: list[str] = []
     for metric in metrics:
         std_col = metric.replace("_mean", "_std")
         if std_col in baselines.columns and std_col not in std_columns:
             std_columns.append(std_col)
+
+    if filtered.empty:
+        return _summarise_unavailable_baselines(
+            baselines,
+            metrics=metrics,
+            group_cols=group_cols,
+            extra_cols=extra_cols,
+            std_columns=std_columns,
+        )
+
+    missing_metrics = [metric for metric in metrics if metric not in filtered.columns]
+    if missing_metrics:
+        raise ValueError(
+            "results DataFrame lacks required metric columns: " + ", ".join(missing_metrics)
+        )
+
+    numeric_metrics = filtered[metrics].apply(pd.to_numeric, errors="coerce")
+    finite_mask = np.isfinite(numeric_metrics)
+    if isinstance(finite_mask, pd.DataFrame):
+        valid_rows = finite_mask.all(axis=1)
+    else:  # pragma: no cover - ``metrics`` contains a single column producing a Series
+        valid_rows = finite_mask
+    baselines = filtered[valid_rows.to_numpy(dtype=bool)]
 
     if group_cols:
         try:
@@ -784,6 +796,120 @@ def compute_baseline_best(
     mins = pd.DataFrame(rows, columns=base_columns)
     mins["framework"] = "baseline_best"
     return mins
+
+
+def _summarise_unavailable_baselines(
+    baselines: pd.DataFrame,
+    *,
+    metrics: Sequence[str],
+    group_cols: Sequence[str],
+    extra_cols: Sequence[str],
+    std_columns: Sequence[str],
+) -> pd.DataFrame:
+    """Return placeholder rows when no feasible baseline measurements exist."""
+
+    if baselines.empty:
+        columns = list(
+            dict.fromkeys(
+                [
+                    *group_cols,
+                    *extra_cols,
+                    *metrics,
+                    *std_columns,
+                    "backend",
+                    "status",
+                    "failed",
+                    "unsupported",
+                    "framework",
+                ]
+            )
+        )
+        return pd.DataFrame(columns=columns)
+
+    try:
+        groups = baselines.groupby(group_cols, dropna=False) if group_cols else [((), baselines)]
+    except TypeError:  # pragma: no cover - older pandas without ``dropna`` argument
+        groups = baselines.groupby(group_cols) if group_cols else [((), baselines)]
+
+    rows: list[dict[str, object]] = []
+    for keys, group in groups:
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        row = dict(zip(group_cols, keys))
+        for col in extra_cols:
+            if col in group.columns:
+                row[col] = group[col].iloc[0]
+        for metric in metrics:
+            row[metric] = float("nan")
+            std_col = metric.replace("_mean", "_std")
+            if std_col in std_columns:
+                row[std_col] = float("nan")
+        backend_notes: list[str] = []
+        unsupported_col = group.get("unsupported")
+        failed_col = group.get("failed")
+        if unsupported_col is not None:
+            unsupported_values = unsupported_col.astype("boolean", copy=False)
+            row["unsupported"] = bool(unsupported_values.fillna(False).all())
+        if failed_col is not None:
+            failed_values = failed_col.astype("boolean", copy=False)
+            row["failed"] = bool(failed_values.fillna(False).any())
+        for _, entry in group.iterrows():
+            backend_name = entry.get("framework") or entry.get("backend") or "baseline"
+            status: str
+            if bool(entry.get("failed")):
+                status = "failed"
+            elif bool(entry.get("unsupported")):
+                status = "unsupported"
+            else:
+                status = "unavailable"
+            detail = entry.get("error") or entry.get("comment")
+            note = f"{backend_name}: {status}"
+            if detail:
+                note += f" ({detail})"
+            backend_notes.append(str(note))
+        if backend_notes:
+            # Preserve order while removing duplicates
+            row["status"] = "; ".join(dict.fromkeys(backend_notes))
+        if "repetitions" in extra_cols and "repetitions" not in row:
+            row["repetitions"] = 0
+        row["backend"] = "unavailable"
+        rows.append(row)
+
+    placeholder = pd.DataFrame(rows)
+    for metric in metrics:
+        if metric not in placeholder.columns:
+            placeholder[metric] = float("nan")
+        std_col = metric.replace("_mean", "_std")
+        if std_col in std_columns and std_col not in placeholder.columns:
+            placeholder[std_col] = float("nan")
+    if "failed" not in placeholder.columns:
+        placeholder["failed"] = False
+    else:
+        placeholder["failed"] = placeholder["failed"].fillna(False)
+    if "unsupported" not in placeholder.columns:
+        placeholder["unsupported"] = True
+    else:
+        placeholder["unsupported"] = placeholder["unsupported"].fillna(True)
+    if "status" not in placeholder.columns:
+        placeholder["status"] = ""
+    placeholder["framework"] = "baseline_best"
+
+    ordered_columns = list(
+        dict.fromkeys(
+            [
+                *group_cols,
+                *extra_cols,
+                *metrics,
+                *std_columns,
+                "backend",
+                "status",
+                "failed",
+                "unsupported",
+                "framework",
+            ]
+        )
+    )
+    return placeholder.reindex(columns=ordered_columns)
 
 
 @overload
