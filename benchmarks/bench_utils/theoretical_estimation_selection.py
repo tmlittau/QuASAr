@@ -281,7 +281,7 @@ def resolve_requested_specs(
     circuits: Sequence[str] | None,
     groups: Sequence[str] | None,
     *,
-    default_to_paper: bool = True,
+    default_group: str = "showcase",
 ) -> tuple[paper_figures.CircuitSpec, ...]:
     """Return the circuit specifications requested via CLI arguments."""
 
@@ -322,7 +322,14 @@ def resolve_requested_specs(
                 selected.append(spec)
                 seen.add(key)
 
-    if not selected and default_to_paper:
-        return tuple(paper_figures.CIRCUITS)
+    if not selected:
+        if default_group == "paper":
+            return tuple(paper_figures.CIRCUITS)
+        if default_group not in GROUPS:
+            raise ValueError(
+                f"Unknown default estimation group '{default_group}'. Available groups: "
+                + ", ".join(sorted(GROUPS)),
+            )
+        return tuple(GROUPS[default_group])
 
     return tuple(selected)

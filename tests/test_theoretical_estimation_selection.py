@@ -6,8 +6,13 @@ from benchmarks.bench_utils import paper_figures
 from benchmarks.bench_utils import theoretical_estimation_selection as selection
 
 
-def test_defaults_fall_back_to_paper_circuits() -> None:
+def test_defaults_align_with_showcase_group() -> None:
     specs = selection.resolve_requested_specs(None, None)
+    assert specs == selection.GROUPS["showcase"]
+
+
+def test_explicit_paper_default_is_preserved() -> None:
+    specs = selection.resolve_requested_specs(None, None, default_group="paper")
     assert specs == paper_figures.CIRCUITS
 
 
