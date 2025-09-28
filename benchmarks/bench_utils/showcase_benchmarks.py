@@ -211,39 +211,43 @@ class ShowcaseCircuit:
 
 
 SHOWCASE_CIRCUITS: Mapping[str, ShowcaseCircuit] = {
+    # Clustered circuits previously reached 40 qubits by default, but the
+    # largest width caused workstation runs to stall at the final benchmark
+    # step.  Trimming the tail width to 36 keeps the suite representative
+    # while ensuring the CLI completes in a reasonable time on modest hosts.
     "clustered_ghz_random": ShowcaseCircuit(
         name="clustered_ghz_random",
         display_name="Clustered GHZ + random",
         constructor=circuit_lib.clustered_ghz_random_circuit,
-        default_qubits=(24, 32, 40),
+        default_qubits=(24, 32, 36),
         description="GHZ blocks followed by deep random hybrid layers.",
     ),
     "clustered_w_random": ShowcaseCircuit(
         name="clustered_w_random",
         display_name="Clustered W + random",
         constructor=circuit_lib.clustered_w_random_circuit,
-        default_qubits=(24, 32, 40),
+        default_qubits=(24, 32, 36),
         description="W-state clusters followed by random hybrid layers.",
     ),
     "clustered_ghz_qft": ShowcaseCircuit(
         name="clustered_ghz_qft",
         display_name="Clustered GHZ + QFT",
         constructor=circuit_lib.clustered_ghz_qft_circuit,
-        default_qubits=(24, 32, 40),
+        default_qubits=(24, 32, 36),
         description="GHZ clusters with a global QFT tail.",
     ),
     "clustered_w_qft": ShowcaseCircuit(
         name="clustered_w_qft",
         display_name="Clustered W + QFT",
         constructor=circuit_lib.clustered_w_qft_circuit,
-        default_qubits=(24, 32, 40),
+        default_qubits=(24, 32, 36),
         description="W-state clusters with a global QFT tail.",
     ),
     "clustered_ghz_random_qft": ShowcaseCircuit(
         name="clustered_ghz_random_qft",
         display_name="Clustered GHZ + random + QFT",
         constructor=circuit_lib.clustered_ghz_random_qft_circuit,
-        default_qubits=(24, 32, 40),
+        default_qubits=(24, 32, 36),
         description="GHZ clusters, random evolution and a final QFT.",
     ),
     "layered_clifford_delayed_magic": ShowcaseCircuit(
@@ -468,6 +472,7 @@ def _run_backend_suite_for_width(
     classical_simplification: bool,
     baseline_backends: Iterable[Backend],
     quasar_quick: bool,
+    step_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     records: list[dict[str, object]] = []
     messages: list[str] = []
@@ -552,7 +557,9 @@ def _run_backend_suite_for_width(
             continue
 
         runner = BenchmarkRunner()
-        LOGGER.debug(
+        if step_callback is not None:
+            step_callback(status_msg)
+        LOGGER.info(
             "Running baseline backend %s for %s qubits=%s",
             backend.name,
             spec.name,
@@ -606,8 +613,10 @@ def _run_backend_suite_for_width(
 
     circuit = _ensure_circuit()
     runner = BenchmarkRunner()
-    LOGGER.debug("Running QuASAr for %s qubits=%s", spec.name, width)
     quasar_status = f"quasar@{width}"
+    if step_callback is not None:
+        step_callback(quasar_status)
+    LOGGER.info("Running QuASAr for %s qubits=%s", spec.name, width)
     try:
         rec = runner.run_quasar_multiple(
             circuit,
@@ -665,6 +674,7 @@ def _run_backend_suite_for_width_worker(
     classical_simplification: bool,
     baseline_backends: Iterable[Backend],
     quasar_quick: bool,
+    step_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     engine = thread_engine()
     return _run_backend_suite_for_width(
@@ -677,6 +687,7 @@ def _run_backend_suite_for_width_worker(
         classical_simplification=classical_simplification,
         baseline_backends=baseline_backends,
         quasar_quick=quasar_quick,
+        step_callback=step_callback,
     )
 
 
@@ -764,6 +775,7 @@ def _run_backend_suite(
                     classical_simplification=classical_simplification,
                     baseline_backends=baselines,
                     quasar_quick=quasar_quick,
+                    step_callback=progress.announce,
                 )
                 ordered[index] = recs
                 if database is not None and benchmark_id is not None:
