@@ -310,14 +310,19 @@ class CostEstimator:
         """
 
         bonds = [1] * max(0, num_qubits - 1)
-        limit = 2**num_qubits
+        if not bonds:
+            return bonds
+        local_caps = [
+            2 ** min(i + 1, num_qubits - i - 1)
+            for i in range(num_qubits - 1)
+        ]
         for gate in gates:
             qubits = getattr(gate, "qubits", [])
             if len(qubits) < 2:
                 continue
             q0, q1 = min(qubits), max(qubits)
             for i in range(q0, q1):
-                bonds[i] = min(bonds[i] * 2, limit)
+                bonds[i] = min(bonds[i] * 2, local_caps[i])
         return bonds
 
     def max_schmidt_rank(self, num_qubits: int, gates: Iterable["Gate"]) -> int:
