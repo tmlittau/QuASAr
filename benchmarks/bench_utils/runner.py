@@ -449,6 +449,7 @@ class BenchmarkRunner:
 
         try:
             backend_choice = None
+            quick_backend = None
             use_quick = quick
             should_quick = getattr(scheduler, "should_use_quick_path", None)
             if callable(should_quick):
@@ -461,16 +462,24 @@ class BenchmarkRunner:
             elif quick:
                 use_quick = True
 
+            available_backends = getattr(scheduler, "backends", {})
             if use_quick:
-                tracemalloc.start()
                 select_backend = getattr(scheduler, "select_backend", None)
                 if callable(select_backend):
                     backend_choice = select_backend(circuit, backend=backend)
                 else:
                     backend_choice = backend
+                if backend_choice is not None and (
+                    not available_backends or backend_choice in available_backends
+                ):
+                    quick_backend = backend_choice
+                else:
+                    use_quick = False
 
-                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
-                if backend_choice == Backend.STATEVECTOR:
+            if quick_backend is not None:
+                tracemalloc.start()
+                backend_choice_name = getattr(quick_backend, "name", str(quick_backend))
+                if quick_backend == Backend.STATEVECTOR:
                     max_q = max_qubits_statevector(memory_bytes)
                     if getattr(circuit, "num_qubits", 0) > max_q:
                         msg = (
@@ -496,7 +505,7 @@ class BenchmarkRunner:
                         return record
 
                 start_prepare = time.perf_counter()
-                sim = type(scheduler.backends[backend_choice])()
+                sim = type(scheduler.backends[quick_backend])()
                 sim.load(circuit.num_qubits)
                 prepare_time = time.perf_counter() - start_prepare
                 _, prepare_peak_memory = tracemalloc.get_traced_memory()
@@ -509,7 +518,7 @@ class BenchmarkRunner:
                 result = result if result is not None else getattr(circuit, "ssd", None)
                 _, run_peak_memory = tracemalloc.get_traced_memory()
                 tracemalloc.stop()
-                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
+                backend_choice_name = getattr(quick_backend, "name", str(quick_backend))
             else:
                 tracemalloc.start()
                 if planner is not None:
@@ -707,6 +716,7 @@ class BenchmarkRunner:
         scheduler = getattr(engine, "scheduler", engine)
         planner = getattr(engine, "planner", getattr(scheduler, "planner", None))
         use_quick = quick
+        quick_backend = None
         should_quick = getattr(scheduler, "should_use_quick_path", None)
         if callable(should_quick) and circuit is not None:
             try:
@@ -717,6 +727,21 @@ class BenchmarkRunner:
                     use_quick = True
         elif quick:
             use_quick = True
+
+        available_backends = getattr(scheduler, "backends", {})
+        if use_quick:
+            select_backend = getattr(scheduler, "select_backend", None)
+            if callable(select_backend):
+                try:
+                    quick_backend = select_backend(circuit, backend=backend)
+                except Exception:  # pragma: no cover - defensive guard
+                    quick_backend = None
+            else:
+                quick_backend = backend
+            if quick_backend is None or (
+                available_backends and quick_backend not in available_backends
+            ):
+                use_quick = False
 
         simple_backend: Backend | None = None
         simple_gates: List[Any] | None = None
