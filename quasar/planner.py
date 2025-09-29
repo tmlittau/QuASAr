@@ -929,7 +929,139 @@ class Planner:
             ]
             return PlanResult(table=table, final_backend=init, gates=gates)
 
-        part = Partitioner()
+        @dataclass
+        class _SegmentTracker:
+            """Incrementally maintain parallel groups for a fixed start index."""
+
+            gates: List["Gate"]
+            start: int
+            end: int = field(default=0)
+            q_to_idx: Dict[int, int] = field(default_factory=dict)
+            parent: List[int] = field(default_factory=list)
+            size: List[int] = field(default_factory=list)
+            component_qubits: Dict[int, set[int]] = field(default_factory=dict)
+            component_records: Dict[int, List[Tuple[int, "Gate"]]] = field(
+                default_factory=dict
+            )
+            groups_cache: Optional[List[Tuple[Tuple[int, ...], List["Gate"]]]] = None
+
+            def __post_init__(self) -> None:
+                self.end = self.start
+
+            def _add_qubit(self, qubit: int) -> int:
+                idx = len(self.q_to_idx)
+                self.q_to_idx[qubit] = idx
+                self.parent.append(idx)
+                self.size.append(1)
+                self.component_qubits[idx] = {qubit}
+                self.component_records[idx] = []
+                return idx
+
+            def _find(self, idx: int) -> int:
+                while self.parent[idx] != idx:
+                    self.parent[idx] = self.parent[self.parent[idx]]
+                    idx = self.parent[idx]
+                return idx
+
+            def _merge_records(self, dst: int, src: int) -> None:
+                if dst == src:
+                    return
+                records_dst = self.component_records.get(dst, [])
+                records_src = self.component_records.pop(src, [])
+                if not records_dst:
+                    self.component_records[dst] = records_src
+                    return
+                if not records_src:
+                    self.component_records[dst] = records_dst
+                    return
+                merged: List[Tuple[int, "Gate"]] = []
+                ia = ib = 0
+                while ia < len(records_dst) and ib < len(records_src):
+                    if records_dst[ia][0] <= records_src[ib][0]:
+                        merged.append(records_dst[ia])
+                        ia += 1
+                    else:
+                        merged.append(records_src[ib])
+                        ib += 1
+                if ia < len(records_dst):
+                    merged.extend(records_dst[ia:])
+                if ib < len(records_src):
+                    merged.extend(records_src[ib:])
+                self.component_records[dst] = merged
+
+            def _union(self, a: int, b: int) -> int:
+                ra, rb = self._find(a), self._find(b)
+                if ra == rb:
+                    return ra
+                if self.size[ra] < self.size[rb]:
+                    ra, rb = rb, ra
+                self.parent[rb] = ra
+                self.size[ra] += self.size[rb]
+                self.component_qubits.setdefault(ra, set()).update(
+                    self.component_qubits.pop(rb, set())
+                )
+                self._merge_records(ra, rb)
+                return ra
+
+            def extend(self, end: int) -> None:
+                if end <= self.end:
+                    return
+                for offset, gate in enumerate(
+                    self.gates[self.end : end], start=self.end
+                ):
+                    if not gate.qubits:
+                        continue
+                    indices: List[int] = []
+                    for qubit in gate.qubits:
+                        idx = self.q_to_idx.get(qubit)
+                        if idx is None:
+                            idx = self._add_qubit(qubit)
+                        indices.append(idx)
+                    root = indices[0]
+                    for idx in indices[1:]:
+                        root = self._union(root, idx)
+                    root = self._find(root)
+                    self.component_records.setdefault(root, []).append((offset, gate))
+                    self.component_qubits.setdefault(root, set()).update(
+                        gate.qubits
+                    )
+                self.end = end
+                self.groups_cache = None
+
+            def groups(self) -> List[Tuple[Tuple[int, ...], List["Gate"]]]:
+                if self.groups_cache is None:
+                    groups: List[Tuple[Tuple[int, ...], List["Gate"]]] = []
+                    for root, qubits in self.component_qubits.items():
+                        records = self.component_records.get(root, [])
+                        if not records:
+                            continue
+                        ordered = [gate for _, gate in records]
+                        groups.append((tuple(sorted(qubits)), ordered))
+                    groups.sort(key=lambda item: item[0])
+                    self.groups_cache = groups
+                return self.groups_cache
+
+        class _ParallelGroupCache:
+            def __init__(self, gate_list: List["Gate"]):
+                self._gates = gate_list
+                self._trackers: Dict[int, _SegmentTracker] = {}
+
+            def get(
+                self, start: int, end: int
+            ) -> List[Tuple[Tuple[int, ...], List["Gate"]]]:
+                tracker = self._trackers.get(start)
+                if tracker is None:
+                    tracker = _SegmentTracker(self._gates, start)
+                    self._trackers[start] = tracker
+                tracker.extend(end)
+                return tracker.groups()
+
+            def discard_before(self, threshold: int) -> None:
+                stale = [idx for idx in self._trackers if idx < threshold]
+                for idx in stale:
+                    del self._trackers[idx]
+
+        parallel_cache = _ParallelGroupCache(gates)
 
         # Pre-compute prefix and future qubit sets to derive boundary sizes.
         prefix_qubits: List[Set[int]] = [set() for _ in range(n + 1)]
@@ -976,6 +1108,8 @@ class Planner:
 
         for idx_i in range(1, len(indices)):
             i = indices[idx_i]
+            if window is not None:
+                parallel_cache.discard_before(max(0, i - window))
             for idx_j in range(idx_i):
                 j = indices[idx_j]
                 if window is not None and i - j > window:
@@ -1011,7 +1145,7 @@ class Planner:
                     nonlocal segment_groups
                     if segment_groups is None:
                         if len(ensure_qubits()) > 1:
-                            segment_groups = part.parallel_groups(ensure_segment())
+                            segment_groups = parallel_cache.get(j, i)
                         else:
                             segment_groups = []
                     return segment_groups
