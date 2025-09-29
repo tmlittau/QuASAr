@@ -267,6 +267,39 @@ class Scheduler:
                 Backend.DECISION_DIAGRAM: DecisionDiagramBackend(),
             }
 
+    def _load_backend(
+        self,
+        sim_obj: object,
+        num_qubits: int,
+        *,
+        target: Backend | None = None,
+    ) -> None:
+        """Initialise ``sim_obj`` with ``num_qubits`` respecting backend hints.
+
+        When ``target`` (or ``sim_obj.backend`` when ``target`` is ``None``)
+        denotes the MPS backend, the helper forwards the planner's chosen
+        maximum bond dimension ``chi`` so that execution replays the planned
+        truncation settings.  Backends that do not accept a ``chi`` argument
+        gracefully fall back to their default ``load`` signature.
+        """
+
+        backend = target or getattr(sim_obj, "backend", None)
+        kwargs: Dict[str, object] = {}
+        if backend == Backend.MPS:
+            estimator = getattr(self.planner, "estimator", None) if self.planner else None
+            chi = getattr(estimator, "chi_max", None)
+            if chi is None:
+                chi = getattr(sim_obj, "chi", None)
+            if chi is None:
+                chi = 16
+            kwargs["chi"] = chi
+        try:
+            sim_obj.load(num_qubits, **kwargs)
+        except TypeError:
+            # Some test doubles or alternative backends may not accept the
+            # ``chi`` keyword argument.  Retry without backend-specific kwargs.
+            sim_obj.load(num_qubits)
+
     def should_use_quick_path(
         self,
         circuit: Circuit,
@@ -782,7 +815,7 @@ class Scheduler:
                     sim_qubits = tuple(sorted(qubit_set))
                     template = self.backends[target]
                     sim_obj = _clone_backend_instance(template)
-                    sim_obj.load(len(sim_qubits))
+                    self._load_backend(sim_obj, len(sim_qubits), target=target)
                     sims[key] = (sim_obj, sim_qubits)
                 else:
                     sim_obj, sim_qubits = sims[key]
@@ -896,7 +929,7 @@ class Scheduler:
             segment = gates[step.start : step.end]
             est_cost = est_costs[0]
             sim_obj = type(self.backends[target])()
-            sim_obj.load(circuit.num_qubits)
+            self._load_backend(sim_obj, circuit.num_qubits, target=target)
             prev_backend = target
             if instrument:
                 tracemalloc.start()
@@ -1041,7 +1074,7 @@ class Scheduler:
                     key_p = (qset, target)
                     if key_p not in sims:
                         sim_p = type(self.backends[target])()
-                        sim_p.load(circuit.num_qubits)
+                        self._load_backend(sim_p, circuit.num_qubits, target=target)
                         sims[key_p] = sim_p
                     jobs.append((sims[key_p], glist))
 
@@ -1121,7 +1154,7 @@ class Scheduler:
                 if left_info and right_info and left_info[1] is not right_info[1]:
                     prepared = plan.replay_ssd.get(i)
                     sim_obj = type(self.backends[target])()
-                    sim_obj.load(circuit.num_qubits)
+                    self._load_backend(sim_obj, circuit.num_qubits, target=target)
                     if instrument:
                         tracemalloc.reset_peak()
                         start_time = time.perf_counter()
@@ -1170,11 +1203,17 @@ class Scheduler:
                                             rep, num_qubits=circuit.num_qubits
                                         )
                                     else:
-                                        sim_obj.load(circuit.num_qubits)
+                                        self._load_backend(
+                                            sim_obj, circuit.num_qubits, target=target
+                                        )
                                 except Exception:
-                                    sim_obj.load(circuit.num_qubits)
+                                    self._load_backend(
+                                        sim_obj, circuit.num_qubits, target=target
+                                    )
                             else:
-                                sim_obj.load(circuit.num_qubits)
+                                self._load_backend(
+                                    sim_obj, circuit.num_qubits, target=target
+                                )
                     if instrument:
                         elapsed = time.perf_counter() - start_time
                         _, peak = tracemalloc.get_traced_memory()
@@ -1195,7 +1234,7 @@ class Scheduler:
 
             if key not in sims:
                 sim_obj = type(self.backends[target])()
-                sim_obj.load(circuit.num_qubits)
+                self._load_backend(sim_obj, circuit.num_qubits, target=target)
                 sims[key] = sim_obj
             sim_obj = sims[key]
 
@@ -1205,7 +1244,7 @@ class Scheduler:
                     and getattr(sim_obj, "num_qubits", circuit.num_qubits)
                     != circuit.num_qubits
                 ):
-                    sim_obj.load(circuit.num_qubits)
+                    self._load_backend(sim_obj, circuit.num_qubits, target=target)
                 if current_sim is not None:
                     if instrument:
                         tracemalloc.reset_peak()
@@ -1390,13 +1429,21 @@ class Scheduler:
                                             mapping=boundary,
                                         )
                                     else:
-                                        sim_obj.load(circuit.num_qubits)
+                                        self._load_backend(
+                                            sim_obj, circuit.num_qubits, target=target
+                                        )
                                 else:
-                                    sim_obj.load(circuit.num_qubits)
+                                    self._load_backend(
+                                        sim_obj, circuit.num_qubits, target=target
+                                    )
                             except Exception:
-                                sim_obj.load(circuit.num_qubits)
+                                self._load_backend(
+                                    sim_obj, circuit.num_qubits, target=target
+                                )
                         else:
-                            sim_obj.load(circuit.num_qubits)
+                            self._load_backend(
+                                sim_obj, circuit.num_qubits, target=target
+                            )
                     finally:
                         if instrument:
                             elapsed = time.perf_counter() - start_time
