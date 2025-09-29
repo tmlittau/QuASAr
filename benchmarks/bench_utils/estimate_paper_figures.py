@@ -456,8 +456,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "-r",
         "--repetitions",
         type=int,
-        default=3,
-        help="Number of repetitions used in paper_figures (default: 3).",
+        default=1,
+        help="Number of repetitions used in paper_figures (default: %(default)s).",
     )
     parser.add_argument(
         "--ops-per-second",

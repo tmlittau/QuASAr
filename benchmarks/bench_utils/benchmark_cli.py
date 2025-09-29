@@ -178,8 +178,8 @@ def main() -> None:
     parser.add_argument(
         "--repetitions",
         type=int,
-        default=3,
-        help="Number of repetitions per configuration",
+        default=1,
+        help="Number of repetitions per configuration (default: %(default)s)",
     )
     parser.add_argument(
         "--output", required=True, type=Path, help="Output file path without extension"
