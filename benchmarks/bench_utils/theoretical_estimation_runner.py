@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -270,6 +270,26 @@ def estimate_circuit(
     return records
 
 
+def _estimate_width(
+    spec: paper_figures.CircuitSpec,
+    width: int,
+    backends: Sequence[Backend],
+    estimator: CostEstimator,
+) -> tuple[list[EstimateRecord], list[str]]:
+    """Return records and progress messages for a single ``spec`` width."""
+
+    planner = Planner(estimator=estimator, perf_prio="time")
+    width_records = estimate_circuit(
+        spec,
+        width,
+        estimator,
+        backends,
+        planner,
+    )
+    messages = [f"{rec.circuit}@{rec.qubits} {rec.framework.lower()}" for rec in width_records]
+    return width_records, messages
+
+
 def collect_estimates(
     specs: Iterable[paper_figures.CircuitSpec],
     backends: Sequence[Backend],
@@ -282,51 +302,41 @@ def collect_estimates(
     spec_list = list(specs)
     total_steps = sum(len(spec.qubits) * (len(backends) + 1) for spec in spec_list)
     progress = ProgressReporter(total_steps, prefix="Estimating") if total_steps else None
-    ordered: dict[int, list[EstimateRecord]] = {}
+    ordered: dict[int, list[tuple[int, list[EstimateRecord]]]] = {}
 
-    def _estimate(spec: paper_figures.CircuitSpec) -> tuple[list[EstimateRecord], list[str]]:
-        spec_records: list[EstimateRecord] = []
-        messages: list[str] = []
-        planner = Planner(estimator=estimator, perf_prio="time")
-        for width in spec.qubits:
-            width_records = estimate_circuit(
-                spec,
-                width,
-                estimator,
-                backends,
-                planner,
-            )
-            spec_records.extend(width_records)
-            for rec in width_records:
-                label = f"{rec.circuit}@{rec.qubits} {rec.framework.lower()}"
-                messages.append(label)
-        return spec_records, messages
-
-    worker_count = resolve_worker_count(max_workers, len(spec_list))
+    backend_list = tuple(backends)
+    total_widths = sum(len(spec.qubits) for spec in spec_list)
+    worker_count = resolve_worker_count(max_workers, total_widths)
 
     try:
         if worker_count <= 1:
-            for index, spec in enumerate(spec_list):
-                spec_records, messages = _estimate(spec)
-                ordered[index] = spec_records
-                if progress:
-                    for message in messages:
-                        progress.advance(message)
+            for spec_index, spec in enumerate(spec_list):
+                for position, width in enumerate(spec.qubits):
+                    width_records, messages = _estimate_width(
+                        spec, width, backend_list, estimator
+                    )
+                    ordered.setdefault(spec_index, []).append((position, width_records))
+                    if progress:
+                        for message in messages:
+                            progress.advance(message)
         else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            with ProcessPoolExecutor(max_workers=worker_count) as executor:
                 futures = {
-                    executor.submit(_estimate, spec): index
-                    for index, spec in enumerate(spec_list)
+                    executor.submit(
+                        _estimate_width, spec, width, backend_list, estimator
+                    ): (spec_index, position)
+                    for spec_index, spec in enumerate(spec_list)
+                    for position, width in enumerate(spec.qubits)
                 }
                 for future in as_completed(futures):
-                    index = futures[future]
+                    spec_index, position = futures[future]
                     try:
-                        spec_records, messages = future.result()
+                        width_records, messages = future.result()
                     except Exception:
                         if progress:
                             progress.close()
                         raise
-                    ordered[index] = spec_records
+                    ordered.setdefault(spec_index, []).append((position, width_records))
                     if progress:
                         for message in messages:
                             progress.advance(message)
@@ -336,7 +346,10 @@ def collect_estimates(
 
     records: list[EstimateRecord] = []
     for index in range(len(spec_list)):
-        records.extend(ordered.get(index, []))
+        entries = ordered.get(index, [])
+        entries.sort(key=lambda item: item[0])
+        for _, width_records in entries:
+            records.extend(width_records)
     return records
 
 
