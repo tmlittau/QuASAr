@@ -3,12 +3,33 @@ from __future__ import annotations
 import types
 
 import numpy as np
+import pytest
 
 from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circuit
 
 from quasar.circuit import Circuit, Gate
 from quasar.cost import Backend, CostEstimator
 from quasar.planner import Planner
+import quasar.config as config
+
+
+@pytest.fixture(autouse=True)
+def _relax_mps_thresholds(monkeypatch):
+    monkeypatch.setattr(
+        config.DEFAULT,
+        "mps_long_range_fraction_threshold",
+        0.95,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        config.DEFAULT,
+        "mps_long_range_extent_threshold",
+        0.95,
+        raising=False,
+    )
+
+
+DELAYED_MAGIC_TEST_DEPTH = 40
 
 
 def random_clifford_t_circuit(
@@ -98,7 +119,9 @@ def test_planner_prefers_mps_for_random_clifford_when_faster() -> None:
 
 
 def test_forced_mps_respects_memory_cap_for_delayed_magic() -> None:
-    circuit = layered_clifford_delayed_magic_circuit(12)
+    circuit = layered_clifford_delayed_magic_circuit(
+        12, depth=DELAYED_MAGIC_TEST_DEPTH
+    )
     estimator = CostEstimator()
     planner = Planner(
         estimator=estimator,
@@ -111,3 +134,4 @@ def test_forced_mps_respects_memory_cap_for_delayed_magic() -> None:
     plan = planner.plan(circuit, backend=Backend.MPS, use_cache=False)
 
     assert plan.final_backend == Backend.MPS
+

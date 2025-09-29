@@ -98,6 +98,18 @@ class Config:
     mps_target_fidelity: float = _float_from_env(
         "QUASAR_MPS_TARGET_FIDELITY", 1.0
     )
+    mps_long_range_fraction_threshold: float = _float_from_env(
+        "QUASAR_MPS_LONG_RANGE_FRACTION_THRESHOLD", 0.35
+    )
+    mps_long_range_extent_threshold: float = _float_from_env(
+        "QUASAR_MPS_LONG_RANGE_EXTENT_THRESHOLD", 0.25
+    )
+    mps_locality_strict_qubits: int = _int_from_env(
+        "QUASAR_MPS_LOCALITY_STRICT_QUBITS", 6
+    )
+    mps_locality_strict_distance: int = _int_from_env(
+        "QUASAR_MPS_LOCALITY_STRICT_DISTANCE", 4
+    )
     dd_sparsity_threshold: float = _float_from_env(
         "QUASAR_DD_SPARSITY_THRESHOLD", 0.8
     )

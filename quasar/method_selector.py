@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Backend selection based on multi-criteria constraints."""
 
-from typing import Any, List, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING
 
 from .cost import Backend, Cost, CostEstimator
 from . import config
@@ -26,6 +26,89 @@ CLIFFORD_GATES = {
 }
 
 CLIFFORD_PLUS_T_GATES = CLIFFORD_GATES | {"T", "TDG"}
+
+
+def _sequential_cost(costs: Sequence[Cost]) -> Cost:
+    """Combine sequential cost estimates."""
+
+    if not costs:
+        return Cost(0.0, 0.0)
+    time = sum(cost.time for cost in costs)
+    memory = max(cost.memory for cost in costs)
+    log_depth = max(cost.log_depth for cost in costs)
+    conversion = sum(cost.conversion for cost in costs)
+    replay = sum(cost.replay for cost in costs)
+    return Cost(time=time, memory=memory, log_depth=log_depth, conversion=conversion, replay=replay)
+
+
+def _parallel_groups(gates: Sequence['Gate']) -> List[Tuple[Tuple[int, ...], List['Gate']]]:
+    """Return connectivity groups for ``gates`` ignoring order."""
+
+    gate_list = list(gates)
+    if not gate_list:
+        return []
+
+    qubits = sorted({q for gate in gate_list for q in gate.qubits})
+    if not qubits:
+        return []
+
+    index = {q: i for i, q in enumerate(qubits)}
+    parent = list(range(len(qubits)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for gate in gate_list:
+        mapped = [index[q] for q in gate.qubits]
+        if len(mapped) > 1:
+            base = mapped[0]
+            for other in mapped[1:]:
+                union(base, other)
+
+    groups: Dict[int, List['Gate']] = {find(i): [] for i in range(len(qubits))}
+    for gate in gate_list:
+        if not gate.qubits:
+            continue
+        root = find(index[gate.qubits[0]])
+        groups[root].append(gate)
+
+    result: List[Tuple[Tuple[int, ...], List['Gate']]] = []
+    for root, gate_seq in groups.items():
+        member_qubits = tuple(q for q in qubits if find(index[q]) == root)
+        if member_qubits:
+            result.append((member_qubits, gate_seq))
+    return result
+
+
+def _statistics(qubits: Sequence[int], gates: Sequence['Gate']) -> Dict[str, Any]:
+    """Return basic statistics for ``gates`` on ``qubits``."""
+
+    num_gates = len(gates)
+    num_meas = sum(1 for gate in gates if gate.gate.upper() in {"MEASURE", "RESET"})
+    num_1q = sum(
+        1
+        for gate in gates
+        if len(gate.qubits) == 1 and gate.gate.upper() not in {"MEASURE", "RESET"}
+    )
+    num_2q = num_gates - num_1q - num_meas
+    num_t = sum(1 for gate in gates if gate.gate.upper() in {"T", "TDG"})
+    return {
+        "qubits": tuple(qubits),
+        "num_qubits": len(qubits),
+        "num_gates": num_gates,
+        "num_meas": num_meas,
+        "num_1q": num_1q,
+        "num_2q": num_2q,
+        "num_t": num_t,
+    }
 
 
 class NoFeasibleBackendError(RuntimeError):
@@ -56,6 +139,7 @@ class MethodSelector:
         max_time: float | None = None,
         target_accuracy: float | None = None,
         diagnostics: dict[str, Any] | None = None,
+        _split_parallel: bool = True,
     ) -> Tuple[Backend, Cost]:
         """Return the preferred backend and its cost for ``gates``.
 
@@ -98,24 +182,209 @@ class MethodSelector:
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
+        num_t_gates = sum(1 for n in names if n in {"T", "TDG"})
+
+        groups = _parallel_groups(gates) if (num_qubits > 1 and _split_parallel) else []
+        group_stats = [_statistics(qubits, seq) for qubits, seq in groups if qubits]
+        if len(group_stats) <= 1 and (
+            not group_stats or group_stats[0]["num_qubits"] == num_qubits
+        ):
+            group_stats = []
+
+        if group_stats:
+            metrics_seq = group_stats
+        else:
+            qubit_tuple = tuple(sorted({q for gate in gates for q in gate.qubits}))
+            metrics_seq = [
+                {
+                    "qubits": qubit_tuple,
+                    "num_qubits": num_qubits,
+                    "num_gates": num_gates,
+                    "num_meas": num_meas,
+                    "num_1q": num_1q,
+                    "num_2q": num_2q,
+                    "num_t": num_t_gates,
+                }
+            ]
+
+        largest_subsystem = max(m["num_qubits"] for m in metrics_seq) if metrics_seq else 0
 
         diag_backends: dict[Backend, dict[str, Any]] | None = None
         diag: dict[str, Any] | None = diagnostics
 
-        # Clifford fragments can run on the tableau simulator directly.
         if diag is not None:
-            diag_backends = {}
-            diag["backends"] = diag_backends
+            diag_backends = diag.setdefault("backends", {})
             metrics = diag.setdefault("metrics", {})
             metrics.update({
                 "num_qubits": num_qubits,
                 "num_gates": num_gates,
             })
+            if len(metrics_seq) > 1:
+                metrics.update(
+                    {
+                        "num_subsystems": len(metrics_seq),
+                        "largest_subsystem": largest_subsystem,
+                        "subsystem_qubits": [m["qubits"] for m in metrics_seq],
+                    }
+                )
         else:
             diag_backends = None
 
+        if _split_parallel and len(metrics_seq) > 1:
+            subsystem_info: List[Dict[str, Any]] = []
+            subsystem_costs: List[Cost] = []
+            subsystem_backend: Backend | None = None
+            consistent_backend = True
+
+            for qubits, seq in groups:
+                if not qubits:
+                    continue
+                sub_diag: dict[str, Any] | None
+                if diag is not None:
+                    sub_diag = {}
+                else:
+                    sub_diag = None
+                backend, cost = self.select(
+                    seq,
+                    len(qubits),
+                    sparsity=None,
+                    phase_rotation_diversity=None,
+                    amplitude_rotation_diversity=None,
+                    allow_tableau=allow_tableau,
+                    max_memory=max_memory,
+                    max_time=max_time,
+                    target_accuracy=target_accuracy,
+                    diagnostics=sub_diag,
+                    _split_parallel=True,
+                )
+                subsystem_costs.append(cost)
+                if subsystem_backend is None:
+                    subsystem_backend = backend
+                elif backend != subsystem_backend:
+                    consistent_backend = False
+                if diag is not None:
+                    subsystem_info.append(
+                        {
+                            "qubits": tuple(qubits),
+                            "backend": backend,
+                            "cost": cost,
+                            "diagnostics": sub_diag,
+                        }
+                    )
+
+            if diag is not None:
+                diag["parallel_subsystems"] = subsystem_info
+
+            if subsystem_backend is not None and consistent_backend:
+                combined_cost = _sequential_cost(subsystem_costs)
+                reasons: list[str] = []
+                feasible = True
+                if max_memory is not None and combined_cost.memory > max_memory:
+                    reasons.append("memory > threshold")
+                    feasible = False
+                if max_time is not None and combined_cost.time > max_time:
+                    reasons.append("time > threshold")
+                    feasible = False
+                if feasible:
+                    if diag is not None and diag_backends is not None:
+                        entry = diag_backends.setdefault(
+                            subsystem_backend,
+                            {
+                                "feasible": True,
+                                "reasons": [],
+                                "cost": combined_cost,
+                            },
+                        )
+                        entry.update(
+                            {
+                                "feasible": True,
+                                "reasons": [],
+                                "cost": combined_cost,
+                                "selected": True,
+                                "parallel": True,
+                            }
+                        )
+                        for other in Backend:
+                            if other == subsystem_backend:
+                                continue
+                            diag_backends.setdefault(
+                                other,
+                                {
+                                    "feasible": False,
+                                    "reasons": [
+                                        "skipped: parallel subsystem backend preferred"
+                                    ],
+                                    "selected": False,
+                                },
+                            )
+                        diag["selected_backend"] = subsystem_backend
+                        diag["selected_cost"] = combined_cost
+                    return subsystem_backend, combined_cost
+                else:
+                    if diag_backends is not None and subsystem_backend is not None:
+                        diag_backends[subsystem_backend] = {
+                            "feasible": False,
+                            "reasons": reasons,
+                            "cost": combined_cost,
+                            "parallel": True,
+                        }
+
+        return self._select_fragment(
+            gates=gates,
+            names=names,
+            num_qubits=num_qubits,
+            num_gates=num_gates,
+            num_meas=num_meas,
+            num_1q=num_1q,
+            num_2q=num_2q,
+            num_t_gates=num_t_gates,
+            metrics_seq=metrics_seq,
+            allow_tableau=allow_tableau,
+            max_memory=max_memory,
+            max_time=max_time,
+            target_accuracy=target_accuracy,
+            sparsity=sparsity,
+            phase_rotation_diversity=phase_rotation_diversity,
+            amplitude_rotation_diversity=amplitude_rotation_diversity,
+            diagnostics=diag,
+            diag_backends=diag_backends,
+        )
+
+    def _select_fragment(
+        self,
+        *,
+        gates: Sequence['Gate'],
+        names: Sequence[str],
+        num_qubits: int,
+        num_gates: int,
+        num_meas: int,
+        num_1q: int,
+        num_2q: int,
+        num_t_gates: int,
+        metrics_seq: Sequence[Dict[str, Any]],
+        allow_tableau: bool,
+        max_memory: float | None,
+        max_time: float | None,
+        target_accuracy: float | None,
+        sparsity: float | None,
+        phase_rotation_diversity: int | None,
+        amplitude_rotation_diversity: int | None,
+        diagnostics: dict[str, Any] | None,
+        diag_backends: dict[Backend, dict[str, Any]] | None,
+    ) -> Tuple[Backend, Cost]:
+        diag = diagnostics
+        largest_subsystem = (
+            max(stats["num_qubits"] for stats in metrics_seq)
+            if metrics_seq
+            else 0
+        )
+
         if allow_tableau and names and all(n in CLIFFORD_GATES for n in names):
-            cost = self.estimator.tableau(num_qubits, num_gates)
+            tableau_costs = [
+                self.estimator.tableau(m["num_qubits"], m["num_gates"])
+                for m in metrics_seq
+            ]
+            cost = _sequential_cost(tableau_costs)
             tableau_reasons: list[str] = []
             feasible = True
             if max_memory is not None and cost.memory > max_memory:
@@ -160,19 +429,24 @@ class MethodSelector:
                 }
 
         clifford_t = names and all(n in CLIFFORD_PLUS_T_GATES for n in names)
-        num_t_gates = sum(1 for n in names if n in {"T", "TDG"})
 
         ext_cost = None
+        total_t = sum(stats["num_t"] for stats in metrics_seq)
         if clifford_t and names:
-            num_clifford = num_gates - num_t_gates - num_meas
-            num_clifford = max(0, num_clifford)
-            ext_cost = self.estimator.extended_stabilizer(
-                num_qubits,
-                num_clifford,
-                num_t_gates,
-                num_meas=num_meas,
-                depth=num_gates,
-            )
+            ext_costs = []
+            for stats in metrics_seq:
+                num_clifford = stats["num_gates"] - stats["num_t"] - stats["num_meas"]
+                num_clifford = max(0, num_clifford)
+                ext_costs.append(
+                    self.estimator.extended_stabilizer(
+                        stats["num_qubits"],
+                        num_clifford,
+                        stats["num_t"],
+                        num_meas=stats["num_meas"],
+                        depth=stats["num_gates"],
+                    )
+                )
+            ext_cost = _sequential_cost(ext_costs)
             ext_reasons: list[str] = []
             ext_feasible = True
             if max_memory is not None and ext_cost.memory > max_memory:
@@ -190,7 +464,7 @@ class MethodSelector:
                     "feasible": ext_feasible,
                     "reasons": ext_reasons,
                     "cost": ext_cost,
-                    "num_t_gates": num_t_gates,
+                    "num_t_gates": total_t,
                 }
         else:
             candidates = {}
@@ -199,7 +473,7 @@ class MethodSelector:
                 diag_backends[Backend.EXTENDED_STABILIZER] = {
                     "feasible": False,
                     "reasons": [reason],
-                    "num_t_gates": num_t_gates,
+                    "num_t_gates": total_t,
                 }
 
         # ------------------------------------------------------------------
@@ -328,7 +602,14 @@ class MethodSelector:
             metrics["mps_max_interaction_distance"] = max_interaction_distance
 
         if dd_metric:
-            dd_cost = self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+            dd_costs = [
+                self.estimator.decision_diagram(
+                    num_gates=stats["num_gates"],
+                    frontier=stats["num_qubits"],
+                )
+                for stats in metrics_seq
+            ]
+            dd_cost = _sequential_cost(dd_costs)
             dd_reasons: list[str] = []
             feasible = True
             if max_memory is not None and dd_cost.memory > max_memory:
@@ -366,17 +647,49 @@ class MethodSelector:
                     chi = chi_cap
                 else:
                     infeasible_chi = True
-            mps_cost = self.estimator.mps(
-                num_qubits,
-                num_1q + num_meas,
-                num_2q,
-                chi=chi,
-                svd=True,
-                long_range_fraction=long_range_fraction,
-                long_range_extent=long_range_extent,
+            over_fraction = (
+                long_range_fraction
+                > config.DEFAULT.mps_long_range_fraction_threshold
             )
+            over_extent = (
+                long_range_extent
+                > config.DEFAULT.mps_long_range_extent_threshold
+            )
+            enforce_locality = (
+                over_fraction
+                and over_extent
+                and (
+                    largest_subsystem
+                    >= config.DEFAULT.mps_locality_strict_qubits
+                    or max_interaction_distance
+                    >= config.DEFAULT.mps_locality_strict_distance
+                )
+            )
+            locality_reasons: list[str] = []
+            if over_fraction:
+                locality_reasons.append(
+                    "non-local interactions exceed fraction threshold"
+                )
+            if over_extent:
+                locality_reasons.append("interaction span exceeds extent threshold")
+            mps_costs = [
+                self.estimator.mps(
+                    stats["num_qubits"],
+                    stats["num_1q"] + stats["num_meas"],
+                    stats["num_2q"],
+                    chi=chi,
+                    svd=True,
+                    long_range_fraction=long_range_fraction,
+                    long_range_extent=long_range_extent,
+                )
+                for stats in metrics_seq
+            ]
+            mps_cost = _sequential_cost(mps_costs)
             mps_reasons: list[str] = []
             feasible = True
+            if enforce_locality:
+                mps_reasons.extend(locality_reasons)
+                feasible = False
             if infeasible_chi:
                 mps_reasons.append("bond dimension exceeds memory limit")
                 feasible = False
@@ -396,6 +709,8 @@ class MethodSelector:
                     "long_range_extent": long_range_extent,
                     "max_interaction_distance": max_interaction_distance,
                 }
+                if locality_reasons:
+                    entry["locality_warnings"] = locality_reasons
                 if chi_cap is not None:
                     entry["chi_limit"] = chi_cap
                 diag_backends[Backend.MPS] = entry
@@ -411,7 +726,16 @@ class MethodSelector:
                 "max_interaction_distance": 0,
             }
 
-        sv_cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+        sv_costs = [
+            self.estimator.statevector(
+                stats["num_qubits"],
+                stats["num_1q"],
+                stats["num_2q"],
+                stats["num_meas"],
+            )
+            for stats in metrics_seq
+        ]
+        sv_cost = _sequential_cost(sv_costs)
         sv_reasons: list[str] = []
         sv_feasible = True
         if max_memory is not None and sv_cost.memory > max_memory:

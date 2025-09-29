@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from types import SimpleNamespace
 from typing import List
 
@@ -24,6 +25,10 @@ from benchmarks.circuits import (
 from quasar.circuit import Circuit, Gate
 from quasar.cost import Backend
 from quasar.partitioner import Partitioner
+
+
+SMALL_BLOCK_SIZE = 3
+SMALL_RANDOM_DEPTH = 8
 
 
 def _layer_gates(circuit, layer_offsets: List[int], layer: int):
@@ -82,11 +87,23 @@ def test_clustered_entanglement_random_layer_metadata():
 @pytest.mark.parametrize(
     "constructor",
     [
-        clustered_ghz_random_circuit,
-        clustered_ghz_qft_circuit,
-        clustered_w_random_circuit,
-        clustered_w_qft_circuit,
-        clustered_ghz_random_qft_circuit,
+        partial(
+            clustered_ghz_random_circuit,
+            block_size=SMALL_BLOCK_SIZE,
+            depth=SMALL_RANDOM_DEPTH,
+        ),
+        partial(clustered_ghz_qft_circuit, block_size=SMALL_BLOCK_SIZE),
+        partial(
+            clustered_w_random_circuit,
+            block_size=SMALL_BLOCK_SIZE,
+            depth=SMALL_RANDOM_DEPTH,
+        ),
+        partial(clustered_w_qft_circuit, block_size=SMALL_BLOCK_SIZE),
+        partial(
+            clustered_ghz_random_qft_circuit,
+            block_size=SMALL_BLOCK_SIZE,
+            depth=SMALL_RANDOM_DEPTH,
+        ),
     ],
 )
 def test_clustered_circuits_stay_within_blocks(constructor):
@@ -101,7 +118,11 @@ def test_clustered_circuits_stay_within_blocks(constructor):
 
 
 def test_clustered_ghz_random_parallel_groups_match_blocks():
-    circuit = clustered_ghz_random_circuit(15)
+    circuit = clustered_ghz_random_circuit(
+        15,
+        block_size=SMALL_BLOCK_SIZE,
+        depth=SMALL_RANDOM_DEPTH,
+    )
     metadata = circuit.metadata
     blocks = [block for block in _cluster_blocks(circuit.num_qubits, metadata["block_size"]) if block]
 

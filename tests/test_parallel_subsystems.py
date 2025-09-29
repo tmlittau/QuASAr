@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from benchmarks.parallel_circuits import many_ghz_subsystems
 from quasar.cost import Backend
+from quasar.method_selector import MethodSelector
 from quasar.planner import Planner
 
 
@@ -56,3 +59,46 @@ def test_parallel_groups_with_batched_planner() -> None:
     assert step.parallel == expected_groups
     assert step.start == 0
     assert step.end == len(circuit.gates)
+
+
+def test_method_selector_respects_parallel_memory_limits() -> None:
+    """Selector should base memory on the largest independent subsystem."""
+
+    num_groups = 6
+    group_size = 5
+    circuit = many_ghz_subsystems(num_groups=num_groups, group_size=group_size)
+    selector = MethodSelector()
+
+    total_gates = len(circuit.gates)
+    naive_tableau_cost = selector.estimator.tableau(
+        circuit.num_qubits, total_gates
+    )
+
+    single_circuit = many_ghz_subsystems(num_groups=1, group_size=group_size)
+    single_tableau_cost = selector.estimator.tableau(
+        single_circuit.num_qubits, len(single_circuit.gates)
+    )
+
+    assert naive_tableau_cost.memory > single_tableau_cost.memory
+
+    memory_limit = single_tableau_cost.memory * 3
+    assert memory_limit < naive_tableau_cost.memory
+
+    diagnostics: dict[str, object] = {}
+    backend, cost = selector.select(
+        circuit.gates,
+        circuit.num_qubits,
+        max_memory=memory_limit,
+        diagnostics=diagnostics,
+    )
+
+    assert backend is Backend.TABLEAU
+    assert cost.memory == pytest.approx(single_tableau_cost.memory)
+
+    assert diagnostics["selected_backend"] is Backend.TABLEAU
+    subsystems = diagnostics.get("parallel_subsystems")
+    assert subsystems is not None
+    assert len(subsystems) == num_groups
+    for entry in subsystems:
+        assert entry["backend"] is Backend.TABLEAU
+        assert entry["cost"].memory == pytest.approx(single_tableau_cost.memory)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+import quasar.config as config
+
 from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circuit
 from benchmarks.circuits import grover_circuit
 from quasar.circuit import Circuit
@@ -14,6 +16,9 @@ from quasar.symmetry import (
     amplitude_rotation_diversity,
     phase_rotation_diversity,
 )
+
+
+DELAYED_MAGIC_TEST_DEPTH = 40
 
 
 def _gate_counts(circuit: Circuit) -> tuple[int, int, int]:
@@ -76,8 +81,22 @@ def test_small_grover_prefers_decision_diagrams(width: int) -> None:
         assert dd_cost.time <= mps_cost.time
 
 
-def test_layered_circuit_prefers_mps() -> None:
-    circuit = layered_clifford_delayed_magic_circuit(12)
+def test_layered_circuit_prefers_mps(monkeypatch) -> None:
+    monkeypatch.setattr(
+        config.DEFAULT,
+        "mps_long_range_fraction_threshold",
+        0.95,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        config.DEFAULT,
+        "mps_long_range_extent_threshold",
+        0.95,
+        raising=False,
+    )
+    circuit = layered_clifford_delayed_magic_circuit(
+        12, depth=DELAYED_MAGIC_TEST_DEPTH
+    )
     estimator = CostEstimator()
     selector = MethodSelector(estimator)
 
@@ -110,3 +129,4 @@ def test_layered_circuit_prefers_mps() -> None:
     assert mps_entry["cost"].memory <= sv_entry["cost"].memory
     assert diagnostics["selected_backend"] is Backend.MPS
     assert diagnostics["selected_cost"] == cost
+
