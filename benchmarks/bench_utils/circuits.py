@@ -1169,63 +1169,118 @@ def clustered_entanglement_circuit(
     return circuit
 
 
-def clustered_ghz_random_circuit(num_qubits: int) -> Circuit:
-    """Prepare GHZ clusters followed by deep random layers."""
+def clustered_ghz_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    depth: int | Sequence[int] | None = None,
+    seed: int | None = 1337,
+) -> Circuit:
+    """Prepare GHZ clusters followed by random entangling layers.
 
+    Parameters
+    ----------
+    num_qubits:
+        Total number of qubits in the circuit.
+    block_size:
+        Size of each independent GHZ block. Defaults to ``5`` to match the
+        benchmark configuration but can be reduced in tests to keep the gate
+        count manageable.
+    depth:
+        Optional override for the number of random layers applied to each
+        block. When omitted the benchmark depth of ``600`` is used.
+    seed:
+        Random seed forwarded to :func:`clustered_entanglement_circuit`.
+    """
+
+    random_depth = 600 if depth is None else depth
     return clustered_entanglement_circuit(
         num_qubits,
-        block_size=5,
+        block_size=block_size,
         state="ghz",
         entangler="random",
-        depth=600,
+        depth=random_depth,
+        seed=seed,
     )
 
 
-def clustered_ghz_qft_circuit(num_qubits: int) -> Circuit:
-    """Prepare GHZ clusters followed by a global QFT."""
+def clustered_ghz_qft_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    seed: int | None = 1337,
+) -> Circuit:
+    """Prepare GHZ clusters followed by a global QFT.
+
+    ``block_size`` and ``seed`` are exposed so tests can shrink the circuit
+    while benchmarks retain the original defaults.
+    """
 
     return clustered_entanglement_circuit(
         num_qubits,
-        block_size=5,
+        block_size=block_size,
         state="ghz",
         entangler="qft",
         depth=0,
+        seed=seed,
     )
 
 
-def clustered_w_random_circuit(num_qubits: int) -> Circuit:
+def clustered_w_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    depth: int | Sequence[int] | None = None,
+    seed: int | None = 1337,
+) -> Circuit:
     """Prepare W-state clusters followed by random entangling layers."""
 
+    random_depth = 600 if depth is None else depth
     return clustered_entanglement_circuit(
         num_qubits,
-        block_size=5,
+        block_size=block_size,
         state="w",
         entangler="random",
-        depth=600,
+        depth=random_depth,
+        seed=seed,
     )
 
 
-def clustered_w_qft_circuit(num_qubits: int) -> Circuit:
+def clustered_w_qft_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    seed: int | None = 1337,
+) -> Circuit:
     """Prepare W-state clusters followed by a QFT."""
 
     return clustered_entanglement_circuit(
         num_qubits,
-        block_size=5,
+        block_size=block_size,
         state="w",
         entangler="qft",
         depth=0,
+        seed=seed,
     )
 
 
-def clustered_ghz_random_qft_circuit(num_qubits: int) -> Circuit:
+def clustered_ghz_random_qft_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    depth: int | Sequence[int] | None = None,
+    seed: int | None = 1337,
+) -> Circuit:
     """Prepare GHZ clusters, random layers and a final QFT."""
 
+    random_depth = 600 if depth is None else depth
     return clustered_entanglement_circuit(
         num_qubits,
-        block_size=5,
+        block_size=block_size,
         state="ghz",
         entangler="random+qft",
-        depth=600,
+        depth=random_depth,
+        seed=seed,
     )
 
 
@@ -1271,11 +1326,25 @@ def layered_clifford_midpoint_circuit(num_qubits: int) -> Circuit:
     )
 
 
-def layered_clifford_delayed_magic_circuit(num_qubits: int) -> Circuit:
-    """Delay the introduction of non-Clifford gates to late layers."""
+def layered_clifford_delayed_magic_circuit(
+    num_qubits: int,
+    *,
+    depth: int = 2000,
+    fraction_clifford: float = 0.8,
+    seed: int | None = 2025,
+) -> Circuit:
+    """Delay the introduction of non-Clifford gates to late layers.
+
+    Parameters mirror :func:`layered_clifford_nonclifford_circuit` so unit tests
+    can reduce ``depth`` to keep runtimes low while benchmarks retain the
+    original heavy configuration.
+    """
 
     return layered_clifford_nonclifford_circuit(
-        num_qubits, depth=2000, fraction_clifford=0.8
+        num_qubits,
+        depth=depth,
+        fraction_clifford=fraction_clifford,
+        seed=seed,
     )
 
 

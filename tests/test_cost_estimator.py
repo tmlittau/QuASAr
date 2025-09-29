@@ -7,8 +7,13 @@ from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circu
 from quasar.cost import CostEstimator
 
 
+DELAYED_MAGIC_TEST_DEPTH = 40
+
+
 def test_bond_dimensions_respect_local_schmidt_cap() -> None:
-    circuit = layered_clifford_delayed_magic_circuit(12)
+    circuit = layered_clifford_delayed_magic_circuit(
+        12, depth=DELAYED_MAGIC_TEST_DEPTH
+    )
     estimator = CostEstimator()
 
     gates = list(circuit.gates)
@@ -41,7 +46,9 @@ def _gate_counts(circuit) -> tuple[int, int, int]:
 
 
 def test_scalar_chi_matches_per_cut_cap() -> None:
-    circuit = layered_clifford_delayed_magic_circuit(12)
+    circuit = layered_clifford_delayed_magic_circuit(
+        12, depth=DELAYED_MAGIC_TEST_DEPTH
+    )
     estimator = CostEstimator()
 
     num_1q, num_2q, num_meas = _gate_counts(circuit)
