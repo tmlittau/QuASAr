@@ -461,56 +461,62 @@ class BenchmarkRunner:
             elif quick:
                 use_quick = True
 
+            backend_choice_name = None
             if use_quick:
-                tracemalloc.start()
                 select_backend = getattr(scheduler, "select_backend", None)
                 if callable(select_backend):
                     backend_choice = select_backend(circuit, backend=backend)
                 else:
                     backend_choice = backend
 
+                backend_map = getattr(scheduler, "backends", {})
                 backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
-                if backend_choice == Backend.STATEVECTOR:
-                    max_q = max_qubits_statevector(memory_bytes)
-                    if getattr(circuit, "num_qubits", 0) > max_q:
-                        msg = (
-                            f"circuit width {circuit.num_qubits} exceeds statevector "
-                            f"limit of {max_q} qubits"
-                        )
-                        warnings.warn(msg)
-                        tracemalloc.stop()
-                        record = {
-                            "framework": "quasar",
-                            "prepare_time": 0.0,
-                            "run_time": 0.0,
-                            "total_time": 0.0,
-                            "prepare_peak_memory": 0,
-                            "run_peak_memory": 0,
-                            "result": None,
-                            "failed": False,
-                            "backend": backend_choice_name,
-                            "unsupported": True,
-                            "comment": msg,
-                        }
-                        self.results.append(record)
-                        return record
+                backend_impl = backend_map.get(backend_choice)
+                if backend_choice is None or backend_impl is None:
+                    use_quick = False
+                else:
+                    tracemalloc.start()
+                    if backend_choice == Backend.STATEVECTOR:
+                        max_q = max_qubits_statevector(memory_bytes)
+                        if getattr(circuit, "num_qubits", 0) > max_q:
+                            msg = (
+                                f"circuit width {circuit.num_qubits} exceeds statevector "
+                                f"limit of {max_q} qubits"
+                            )
+                            warnings.warn(msg)
+                            tracemalloc.stop()
+                            record = {
+                                "framework": "quasar",
+                                "prepare_time": 0.0,
+                                "run_time": 0.0,
+                                "total_time": 0.0,
+                                "prepare_peak_memory": 0,
+                                "run_peak_memory": 0,
+                                "result": None,
+                                "failed": False,
+                                "backend": backend_choice_name,
+                                "unsupported": True,
+                                "comment": msg,
+                            }
+                            self.results.append(record)
+                            return record
 
-                start_prepare = time.perf_counter()
-                sim = type(scheduler.backends[backend_choice])()
-                sim.load(circuit.num_qubits)
-                prepare_time = time.perf_counter() - start_prepare
-                _, prepare_peak_memory = tracemalloc.get_traced_memory()
-                tracemalloc.reset_peak()
-                start_run = time.perf_counter()
-                for g in getattr(circuit, "gates", []):
-                    sim.apply_gate(g.gate, g.qubits, g.params)
-                result = sim.extract_ssd()
-                run_time = time.perf_counter() - start_run
-                result = result if result is not None else getattr(circuit, "ssd", None)
-                _, run_peak_memory = tracemalloc.get_traced_memory()
-                tracemalloc.stop()
-                backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
-            else:
+                    start_prepare = time.perf_counter()
+                    sim = backend_impl()
+                    sim.load(circuit.num_qubits)
+                    prepare_time = time.perf_counter() - start_prepare
+                    _, prepare_peak_memory = tracemalloc.get_traced_memory()
+                    tracemalloc.reset_peak()
+                    start_run = time.perf_counter()
+                    for g in getattr(circuit, "gates", []):
+                        sim.apply_gate(g.gate, g.qubits, g.params)
+                    result = sim.extract_ssd()
+                    run_time = time.perf_counter() - start_run
+                    result = result if result is not None else getattr(circuit, "ssd", None)
+                    _, run_peak_memory = tracemalloc.get_traced_memory()
+                    tracemalloc.stop()
+                    backend_choice_name = getattr(backend_choice, "name", str(backend_choice))
+            if not use_quick:
                 tracemalloc.start()
                 if planner is not None:
                     start_prepare = time.perf_counter()
