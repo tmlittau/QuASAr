@@ -139,6 +139,7 @@ class MethodSelector:
         max_time: float | None = None,
         target_accuracy: float | None = None,
         diagnostics: dict[str, Any] | None = None,
+        _split_parallel: bool = True,
     ) -> Tuple[Backend, Cost]:
         """Return the preferred backend and its cost for ``gates``.
 
@@ -183,7 +184,7 @@ class MethodSelector:
         num_2q = num_gates - num_1q - num_meas
         num_t_gates = sum(1 for n in names if n in {"T", "TDG"})
 
-        groups = _parallel_groups(gates) if num_qubits > 1 else []
+        groups = _parallel_groups(gates) if (num_qubits > 1 and _split_parallel) else []
         group_stats = [_statistics(qubits, seq) for qubits, seq in groups if qubits]
         if len(group_stats) <= 1 and (
             not group_stats or group_stats[0]["num_qubits"] == num_qubits
@@ -211,10 +212,8 @@ class MethodSelector:
         diag_backends: dict[Backend, dict[str, Any]] | None = None
         diag: dict[str, Any] | None = diagnostics
 
-        # Clifford fragments can run on the tableau simulator directly.
         if diag is not None:
-            diag_backends = {}
-            diag["backends"] = diag_backends
+            diag_backends = diag.setdefault("backends", {})
             metrics = diag.setdefault("metrics", {})
             metrics.update({
                 "num_qubits": num_qubits,
@@ -230,6 +229,150 @@ class MethodSelector:
                 )
         else:
             diag_backends = None
+
+        if _split_parallel and len(metrics_seq) > 1:
+            subsystem_info: List[Dict[str, Any]] = []
+            subsystem_costs: List[Cost] = []
+            subsystem_backend: Backend | None = None
+            consistent_backend = True
+
+            for qubits, seq in groups:
+                if not qubits:
+                    continue
+                sub_diag: dict[str, Any] | None
+                if diag is not None:
+                    sub_diag = {}
+                else:
+                    sub_diag = None
+                backend, cost = self.select(
+                    seq,
+                    len(qubits),
+                    sparsity=None,
+                    phase_rotation_diversity=None,
+                    amplitude_rotation_diversity=None,
+                    allow_tableau=allow_tableau,
+                    max_memory=max_memory,
+                    max_time=max_time,
+                    target_accuracy=target_accuracy,
+                    diagnostics=sub_diag,
+                    _split_parallel=True,
+                )
+                subsystem_costs.append(cost)
+                if subsystem_backend is None:
+                    subsystem_backend = backend
+                elif backend != subsystem_backend:
+                    consistent_backend = False
+                if diag is not None:
+                    subsystem_info.append(
+                        {
+                            "qubits": tuple(qubits),
+                            "backend": backend,
+                            "cost": cost,
+                            "diagnostics": sub_diag,
+                        }
+                    )
+
+            if diag is not None:
+                diag["parallel_subsystems"] = subsystem_info
+
+            if subsystem_backend is not None and consistent_backend:
+                combined_cost = _sequential_cost(subsystem_costs)
+                reasons: list[str] = []
+                feasible = True
+                if max_memory is not None and combined_cost.memory > max_memory:
+                    reasons.append("memory > threshold")
+                    feasible = False
+                if max_time is not None and combined_cost.time > max_time:
+                    reasons.append("time > threshold")
+                    feasible = False
+                if feasible:
+                    if diag is not None and diag_backends is not None:
+                        entry = diag_backends.setdefault(
+                            subsystem_backend,
+                            {
+                                "feasible": True,
+                                "reasons": [],
+                                "cost": combined_cost,
+                            },
+                        )
+                        entry.update(
+                            {
+                                "feasible": True,
+                                "reasons": [],
+                                "cost": combined_cost,
+                                "selected": True,
+                                "parallel": True,
+                            }
+                        )
+                        for other in Backend:
+                            if other == subsystem_backend:
+                                continue
+                            diag_backends.setdefault(
+                                other,
+                                {
+                                    "feasible": False,
+                                    "reasons": [
+                                        "skipped: parallel subsystem backend preferred"
+                                    ],
+                                    "selected": False,
+                                },
+                            )
+                        diag["selected_backend"] = subsystem_backend
+                        diag["selected_cost"] = combined_cost
+                    return subsystem_backend, combined_cost
+                else:
+                    if diag_backends is not None and subsystem_backend is not None:
+                        diag_backends[subsystem_backend] = {
+                            "feasible": False,
+                            "reasons": reasons,
+                            "cost": combined_cost,
+                            "parallel": True,
+                        }
+
+        return self._select_fragment(
+            gates=gates,
+            names=names,
+            num_qubits=num_qubits,
+            num_gates=num_gates,
+            num_meas=num_meas,
+            num_1q=num_1q,
+            num_2q=num_2q,
+            num_t_gates=num_t_gates,
+            metrics_seq=metrics_seq,
+            allow_tableau=allow_tableau,
+            max_memory=max_memory,
+            max_time=max_time,
+            target_accuracy=target_accuracy,
+            sparsity=sparsity,
+            phase_rotation_diversity=phase_rotation_diversity,
+            amplitude_rotation_diversity=amplitude_rotation_diversity,
+            diagnostics=diag,
+            diag_backends=diag_backends,
+        )
+
+    def _select_fragment(
+        self,
+        *,
+        gates: Sequence['Gate'],
+        names: Sequence[str],
+        num_qubits: int,
+        num_gates: int,
+        num_meas: int,
+        num_1q: int,
+        num_2q: int,
+        num_t_gates: int,
+        metrics_seq: Sequence[Dict[str, Any]],
+        allow_tableau: bool,
+        max_memory: float | None,
+        max_time: float | None,
+        target_accuracy: float | None,
+        sparsity: float | None,
+        phase_rotation_diversity: int | None,
+        amplitude_rotation_diversity: int | None,
+        diagnostics: dict[str, Any] | None,
+        diag_backends: dict[Backend, dict[str, Any]] | None,
+    ) -> Tuple[Backend, Cost]:
+        diag = diagnostics
 
         if allow_tableau and names and all(n in CLIFFORD_GATES for n in names):
             tableau_costs = [

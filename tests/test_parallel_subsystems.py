@@ -69,43 +69,36 @@ def test_method_selector_respects_parallel_memory_limits() -> None:
     circuit = many_ghz_subsystems(num_groups=num_groups, group_size=group_size)
     selector = MethodSelector()
 
-    def _counts(gates):
-        total = len(gates)
-        meas = sum(1 for gate in gates if gate.gate.upper() in {"MEASURE", "RESET"})
-        singles = sum(
-            1
-            for gate in gates
-            if len(gate.qubits) == 1 and gate.gate.upper() not in {"MEASURE", "RESET"}
-        )
-        return singles, total - singles - meas, meas
-
-    total_1q, total_2q, total_meas = _counts(circuit.gates)
-    combined_cost = selector.estimator.statevector(
-        circuit.num_qubits, total_1q, total_2q, total_meas
+    total_gates = len(circuit.gates)
+    naive_tableau_cost = selector.estimator.tableau(
+        circuit.num_qubits, total_gates
     )
 
     single_circuit = many_ghz_subsystems(num_groups=1, group_size=group_size)
-    single_1q, single_2q, single_meas = _counts(single_circuit.gates)
-    single_cost = selector.estimator.statevector(
-        single_circuit.num_qubits, single_1q, single_2q, single_meas
+    single_tableau_cost = selector.estimator.tableau(
+        single_circuit.num_qubits, len(single_circuit.gates)
     )
 
-    assert combined_cost.memory > single_cost.memory
+    assert naive_tableau_cost.memory > single_tableau_cost.memory
 
-    memory_limit = single_cost.memory * 10
-    assert memory_limit < combined_cost.memory
+    memory_limit = single_tableau_cost.memory * 3
+    assert memory_limit < naive_tableau_cost.memory
 
     diagnostics: dict[str, object] = {}
     backend, cost = selector.select(
         circuit.gates,
         circuit.num_qubits,
         max_memory=memory_limit,
-        allow_tableau=False,
         diagnostics=diagnostics,
     )
 
-    assert backend in {Backend.STATEVECTOR, Backend.MPS}
-    backends = diagnostics["backends"]
-    sv_entry = backends[Backend.STATEVECTOR]
-    assert sv_entry["feasible"] is True
-    assert sv_entry["cost"].memory == pytest.approx(single_cost.memory)
+    assert backend is Backend.TABLEAU
+    assert cost.memory == pytest.approx(single_tableau_cost.memory)
+
+    assert diagnostics["selected_backend"] is Backend.TABLEAU
+    subsystems = diagnostics.get("parallel_subsystems")
+    assert subsystems is not None
+    assert len(subsystems) == num_groups
+    for entry in subsystems:
+        assert entry["backend"] is Backend.TABLEAU
+        assert entry["cost"].memory == pytest.approx(single_tableau_cost.memory)
