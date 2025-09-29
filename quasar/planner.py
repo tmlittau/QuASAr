@@ -948,6 +948,25 @@ class Planner:
 
         boundaries = [prefix_qubits[i] & future_qubits[i] for i in range(n + 1)]
 
+        # Prefix aggregates used when evaluating candidate segments.  These
+        # values allow the DP loops to avoid repeatedly slicing ``gates`` just
+        # to count gate types.
+        meas_ops = {"MEASURE", "RESET"}
+        t_ops = {"T", "TDG"}
+        prefix_1q = [0] * (n + 1)
+        prefix_2q = [0] * (n + 1)
+        prefix_meas = [0] * (n + 1)
+        prefix_t = [0] * (n + 1)
+        for idx, gate in enumerate(gates, start=1):
+            name = gate.gate.upper()
+            is_measure = name in meas_ops
+            is_1q = len(gate.qubits) == 1 and not is_measure
+            is_multi = len(gate.qubits) > 1 and not is_measure
+            prefix_1q[idx] = prefix_1q[idx - 1] + (1 if is_1q else 0)
+            prefix_2q[idx] = prefix_2q[idx - 1] + (1 if is_multi else 0)
+            prefix_meas[idx] = prefix_meas[idx - 1] + (1 if is_measure else 0)
+            prefix_t[idx] = prefix_t[idx - 1] + (1 if name in t_ops else 0)
+
         table: List[Dict[Optional[Backend], DPEntry]] = [dict() for _ in range(n + 1)]
         infeasible_segments: List[Tuple[int, int, List[Tuple[Backend, Cost]]]] = []
         start_backend = initial_backend if initial_backend is not None else None
@@ -963,34 +982,48 @@ class Planner:
                 j = indices[idx_j]
                 if window is not None and i - j > window:
                     continue
-                segment = gates[j:i]
-                qubits = {q for g in segment for q in g.qubits}
-                num_qubits = len(qubits)
                 num_gates = i - j
-                num_meas = sum(
-                    1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"}
-                )
-                num_1q = sum(
-                    1
-                    for g in segment
-                    if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
-                )
-                num_2q = num_gates - num_1q - num_meas
-                num_t_segment = sum(1 for g in segment if g.gate.upper() in {"T", "TDG"})
-                segment_depth = _circuit_depth(segment)
-                groups = part.parallel_groups(segment) if num_qubits > 1 else []
-                backends = self._order_backends(
-                    _supported_backends(
-                        segment,
-                        sparsity=sparsity,
-                        phase_rotation_diversity=phase_rotation_diversity,
-                        amplitude_rotation_diversity=amplitude_rotation_diversity,
-                        allow_tableau=allow_tableau,
-                        estimator=self.estimator,
-                        max_memory=max_memory,
-                    ),
-                    dd_metric=dd_metric,
-                )
+                num_meas = prefix_meas[i] - prefix_meas[j]
+                num_1q = prefix_1q[i] - prefix_1q[j]
+                num_2q = prefix_2q[i] - prefix_2q[j]
+                num_t_segment = prefix_t[i] - prefix_t[j]
+
+                segment: List["Gate"] | None = None
+                segment_qubits: Set[int] | None = None
+                segment_groups: List[
+                    Tuple[Tuple[int, ...], List["Gate"]]
+                ] | None = None
+                segment_depth: int | None = None
+
+                def ensure_segment() -> List["Gate"]:
+                    nonlocal segment
+                    if segment is None:
+                        segment = gates[j:i]
+                    return segment
+
+                def ensure_qubits() -> Set[int]:
+                    nonlocal segment_qubits
+                    if segment_qubits is None:
+                        segment_qubits = {
+                            q for gate in ensure_segment() for q in gate.qubits
+                        }
+                    return segment_qubits
+
+                def ensure_groups() -> List[Tuple[Tuple[int, ...], List["Gate"]]]:
+                    nonlocal segment_groups
+                    if segment_groups is None:
+                        if len(ensure_qubits()) > 1:
+                            segment_groups = part.parallel_groups(ensure_segment())
+                        else:
+                            segment_groups = []
+                    return segment_groups
+
+                def ensure_depth() -> int:
+                    nonlocal segment_depth
+                    if segment_depth is None:
+                        segment_depth = _circuit_depth(ensure_segment())
+                    return segment_depth
+                  
                 if (
                     not backends
                     and max_memory is not None
@@ -1008,6 +1041,10 @@ class Planner:
                         ),
                         dd_metric=dd_metric,
                     )
+
+                num_qubits = len(ensure_qubits())
+                requires_true_depth = num_qubits > 1 and num_2q > 0
+
                 if forced_backend is not None:
                     if forced_backend not in backends:
                         raise ValueError(
@@ -1017,6 +1054,12 @@ class Planner:
                 candidates: List[Tuple[Backend, Cost]] = []
                 violations: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
+                    depth_hint: int | None = None
+                    if backend == Backend.EXTENDED_STABILIZER:
+                        if requires_true_depth:
+                            depth_hint = ensure_depth()
+                        else:
+                            depth_hint = num_gates
                     cost = _simulation_cost(
                         self.estimator,
                         backend,
@@ -1025,8 +1068,9 @@ class Planner:
                         num_2q,
                         num_meas,
                         num_t_gates=num_t_segment,
-                        depth=segment_depth,
+                        depth=depth_hint,
                     )
+                    groups = ensure_groups()
                     if len(groups) > 1:
                         par_cost = _parallel_simulation_cost(
                             self.estimator, backend, groups
@@ -1041,7 +1085,7 @@ class Planner:
                     if max_memory is not None:
                         if not backends:
                             retry_backends = _supported_backends(
-                                segment,
+                                ensure_segment(),
                                 sparsity=sparsity,
                                 phase_rotation_diversity=phase_rotation_diversity,
                                 amplitude_rotation_diversity=amplitude_rotation_diversity,
@@ -1050,6 +1094,12 @@ class Planner:
                                 max_memory=None,
                             )
                             for backend in retry_backends:
+                                depth_hint = None
+                                if backend == Backend.EXTENDED_STABILIZER:
+                                    if requires_true_depth:
+                                        depth_hint = ensure_depth()
+                                    else:
+                                        depth_hint = num_gates
                                 retry_cost = _simulation_cost(
                                     self.estimator,
                                     backend,
@@ -1058,8 +1108,9 @@ class Planner:
                                     num_2q,
                                     num_meas,
                                     num_t_gates=num_t_segment,
-                                    depth=segment_depth,
+                                    depth=depth_hint,
                                 )
+                                groups = ensure_groups()
                                 if len(groups) > 1:
                                     par_retry = _parallel_simulation_cost(
                                         self.estimator, backend, groups

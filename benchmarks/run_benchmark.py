@@ -43,7 +43,11 @@ try:  # package execution
     from .bench_utils import paper_figures
     from .bench_utils import showcase_benchmarks
     from .bench_utils.showcase_benchmarks import RUN_TIMEOUT_DEFAULT_SECONDS
-    from .bench_utils.theoretical_estimation_runner import collect_estimates
+    from .bench_utils.theoretical_estimation_runner import (
+        LARGE_GATE_THRESHOLD_DEFAULT,
+        LARGE_PLANNER_OVERRIDES_DEFAULT,
+        collect_estimates,
+    )
     from .bench_utils.theoretical_estimation_selection import (
         GROUPS as ESTIMATION_GROUPS,
         format_available_circuits as format_estimation_circuits,
@@ -68,7 +72,11 @@ except ImportError:  # pragma: no cover - script execution fallback
     from bench_utils.showcase_benchmarks import (  # type: ignore
         RUN_TIMEOUT_DEFAULT_SECONDS,
     )
-    from bench_utils.theoretical_estimation_runner import collect_estimates  # type: ignore
+    from bench_utils.theoretical_estimation_runner import (  # type: ignore
+        LARGE_GATE_THRESHOLD_DEFAULT,
+        LARGE_PLANNER_OVERRIDES_DEFAULT,
+        collect_estimates,
+    )
     from bench_utils.theoretical_estimation_selection import (  # type: ignore
         GROUPS as ESTIMATION_GROUPS,
         format_available_circuits as format_estimation_circuits,
@@ -130,6 +138,24 @@ def _list_groups() -> str:
         circuits = ", ".join(members)
         lines.append(f"  - {name}: {circuits}")
     return "\n".join(lines)
+
+
+def _large_planner_overrides_from_args(args: argparse.Namespace) -> dict[str, object]:
+    """Extract tuned planner overrides from CLI arguments."""
+
+    mapping = {
+        "estimate_large_batch_size": "batch_size",
+        "estimate_large_horizon": "horizon",
+        "estimate_large_quick_max_qubits": "quick_max_qubits",
+        "estimate_large_quick_max_gates": "quick_max_gates",
+        "estimate_large_quick_max_depth": "quick_max_depth",
+    }
+    overrides: dict[str, object] = {}
+    for attr, key in mapping.items():
+        value = getattr(args, attr, None)
+        if value is not None:
+            overrides[key] = value
+    return overrides
 
 
 def run_showcase_suite(
@@ -196,6 +222,9 @@ def generate_theoretical_estimates(
     circuits: Sequence[str] | None = None,
     groups: Sequence[str] | None = None,
     database: BenchmarkDatabase | None = None,
+    enable_large_planner: bool = True,
+    large_gate_threshold: int | None = LARGE_GATE_THRESHOLD_DEFAULT,
+    large_planner_kwargs: dict[str, object] | None = None,
 ):
     """Return detailed and summary DataFrames for theoretical estimates."""
 
@@ -207,6 +236,9 @@ def generate_theoretical_estimates(
         paper_figures.BACKENDS,
         estimator,
         max_workers=workers,
+        enable_large_planner=enable_large_planner,
+        large_gate_threshold=large_gate_threshold,
+        large_planner_kwargs=large_planner_kwargs,
     )
     detail = build_dataframe(records, throughput)
     summary = build_summary(detail)
@@ -379,6 +411,9 @@ def _run_theoretical_estimation(
     workers: int | None,
     circuits: Sequence[str] | None,
     groups: Sequence[str] | None,
+    enable_large_planner: bool,
+    large_gate_threshold: int | None,
+    large_planner_kwargs: dict[str, object] | None,
     database_path: Path | None = None,
 ) -> None:
     """Execute the theoretical estimation pipeline and export artefacts."""
@@ -392,6 +427,9 @@ def _run_theoretical_estimation(
                 circuits=circuits,
                 groups=groups,
                 database=database,
+                enable_large_planner=enable_large_planner,
+                large_gate_threshold=large_gate_threshold,
+                large_planner_kwargs=large_planner_kwargs,
             )
     else:
         detail, summary, throughput = generate_theoretical_estimates(
@@ -400,6 +438,9 @@ def _run_theoretical_estimation(
             workers=workers,
             circuits=circuits,
             groups=groups,
+            enable_large_planner=enable_large_planner,
+            large_gate_threshold=large_gate_threshold,
+            large_planner_kwargs=large_planner_kwargs,
         )
 
     write_tables(detail, summary)
@@ -484,6 +525,70 @@ def _build_parser() -> argparse.ArgumentParser:
             " name[params]:q1,q2. Use --list-estimate-circuits for options."
         ),
     )
+    parser.add_argument(
+        "--estimate-large-planner",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Enable tuned planner settings for large simplified circuits."
+            " Use --no-estimate-large-planner to keep the default planner"
+            " behaviour."
+        ),
+    )
+    parser.add_argument(
+        "--estimate-large-threshold",
+        type=int,
+        default=LARGE_GATE_THRESHOLD_DEFAULT,
+        help=(
+            "Gate count on the simplified circuit that triggers the tuned"
+            " planner (set to 0 to disable, default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--estimate-large-batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner batch size.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['batch_size']}."
+        ),
+    )
+    parser.add_argument(
+        "--estimate-large-horizon",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner DP horizon.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['horizon']}."
+        ),
+    )
+    parser.add_argument(
+        "--estimate-large-quick-max-qubits",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner quick-path qubit limit.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['quick_max_qubits']}."
+        ),
+    )
+    parser.add_argument(
+        "--estimate-large-quick-max-gates",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner quick-path gate limit.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['quick_max_gates']}."
+        ),
+    )
+    parser.add_argument(
+        "--estimate-large-quick-max-depth",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner quick-path depth limit.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['quick_max_depth']}."
+        ),
+    )
     return parser
 
 
@@ -502,6 +607,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     if args.workers is not None and args.workers <= 0:
         parser.error("--workers must be a positive integer")
+    if args.estimate_large_threshold is not None and args.estimate_large_threshold < 0:
+        parser.error("--estimate-large-threshold must be non-negative")
+    for opt in (
+        "estimate_large_batch_size",
+        "estimate_large_horizon",
+        "estimate_large_quick_max_qubits",
+        "estimate_large_quick_max_gates",
+        "estimate_large_quick_max_depth",
+    ):
+        value = getattr(args, opt, None)
+        if value is not None and value <= 0:
+            parser.error(f"--{opt.replace('_', '-')} must be positive")
 
     return args
 
@@ -526,6 +643,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
         return
 
     throughput = args.ops_per_second if args.ops_per_second > 0 else None
+    large_overrides = _large_planner_overrides_from_args(args)
 
     if not args.estimate_only:
         LOGGER.info("Running showcase benchmarks")
@@ -539,6 +657,9 @@ def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
             workers=args.workers,
             circuits=args.estimate_circuits,
             groups=args.estimate_groups,
+            enable_large_planner=args.estimate_large_planner,
+            large_gate_threshold=args.estimate_large_threshold,
+            large_planner_kwargs=large_overrides or None,
             database_path=getattr(args, "database", None),
         )
 

@@ -2,7 +2,9 @@ from functools import lru_cache
 
 import pytest
 
+import quasar.planner as planner_module
 from quasar.circuit import Circuit
+from quasar.cost import Backend
 from quasar.planner import Planner, _simulation_cost, _supported_backends
 
 BASELINES = {
@@ -99,3 +101,55 @@ def test_planner_cost_table(name: str, circuit: Circuit) -> None:
     for method, cost in metrics.items():
         expected_cost = BASELINES[name][method]
         assert cost == expected_cost
+
+
+def test_dp_high_gate_prefix_aggregates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Large Clifford circuits should reuse cached aggregates."""
+
+    num_layers = 96
+    gates = []
+    for _ in range(num_layers):
+        gates.append({"gate": "H", "qubits": [0]})
+        gates.append({"gate": "S", "qubits": [0]})
+        gates.append({"gate": "X", "qubits": [0]})
+    circuit = Circuit(gates, use_classical_simplification=False)
+    assert len(circuit.gates) == num_layers * 3
+
+    sparsity = circuit.sparsity
+    phase_div = circuit.phase_rotation_diversity
+    amp_div = circuit.amplitude_rotation_diversity
+
+    baseline_planner = Planner()
+    baseline = baseline_planner._dp(
+        circuit.gates,
+        allow_tableau=True,
+        forced_backend=Backend.TABLEAU,
+        sparsity=sparsity,
+        phase_rotation_diversity=phase_div,
+        amplitude_rotation_diversity=amp_div,
+    )
+    baseline_cost = baseline.table[-1][Backend.TABLEAU].cost
+
+    planner = Planner()
+    depth_calls = 0
+    original_depth = planner_module._circuit_depth
+
+    def counting_depth(segment):
+        nonlocal depth_calls
+        depth_calls += 1
+        return original_depth(segment)
+
+    monkeypatch.setattr(planner_module, "_circuit_depth", counting_depth)
+    result = planner._dp(
+        circuit.gates,
+        allow_tableau=True,
+        sparsity=sparsity,
+        phase_rotation_diversity=phase_div,
+        amplitude_rotation_diversity=amp_div,
+    )
+
+    assert depth_calls == 0
+    assert result.final_backend == Backend.TABLEAU
+    final_cost = result.table[-1][Backend.TABLEAU].cost
+    assert final_cost.time == pytest.approx(baseline_cost.time)
+    assert final_cost.memory == pytest.approx(baseline_cost.memory)
