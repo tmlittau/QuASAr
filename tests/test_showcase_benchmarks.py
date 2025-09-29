@@ -22,8 +22,9 @@ from benchmarks.circuits import (
     layered_clifford_ramp_circuit,
 )
 from quasar.circuit import Circuit, Gate
-from quasar.cost import Backend
+from quasar.cost import Backend, CostEstimator
 from quasar.partitioner import Partitioner
+from quasar.planner import Planner, _parallel_simulation_cost
 
 
 def _layer_gates(circuit, layer_offsets: List[int], layer: int):
@@ -111,6 +112,45 @@ def test_clustered_ghz_random_parallel_groups_match_blocks():
     observed = sorted(tuple(sorted(qubits)) for qubits, _ in groups if qubits)
     expected = sorted(tuple(block) for block in blocks)
     assert observed == expected
+
+
+def test_clustered_parallel_groups_relax_memory_limit():
+    circuit = clustered_entanglement_circuit(
+        16,
+        block_size=4,
+        state="ghz",
+        entangler="random",
+        depth=6,
+        seed=7,
+    )
+    partitioner = Partitioner()
+    groups = partitioner.parallel_groups(list(circuit.gates))
+    # Ensure multiple independent groups are present so that parallel costs apply.
+    assert len(groups) > 1
+
+    estimator = CostEstimator()
+    num_qubits = len({q for g in circuit.gates for q in g.qubits})
+    num_meas = sum(1 for g in circuit.gates if g.gate.upper() in {"MEASURE", "RESET"})
+    num_1q = sum(
+        1
+        for g in circuit.gates
+        if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+    )
+    num_2q = len(circuit.gates) - num_1q - num_meas
+
+    naive_cost = estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+    parallel_cost = _parallel_simulation_cost(estimator, Backend.STATEVECTOR, groups)
+    # Parallel execution must reduce the estimated memory footprint versus the naive cost.
+    assert parallel_cost.memory < naive_cost.memory
+
+    limit = (parallel_cost.memory + naive_cost.memory) / 2.0
+
+    planner = Planner(max_memory=limit)
+    result = planner.plan(circuit)
+
+    assert result.final_backend is not None
+    final_entry = result.table[-1][result.final_backend]
+    assert final_entry.cost.memory <= limit
 
 
 def test_layered_clifford_transition_delays_magic():

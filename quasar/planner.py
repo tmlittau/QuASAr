@@ -373,12 +373,14 @@ def _supported_backends(
 
     clifford = names and all(name in CLIFFORD_GATES for name in names)
     if allow_tableau and clifford:
+        tableau_feasible = True
         if estimator is not None:
             cost = estimator.tableau(num_qubits, num_gates)
             # Memory check uses calibrated coefficients.
             if max_memory is not None and cost.memory > max_memory:
-                return []
-        return [Backend.TABLEAU]
+                tableau_feasible = False
+        if tableau_feasible:
+            return [Backend.TABLEAU]
 
     clifford_t = names and all(name in CLIFFORD_PLUS_T_GATES for name in names)
     num_t = sum(1 for name in names if name in {"T", "TDG"})
@@ -989,6 +991,23 @@ class Planner:
                     ),
                     dd_metric=dd_metric,
                 )
+                if (
+                    not backends
+                    and max_memory is not None
+                    and len(groups) > 1
+                ):
+                    backends = self._order_backends(
+                        _supported_backends(
+                            segment,
+                            sparsity=sparsity,
+                            phase_rotation_diversity=phase_rotation_diversity,
+                            amplitude_rotation_diversity=amplitude_rotation_diversity,
+                            allow_tableau=allow_tableau,
+                            estimator=self.estimator,
+                            max_memory=None,
+                        ),
+                        dd_metric=dd_metric,
+                    )
                 if forced_backend is not None:
                     if forced_backend not in backends:
                         raise ValueError(
