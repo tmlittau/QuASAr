@@ -19,7 +19,11 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
             sys.path.insert(0, str(path))
 
     importlib.import_module("quasar")
-    from theoretical_estimation_runner import collect_estimates  # type: ignore[no-redef]
+    from theoretical_estimation_runner import (  # type: ignore[no-redef]
+        LARGE_GATE_THRESHOLD_DEFAULT,
+        LARGE_PLANNER_OVERRIDES_DEFAULT,
+        collect_estimates,
+    )
     from theoretical_estimation_selection import (  # type: ignore[no-redef]
         GROUPS as ESTIMATION_GROUPS,
         format_available_circuits,
@@ -40,7 +44,11 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
     import paper_figures as paper_figures  # type: ignore[no-redef]
 else:  # pragma: no cover - package import path
     from . import paper_figures
-    from .theoretical_estimation_runner import collect_estimates
+    from .theoretical_estimation_runner import (
+        LARGE_GATE_THRESHOLD_DEFAULT,
+        LARGE_PLANNER_OVERRIDES_DEFAULT,
+        collect_estimates,
+    )
     from .theoretical_estimation_selection import (
         GROUPS as ESTIMATION_GROUPS,
         format_available_circuits,
@@ -123,7 +131,103 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Number of worker threads for estimate generation (default: auto).",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--large-planner",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Enable tuned planner settings for large simplified circuits."
+            " Use --no-large-planner to keep the default planner behaviour."
+        ),
+    )
+    parser.add_argument(
+        "--large-threshold",
+        type=int,
+        default=LARGE_GATE_THRESHOLD_DEFAULT,
+        help=(
+            "Gate count on the simplified circuit that triggers the tuned"
+            " planner (set to 0 to disable, default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--large-batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner batch size.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['batch_size']}."
+        ),
+    )
+    parser.add_argument(
+        "--large-horizon",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner DP horizon.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['horizon']}."
+        ),
+    )
+    parser.add_argument(
+        "--large-quick-max-qubits",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner quick-path qubit limit.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['quick_max_qubits']}."
+        ),
+    )
+    parser.add_argument(
+        "--large-quick-max-gates",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner quick-path gate limit.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['quick_max_gates']}."
+        ),
+    )
+    parser.add_argument(
+        "--large-quick-max-depth",
+        type=int,
+        default=None,
+        help=(
+            "Override the tuned planner quick-path depth limit.  Defaults to"
+            f" {LARGE_PLANNER_OVERRIDES_DEFAULT['quick_max_depth']}."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    if args.workers is not None and args.workers <= 0:
+        parser.error("--workers must be a positive integer")
+    if args.large_threshold is not None and args.large_threshold < 0:
+        parser.error("--large-threshold must be non-negative")
+    for opt in (
+        "large_batch_size",
+        "large_horizon",
+        "large_quick_max_qubits",
+        "large_quick_max_gates",
+        "large_quick_max_depth",
+    ):
+        value = getattr(args, opt, None)
+        if value is not None and value <= 0:
+            parser.error(f"--{opt.replace('_', '-')} must be positive")
+
+    return args
+
+
+def _large_planner_overrides_from_args(args: argparse.Namespace) -> dict[str, object]:
+    mapping = {
+        "large_batch_size": "batch_size",
+        "large_horizon": "horizon",
+        "large_quick_max_qubits": "quick_max_qubits",
+        "large_quick_max_gates": "quick_max_gates",
+        "large_quick_max_depth": "quick_max_depth",
+    }
+    overrides: dict[str, object] = {}
+    for attr, key in mapping.items():
+        value = getattr(args, attr, None)
+        if value is not None:
+            overrides[key] = value
+    return overrides
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -140,11 +244,15 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     estimator = load_estimator(args.calibration)
     specs = resolve_requested_specs(args.circuits, args.groups, default_group="showcase")
+    overrides = _large_planner_overrides_from_args(args)
     records = collect_estimates(
         specs,
         paper_figures.BACKENDS,
         estimator,
         max_workers=args.workers,
+        enable_large_planner=args.large_planner,
+        large_gate_threshold=args.large_threshold,
+        large_planner_kwargs=overrides or None,
     )
 
     detail = build_dataframe(records, ops_per_second)
