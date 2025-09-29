@@ -645,6 +645,10 @@ class CostEstimator:
         """
 
         n = num_qubits
+        per_cut_limit = [
+            2 ** min(i + 1, n - i - 1)
+            for i in range(max(0, n - 1))
+        ]
         if chi is None:
             if gates is None:
                 raise ValueError("gates must be provided when chi is None")
@@ -652,7 +656,8 @@ class CostEstimator:
         elif isinstance(chi, Iterable) and not isinstance(chi, (str, bytes)):
             bond_dims = list(chi)
         else:
-            bond_dims = [int(chi)] * max(0, n - 1)
+            scalar = max(int(chi), 1)
+            bond_dims = [min(scalar, cap) for cap in per_cut_limit]
 
         if len(bond_dims) < max(0, n - 1):
             bond_dims.extend([1] * (max(0, n - 1) - len(bond_dims)))
