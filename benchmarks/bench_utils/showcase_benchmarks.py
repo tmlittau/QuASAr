@@ -1017,8 +1017,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repetitions",
         type=int,
-        default=3,
-        help="Number of repetitions per configuration (default: 3).",
+        default=1,
+        help="Number of repetitions per configuration (default: %(default)s).",
     )
     parser.add_argument(
         "--run-timeout",

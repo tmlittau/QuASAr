@@ -762,7 +762,7 @@ def collect_backend_data(
     specs: Iterable[CircuitSpec],
     backends: Sequence[Backend],
     *,
-    repetitions: int = 3,
+    repetitions: int = 1,
     run_timeout: float | None = RUN_TIMEOUT_DEFAULT_SECONDS,
     max_workers: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -1092,7 +1092,7 @@ def _annotate_optimal_markers(
 
 def generate_backend_comparison(
     *,
-    repetitions: int = 3,
+    repetitions: int = 1,
     run_timeout: float | None = RUN_TIMEOUT_DEFAULT_SECONDS,
     reuse_existing: bool = False,
     max_workers: int | None = None,
@@ -1841,8 +1841,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         "-r",
         "--repetitions",
         type=int,
-        default=3,
-        help="Number of repetitions per circuit/backend combination (default: 3).",
+        default=1,
+        help="Number of repetitions per circuit/backend combination (default: %(default)s).",
     )
     parser.add_argument(
         "-t",
