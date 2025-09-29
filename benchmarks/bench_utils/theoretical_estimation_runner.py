@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parent
@@ -39,6 +39,115 @@ from quasar.planner import (
 )
 
 from .theoretical_estimation_utils import EstimateRecord
+
+LARGE_GATE_THRESHOLD_DEFAULT = 50_000
+"""Gate count that triggers the tuned planner configuration by default."""
+
+LARGE_PLANNER_OVERRIDES_DEFAULT: Mapping[str, object] = {
+    "batch_size": 8,
+    "horizon": 4_096,
+    "quick_max_qubits": 64,
+    "quick_max_gates": 120_000,
+    "quick_max_depth": 20_000,
+}
+"""Default planner overrides used for large simplified circuits."""
+
+
+def _gate_count(circuit) -> int | None:
+    """Return the number of gates in ``circuit`` when known."""
+
+    if circuit is None:
+        return None
+    gates = getattr(circuit, "gates", None)
+    if gates is not None:
+        try:
+            return len(gates)
+        except TypeError:  # pragma: no cover - defensive fallback
+            pass
+    metadata = getattr(circuit, "metadata", None)
+    if isinstance(metadata, Mapping):
+        value = metadata.get("gate_count")
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                pass
+    num_gates = getattr(circuit, "num_gates", None)
+    if num_gates is not None:
+        try:
+            return int(num_gates)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return None
+    return None
+
+
+def _clone_planner_with_overrides(planner: Planner, overrides: Mapping[str, object]) -> Planner:
+    """Return a new :class:`Planner` instance sharing state with ``planner``."""
+
+    params = {
+        "estimator": planner.estimator,
+        "top_k": planner.top_k,
+        "batch_size": planner.batch_size,
+        "max_memory": planner.max_memory,
+        "quick_max_qubits": planner.quick_max_qubits,
+        "quick_max_gates": planner.quick_max_gates,
+        "quick_max_depth": planner.quick_max_depth,
+        "backend_order": list(planner.backend_order),
+        "conversion_cost_multiplier": planner.conversion_cost_multiplier,
+        "perf_prio": planner.perf_prio,
+        "horizon": planner.horizon,
+        "epsilon": planner.epsilon,
+        "selector": planner.selector,
+        "conversion_engine": planner.conversion_engine,
+    }
+    params.update(overrides)
+    return Planner(**params)
+
+
+def _should_use_tuned_planner(
+    gate_count: int | None,
+    *,
+    enable_large_planner: bool,
+    large_gate_threshold: int | None,
+) -> bool:
+    """Return ``True`` when the tuned planner should be used for ``gate_count``."""
+
+    if not enable_large_planner:
+        return False
+    if gate_count is None:
+        return False
+    if large_gate_threshold is None or large_gate_threshold <= 0:
+        return False
+    return gate_count >= large_gate_threshold
+
+
+def _prepare_planner(
+    circuit,
+    planner: Planner,
+    *,
+    enable_large_planner: bool,
+    large_gate_threshold: int | None,
+    large_planner_kwargs: Mapping[str, object] | None,
+) -> tuple[Planner, bool]:
+    """Return a planner for ``circuit`` and whether tuning was applied."""
+
+    gate_count = _gate_count(circuit)
+    use_tuned = _should_use_tuned_planner(
+        gate_count,
+        enable_large_planner=enable_large_planner,
+        large_gate_threshold=large_gate_threshold,
+    )
+    if not use_tuned:
+        return planner, False
+
+    overrides = dict(LARGE_PLANNER_OVERRIDES_DEFAULT)
+    if large_planner_kwargs:
+        for key, value in large_planner_kwargs.items():
+            if value is None:
+                continue
+            overrides[key] = value
+    tuned = _clone_planner_with_overrides(planner, overrides)
+    return tuned, True
 
 
 def _format_backend_sequence(steps) -> str:
@@ -199,6 +308,10 @@ def estimate_circuit(
     estimator: CostEstimator,
     backends: Sequence[Backend],
     planner: Planner,
+    *,
+    enable_large_planner: bool = True,
+    large_gate_threshold: int | None = LARGE_GATE_THRESHOLD_DEFAULT,
+    large_planner_kwargs: Mapping[str, object] | None = None,
 ) -> list[EstimateRecord]:
     """Return records for ``spec`` at ``n_qubits`` covering baselines and QuASAr."""
 
@@ -259,12 +372,23 @@ def estimate_circuit(
             )
         )
 
+    selected_planner, tuned = _prepare_planner(
+        auto,
+        planner,
+        enable_large_planner=enable_large_planner,
+        large_gate_threshold=large_gate_threshold,
+        large_planner_kwargs=large_planner_kwargs,
+    )
     quasar_record = _estimate_quasar_record(
-        planner=planner,
+        planner=selected_planner,
         circuit=auto,
         spec=spec,
         n_qubits=n_qubits,
     )
+    if tuned:
+        note = quasar_record.note
+        extra = "tuned planner"
+        quasar_record.note = f"{note}; {extra}" if note else extra
     records.append(quasar_record)
 
     return records
@@ -275,6 +399,10 @@ def _estimate_width(
     width: int,
     backends: Sequence[Backend],
     estimator: CostEstimator,
+    *,
+    enable_large_planner: bool,
+    large_gate_threshold: int | None,
+    large_planner_kwargs: Mapping[str, object] | None,
 ) -> tuple[list[EstimateRecord], list[str]]:
     """Return records and progress messages for a single ``spec`` width."""
 
@@ -285,6 +413,9 @@ def _estimate_width(
         estimator,
         backends,
         planner,
+        enable_large_planner=enable_large_planner,
+        large_gate_threshold=large_gate_threshold,
+        large_planner_kwargs=large_planner_kwargs,
     )
     messages = [f"{rec.circuit}@{rec.qubits} {rec.framework.lower()}" for rec in width_records]
     return width_records, messages
@@ -296,8 +427,20 @@ def collect_estimates(
     estimator: CostEstimator,
     *,
     max_workers: int | None = None,
+    enable_large_planner: bool = True,
+    large_gate_threshold: int | None = LARGE_GATE_THRESHOLD_DEFAULT,
+    large_planner_kwargs: Mapping[str, object] | None = None,
 ) -> list[EstimateRecord]:
-    """Return all estimate records for ``specs`` using ``estimator``."""
+    """Return all estimate records for ``specs`` using ``estimator``.
+
+    The helper inspects the classically simplified circuit before invoking the
+    planner.  When ``enable_large_planner`` is true and the simplified gate
+    count exceeds ``large_gate_threshold`` a new planner instance is created
+    using ``LARGE_PLANNER_OVERRIDES_DEFAULT`` merged with
+    ``large_planner_kwargs``.  This keeps smaller circuits on the full dynamic
+    programming path while bounding planning time for large, highly clustered
+    circuits.
+    """
 
     spec_list = list(specs)
     total_steps = sum(len(spec.qubits) * (len(backends) + 1) for spec in spec_list)
@@ -313,7 +456,13 @@ def collect_estimates(
             for spec_index, spec in enumerate(spec_list):
                 for position, width in enumerate(spec.qubits):
                     width_records, messages = _estimate_width(
-                        spec, width, backend_list, estimator
+                        spec,
+                        width,
+                        backend_list,
+                        estimator,
+                        enable_large_planner=enable_large_planner,
+                        large_gate_threshold=large_gate_threshold,
+                        large_planner_kwargs=large_planner_kwargs,
                     )
                     ordered.setdefault(spec_index, []).append((position, width_records))
                     if progress:
@@ -323,7 +472,14 @@ def collect_estimates(
             with ProcessPoolExecutor(max_workers=worker_count) as executor:
                 futures = {
                     executor.submit(
-                        _estimate_width, spec, width, backend_list, estimator
+                        _estimate_width,
+                        spec,
+                        width,
+                        backend_list,
+                        estimator,
+                        enable_large_planner=enable_large_planner,
+                        large_gate_threshold=large_gate_threshold,
+                        large_planner_kwargs=large_planner_kwargs,
                     ): (spec_index, position)
                     for spec_index, spec in enumerate(spec_list)
                     for position, width in enumerate(spec.qubits)
@@ -353,5 +509,10 @@ def collect_estimates(
     return records
 
 
-__all__ = ["collect_estimates", "estimate_circuit"]
+__all__ = [
+    "collect_estimates",
+    "estimate_circuit",
+    "LARGE_GATE_THRESHOLD_DEFAULT",
+    "LARGE_PLANNER_OVERRIDES_DEFAULT",
+]
 
