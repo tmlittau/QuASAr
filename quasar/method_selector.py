@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Backend selection based on multi-criteria constraints."""
 
-from typing import Any, List, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING
 
 from .cost import Backend, Cost, CostEstimator
 from . import config
@@ -26,6 +26,89 @@ CLIFFORD_GATES = {
 }
 
 CLIFFORD_PLUS_T_GATES = CLIFFORD_GATES | {"T", "TDG"}
+
+
+def _sequential_cost(costs: Sequence[Cost]) -> Cost:
+    """Combine sequential cost estimates."""
+
+    if not costs:
+        return Cost(0.0, 0.0)
+    time = sum(cost.time for cost in costs)
+    memory = max(cost.memory for cost in costs)
+    log_depth = max(cost.log_depth for cost in costs)
+    conversion = sum(cost.conversion for cost in costs)
+    replay = sum(cost.replay for cost in costs)
+    return Cost(time=time, memory=memory, log_depth=log_depth, conversion=conversion, replay=replay)
+
+
+def _parallel_groups(gates: Sequence['Gate']) -> List[Tuple[Tuple[int, ...], List['Gate']]]:
+    """Return connectivity groups for ``gates`` ignoring order."""
+
+    gate_list = list(gates)
+    if not gate_list:
+        return []
+
+    qubits = sorted({q for gate in gate_list for q in gate.qubits})
+    if not qubits:
+        return []
+
+    index = {q: i for i, q in enumerate(qubits)}
+    parent = list(range(len(qubits)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for gate in gate_list:
+        mapped = [index[q] for q in gate.qubits]
+        if len(mapped) > 1:
+            base = mapped[0]
+            for other in mapped[1:]:
+                union(base, other)
+
+    groups: Dict[int, List['Gate']] = {find(i): [] for i in range(len(qubits))}
+    for gate in gate_list:
+        if not gate.qubits:
+            continue
+        root = find(index[gate.qubits[0]])
+        groups[root].append(gate)
+
+    result: List[Tuple[Tuple[int, ...], List['Gate']]] = []
+    for root, gate_seq in groups.items():
+        member_qubits = tuple(q for q in qubits if find(index[q]) == root)
+        if member_qubits:
+            result.append((member_qubits, gate_seq))
+    return result
+
+
+def _statistics(qubits: Sequence[int], gates: Sequence['Gate']) -> Dict[str, Any]:
+    """Return basic statistics for ``gates`` on ``qubits``."""
+
+    num_gates = len(gates)
+    num_meas = sum(1 for gate in gates if gate.gate.upper() in {"MEASURE", "RESET"})
+    num_1q = sum(
+        1
+        for gate in gates
+        if len(gate.qubits) == 1 and gate.gate.upper() not in {"MEASURE", "RESET"}
+    )
+    num_2q = num_gates - num_1q - num_meas
+    num_t = sum(1 for gate in gates if gate.gate.upper() in {"T", "TDG"})
+    return {
+        "qubits": tuple(qubits),
+        "num_qubits": len(qubits),
+        "num_gates": num_gates,
+        "num_meas": num_meas,
+        "num_1q": num_1q,
+        "num_2q": num_2q,
+        "num_t": num_t,
+    }
 
 
 class NoFeasibleBackendError(RuntimeError):
@@ -98,6 +181,32 @@ class MethodSelector:
             if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
         )
         num_2q = num_gates - num_1q - num_meas
+        num_t_gates = sum(1 for n in names if n in {"T", "TDG"})
+
+        groups = _parallel_groups(gates) if num_qubits > 1 else []
+        group_stats = [_statistics(qubits, seq) for qubits, seq in groups if qubits]
+        if len(group_stats) <= 1 and (
+            not group_stats or group_stats[0]["num_qubits"] == num_qubits
+        ):
+            group_stats = []
+
+        if group_stats:
+            metrics_seq = group_stats
+        else:
+            qubit_tuple = tuple(sorted({q for gate in gates for q in gate.qubits}))
+            metrics_seq = [
+                {
+                    "qubits": qubit_tuple,
+                    "num_qubits": num_qubits,
+                    "num_gates": num_gates,
+                    "num_meas": num_meas,
+                    "num_1q": num_1q,
+                    "num_2q": num_2q,
+                    "num_t": num_t_gates,
+                }
+            ]
+
+        largest_subsystem = max(m["num_qubits"] for m in metrics_seq) if metrics_seq else 0
 
         diag_backends: dict[Backend, dict[str, Any]] | None = None
         diag: dict[str, Any] | None = diagnostics
@@ -111,11 +220,23 @@ class MethodSelector:
                 "num_qubits": num_qubits,
                 "num_gates": num_gates,
             })
+            if len(metrics_seq) > 1:
+                metrics.update(
+                    {
+                        "num_subsystems": len(metrics_seq),
+                        "largest_subsystem": largest_subsystem,
+                        "subsystem_qubits": [m["qubits"] for m in metrics_seq],
+                    }
+                )
         else:
             diag_backends = None
 
         if allow_tableau and names and all(n in CLIFFORD_GATES for n in names):
-            cost = self.estimator.tableau(num_qubits, num_gates)
+            tableau_costs = [
+                self.estimator.tableau(m["num_qubits"], m["num_gates"])
+                for m in metrics_seq
+            ]
+            cost = _sequential_cost(tableau_costs)
             tableau_reasons: list[str] = []
             feasible = True
             if max_memory is not None and cost.memory > max_memory:
@@ -160,19 +281,24 @@ class MethodSelector:
                 }
 
         clifford_t = names and all(n in CLIFFORD_PLUS_T_GATES for n in names)
-        num_t_gates = sum(1 for n in names if n in {"T", "TDG"})
 
         ext_cost = None
+        total_t = sum(stats["num_t"] for stats in metrics_seq)
         if clifford_t and names:
-            num_clifford = num_gates - num_t_gates - num_meas
-            num_clifford = max(0, num_clifford)
-            ext_cost = self.estimator.extended_stabilizer(
-                num_qubits,
-                num_clifford,
-                num_t_gates,
-                num_meas=num_meas,
-                depth=num_gates,
-            )
+            ext_costs = []
+            for stats in metrics_seq:
+                num_clifford = stats["num_gates"] - stats["num_t"] - stats["num_meas"]
+                num_clifford = max(0, num_clifford)
+                ext_costs.append(
+                    self.estimator.extended_stabilizer(
+                        stats["num_qubits"],
+                        num_clifford,
+                        stats["num_t"],
+                        num_meas=stats["num_meas"],
+                        depth=stats["num_gates"],
+                    )
+                )
+            ext_cost = _sequential_cost(ext_costs)
             ext_reasons: list[str] = []
             ext_feasible = True
             if max_memory is not None and ext_cost.memory > max_memory:
@@ -190,7 +316,7 @@ class MethodSelector:
                     "feasible": ext_feasible,
                     "reasons": ext_reasons,
                     "cost": ext_cost,
-                    "num_t_gates": num_t_gates,
+                    "num_t_gates": total_t,
                 }
         else:
             candidates = {}
@@ -199,7 +325,7 @@ class MethodSelector:
                 diag_backends[Backend.EXTENDED_STABILIZER] = {
                     "feasible": False,
                     "reasons": [reason],
-                    "num_t_gates": num_t_gates,
+                    "num_t_gates": total_t,
                 }
 
         # ------------------------------------------------------------------
@@ -328,7 +454,14 @@ class MethodSelector:
             metrics["mps_max_interaction_distance"] = max_interaction_distance
 
         if dd_metric:
-            dd_cost = self.estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+            dd_costs = [
+                self.estimator.decision_diagram(
+                    num_gates=stats["num_gates"],
+                    frontier=stats["num_qubits"],
+                )
+                for stats in metrics_seq
+            ]
+            dd_cost = _sequential_cost(dd_costs)
             dd_reasons: list[str] = []
             feasible = True
             if max_memory is not None and dd_cost.memory > max_memory:
@@ -366,15 +499,19 @@ class MethodSelector:
                     chi = chi_cap
                 else:
                     infeasible_chi = True
-            mps_cost = self.estimator.mps(
-                num_qubits,
-                num_1q + num_meas,
-                num_2q,
-                chi=chi,
-                svd=True,
-                long_range_fraction=long_range_fraction,
-                long_range_extent=long_range_extent,
-            )
+            mps_costs = [
+                self.estimator.mps(
+                    stats["num_qubits"],
+                    stats["num_1q"] + stats["num_meas"],
+                    stats["num_2q"],
+                    chi=chi,
+                    svd=True,
+                    long_range_fraction=long_range_fraction,
+                    long_range_extent=long_range_extent,
+                )
+                for stats in metrics_seq
+            ]
+            mps_cost = _sequential_cost(mps_costs)
             mps_reasons: list[str] = []
             feasible = True
             if infeasible_chi:
@@ -411,7 +548,16 @@ class MethodSelector:
                 "max_interaction_distance": 0,
             }
 
-        sv_cost = self.estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+        sv_costs = [
+            self.estimator.statevector(
+                stats["num_qubits"],
+                stats["num_1q"],
+                stats["num_2q"],
+                stats["num_meas"],
+            )
+            for stats in metrics_seq
+        ]
+        sv_cost = _sequential_cost(sv_costs)
         sv_reasons: list[str] = []
         sv_feasible = True
         if max_memory is not None and sv_cost.memory > max_memory:
