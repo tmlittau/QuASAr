@@ -13,7 +13,11 @@ from benchmarks.circuits import (
     CLIFFORD_GATES,
     classical_controlled_circuit,
     clustered_entanglement_circuit,
+    clustered_ghz_qft_circuit,
     clustered_ghz_random_circuit,
+    clustered_ghz_random_qft_circuit,
+    clustered_w_qft_circuit,
+    clustered_w_random_circuit,
     layered_clifford_nonclifford_circuit,
     layered_clifford_ramp_circuit,
 )
@@ -75,8 +79,18 @@ def test_clustered_entanglement_random_layer_metadata():
         assert any(g.gate == "X" and g.qubits == [qubit] for g in circuit.gates)
 
 
-def test_clustered_ghz_random_stays_within_blocks():
-    circuit = clustered_ghz_random_circuit(15)
+@pytest.mark.parametrize(
+    "constructor",
+    [
+        clustered_ghz_random_circuit,
+        clustered_ghz_qft_circuit,
+        clustered_w_random_circuit,
+        clustered_w_qft_circuit,
+        clustered_ghz_random_qft_circuit,
+    ],
+)
+def test_clustered_circuits_stay_within_blocks(constructor):
+    circuit = constructor(17)
     metadata = circuit.metadata
     blocks = _cluster_blocks(circuit.num_qubits, metadata["block_size"])
     qubit_to_block = {q: idx for idx, block in enumerate(blocks) for q in block}
