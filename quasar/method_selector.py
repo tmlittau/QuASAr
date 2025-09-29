@@ -642,6 +642,17 @@ class MethodSelector:
                     chi = chi_cap
                 else:
                     infeasible_chi = True
+            locality_reasons: list[str] = []
+            if (
+                long_range_fraction
+                > config.DEFAULT.mps_long_range_fraction_threshold
+            ):
+                locality_reasons.append("non-local interactions exceed fraction threshold")
+            if (
+                long_range_extent
+                > config.DEFAULT.mps_long_range_extent_threshold
+            ):
+                locality_reasons.append("interaction span exceeds extent threshold")
             mps_costs = [
                 self.estimator.mps(
                     stats["num_qubits"],
@@ -657,6 +668,9 @@ class MethodSelector:
             mps_cost = _sequential_cost(mps_costs)
             mps_reasons: list[str] = []
             feasible = True
+            if locality_reasons:
+                mps_reasons.extend(locality_reasons)
+                feasible = False
             if infeasible_chi:
                 mps_reasons.append("bond dimension exceeds memory limit")
                 feasible = False
