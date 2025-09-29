@@ -373,6 +373,11 @@ class MethodSelector:
         diag_backends: dict[Backend, dict[str, Any]] | None,
     ) -> Tuple[Backend, Cost]:
         diag = diagnostics
+        largest_subsystem = (
+            max(stats["num_qubits"] for stats in metrics_seq)
+            if metrics_seq
+            else 0
+        )
 
         if allow_tableau and names and all(n in CLIFFORD_GATES for n in names):
             tableau_costs = [
@@ -650,6 +655,16 @@ class MethodSelector:
                 long_range_extent
                 > config.DEFAULT.mps_long_range_extent_threshold
             )
+            enforce_locality = (
+                over_fraction
+                and over_extent
+                and (
+                    largest_subsystem
+                    >= config.DEFAULT.mps_locality_strict_qubits
+                    or max_interaction_distance
+                    >= config.DEFAULT.mps_locality_strict_distance
+                )
+            )
             locality_reasons: list[str] = []
             if over_fraction:
                 locality_reasons.append(
@@ -672,7 +687,7 @@ class MethodSelector:
             mps_cost = _sequential_cost(mps_costs)
             mps_reasons: list[str] = []
             feasible = True
-            if over_fraction and over_extent:
+            if enforce_locality:
                 mps_reasons.extend(locality_reasons)
                 feasible = False
             if infeasible_chi:
