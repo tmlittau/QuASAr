@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circuit
 from benchmarks.circuits import grover_circuit
 from quasar.circuit import Circuit
 from quasar.cost import Backend, CostEstimator
@@ -73,3 +74,39 @@ def test_small_grover_prefers_decision_diagrams(width: int) -> None:
         dd_cost = dd_entry["cost"]
 
         assert dd_cost.time <= mps_cost.time
+
+
+def test_layered_circuit_prefers_mps() -> None:
+    circuit = layered_clifford_delayed_magic_circuit(12)
+    estimator = CostEstimator()
+    selector = MethodSelector(estimator)
+
+    phase_div = phase_rotation_diversity(circuit)
+    amp_div = amplitude_rotation_diversity(circuit)
+    estimated_sparsity = sparsity_estimate(circuit)
+
+    diagnostics: dict[str, object] = {}
+    backend, cost = selector.select(
+        circuit.gates,
+        circuit.num_qubits,
+        sparsity=estimated_sparsity,
+        phase_rotation_diversity=phase_div,
+        amplitude_rotation_diversity=amp_div,
+        diagnostics=diagnostics,
+    )
+
+    assert backend is Backend.MPS
+
+    backends = diagnostics["backends"]
+    assert Backend.MPS in backends
+    assert Backend.STATEVECTOR in backends
+
+    mps_entry = backends[Backend.MPS]
+    sv_entry = backends[Backend.STATEVECTOR]
+
+    assert mps_entry["feasible"] is True
+    assert sv_entry["feasible"] is True
+    assert mps_entry["cost"].time <= sv_entry["cost"].time
+    assert mps_entry["cost"].memory <= sv_entry["cost"].memory
+    assert diagnostics["selected_backend"] is Backend.MPS
+    assert diagnostics["selected_cost"] == cost

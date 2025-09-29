@@ -43,10 +43,13 @@ def test_entanglement_changes_mps_boundary():
         num_2q_gates=4,
         is_local=True,
     )
+    # The high-entanglement fragment uses enough two-qubit gates to push the
+    # estimator across the MPS/statevector boundary after the scalar ``chi``
+    # expansion fix.  Lower counts still keep MPS as the winner.
     high_ent_stats = FragmentStats(
         num_qubits=8,
         num_1q_gates=18,
-        num_2q_gates=30,
+        num_2q_gates=50,
         is_local=True,
     )
     low_ent_backend, _ = evaluate_fragment_backends(
