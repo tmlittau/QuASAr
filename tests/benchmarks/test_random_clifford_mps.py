@@ -4,6 +4,8 @@ import types
 
 import numpy as np
 
+from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circuit
+
 from quasar.circuit import Circuit, Gate
 from quasar.cost import Backend, CostEstimator
 from quasar.planner import Planner
@@ -93,3 +95,19 @@ def test_planner_prefers_mps_for_random_clifford_when_faster() -> None:
     mps_time = backends[Backend.MPS]["cost"].time
     sv_time = backends[Backend.STATEVECTOR]["cost"].time
     assert mps_time < sv_time
+
+
+def test_forced_mps_respects_memory_cap_for_delayed_magic() -> None:
+    circuit = layered_clifford_delayed_magic_circuit(12)
+    estimator = CostEstimator()
+    planner = Planner(
+        estimator=estimator,
+        max_memory=250_000_000,
+        quick_max_qubits=None,
+        quick_max_gates=None,
+        quick_max_depth=None,
+    )
+
+    plan = planner.plan(circuit, backend=Backend.MPS, use_cache=False)
+
+    assert plan.final_backend == Backend.MPS

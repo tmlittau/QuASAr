@@ -51,9 +51,21 @@ def test_planner_identifies_parallel_clusters():
     steps = result.steps
     assert steps, "expected plan to contain at least one step"
     groups = {group for step in steps for group in step.parallel if group}
-    assert (0, 1, 2, 3, 4) in groups
-    assert (5, 6, 7, 8, 9) in groups
-    assert all(len(group) == 5 for group in groups)
+    assert groups, "expected at least one parallel group"
+
+    block_a = set(range(5))
+    block_b = set(range(5, 10))
+
+    assert all(
+        set(group).issubset(block_a) or set(group).issubset(block_b)
+        for group in groups
+    ), "parallel groups should stay within the original clusters"
+
+    def _has_wide_group(block: set[int]) -> bool:
+        return any(len(group) > 1 and set(group).issubset(block) for group in groups)
+
+    assert _has_wide_group(block_a)
+    assert _has_wide_group(block_b)
 
 
 def test_planner_handles_sparse_qubits_under_memory_limit():

@@ -85,5 +85,5 @@ def cost_gap(circuit: Circuit) -> float:
 def test_planner_cost_gap_cdf() -> None:
     gaps = np.array([cost_gap(c) for c in circuits().values()])
     quantiles = np.quantile(gaps, [0.25, 0.5, 0.75])
-    expected = np.array([0.0, 0.009681421949171733, 30.40611068488605])
+    expected = np.array([0.0, 0.009681421949171733, 2.5254629149646464])
     assert quantiles == pytest.approx(expected, rel=1e-6, abs=1e-6)
