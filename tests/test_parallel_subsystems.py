@@ -34,3 +34,25 @@ def test_many_ghz_subsystems_parallel_groups() -> None:
     assert step.parallel == expected_groups
     assert step.start == 0
     assert step.end == len(circuit.gates)
+
+
+def test_parallel_groups_with_batched_planner() -> None:
+    """Batched DP planning should still emit cached parallel metadata."""
+
+    num_groups = 3
+    group_size = 4
+    circuit = many_ghz_subsystems(num_groups=num_groups, group_size=group_size)
+
+    planner = Planner(batch_size=3)
+    plan = planner.plan(circuit, backend=Backend.TABLEAU)
+
+    assert len(plan.steps) == 1
+    step = plan.steps[0]
+    assert len(step.parallel) == num_groups
+    expected_groups = tuple(
+        tuple(range(group * group_size, (group + 1) * group_size))
+        for group in range(num_groups)
+    )
+    assert step.parallel == expected_groups
+    assert step.start == 0
+    assert step.end == len(circuit.gates)
