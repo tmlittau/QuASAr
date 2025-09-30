@@ -7,8 +7,8 @@ QuASAr evaluates four conversion primitives—boundary-to-boundary (B2B), local 
 Conversion estimates depend on the boundary descriptors emitted by the planner:
 
 - **Boundary size ``q``** – the number of qubits along the cut. Logged as ``boundary``/``boundary_size`` on :class:`~quasar.ssd.PartitionTraceEntry` and ``ConversionLayer.boundary`` on the SSD.【F:quasar/ssd.py†L18-L66】【F:quasar/ssd.py†L118-L160】
-- **Rank ``s``** – the Schmidt-rank bound used for SVD-based primitives. Stored as ``rank`` in planner traces and SSD conversion layers.【F:quasar/ssd.py†L30-L66】【F:quasar/ssd.py†L118-L160】
-- **Frontier ``r``** – the decision-diagram frontier estimate recorded alongside ``rank`` to size DD-style conversions.【F:quasar/ssd.py†L30-L66】【F:quasar/ssd.py†L118-L160】
+- **Rank ``s``** – the Schmidt-rank bound used for SVD-based primitives. Stored as ``rank`` in planner traces and SSD conversion layers. When no upstream estimator supplies a refined value the partitioner defaults to ``2**q`` before scoring primitives.【F:quasar/ssd.py†L30-L66】【F:quasar/ssd.py†L118-L160】【F:quasar/partitioner.py†L143-L201】
+- **Frontier ``r``** – the decision-diagram frontier estimate recorded alongside ``rank`` to size DD-style conversions. The sequential backlog logic uses the boundary size as the default frontier when queuing pending conversions.【F:quasar/ssd.py†L30-L66】【F:quasar/ssd.py†L118-L160】【F:quasar/partitioner.py†L143-L201】
 - **Window ``w``** – the optional dense window size for LW extractions. When not specified by the planner the estimator defaults to ``min(q, 4)`` before scoring the primitives.【F:quasar/cost.py†L698-L739】
 
 The planner always threads ``q``, ``s`` and ``r`` into the cost estimator when emitting trace diagnostics. The LW window parameter remains implicit in the traces but can be reproduced analytically through the estimator helpers described below.

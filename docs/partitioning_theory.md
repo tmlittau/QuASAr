@@ -284,6 +284,41 @@ inputs needed to reason about partition boundaries:
   weighted combination of boundary size and load balance to minimise conversion
   overheads before the new backend is applied.
 
+#### Sequential fragment tracker and SSD hierarchy
+
+The sequential partitioner is mirrored by the SSD hierarchy builder, which
+tracks one fragment at a time while the circuit is scanned from left to right.
+Every gate extends or finalises the active fragment depending on whether the
+qubit set is disjoint from the current fragment; metrics, backend assignments
+and costs are committed to the gate-path layer once a fragment is closed.
+Subsystem states are merged when multi-qubit gates entangle previously
+independent tracks, ensuring the hierarchy preserves the same boundary
+structure that the sequential heuristic observed during planning.【F:quasar/ssd.py†L781-L937】
+
+Building the descriptor now returns an `SSDHierarchy` that bundles the gate
+lookup, the gate-path DAG, and the subsystem graph.  The structure provides the
+raw gate transitions used by the planner, the fragment-level history used by
+the sequential tracker, and the qubit clusters formed by entanglement—all of
+which can be visualised or exported directly from the SSD.【F:quasar/ssd.py†L400-L428】【F:quasar/ssd.py†L481-L516】
+
+#### Single-method backlog and deferred conversions
+
+When a fragment prefers to switch backends but the conversion would not yet be
+profitable, the partitioner queues the candidate switch in a backlog.  Each new
+gate updates the pending entry, re-evaluates the conversion diagnostics, and
+compares the combined cost of committing to the switch (prefix cost + conversion
++ suffix cost) against the cost of keeping the current backend.  Only when the
+switch becomes strictly cheaper does the planner materialise the conversion,
+emit a `reason="deferred_backend_switch"` trace entry, and attach the
+conversion layer to the SSD.  Otherwise the backlog stays pending and further
+gates continue to accumulate on the existing fragment, producing additional
+`reason="deferred_switch_candidate"` traces for diagnostics.【F:quasar/partitioner.py†L283-L347】【F:quasar/partitioner.py†L495-L547】
+
+The backlog logic also feeds the default rank (`2**|boundary|`) and frontier
+estimates into the conversion estimator whenever a boundary is present; the
+`ConversionLayer` inherits whichever primitive the estimator selected once the
+switch is finally applied.【F:quasar/partitioner.py†L143-L201】【F:quasar/partitioner.py†L298-L308】
+
 ## Identified gaps
 
 * The theoretical plots in the notebook do not incorporate the selector's
