@@ -17,7 +17,7 @@ from collections import Counter, defaultdict, deque
 import math
 from typing import Dict, Optional, Set, List, Tuple
 
-from .circuit import Circuit, _is_multiple_of_pi
+from .circuit import Circuit, Gate, _is_multiple_of_pi
 from .cost import Backend, Cost, CostEstimator
 
 
@@ -47,25 +47,37 @@ class AnalysisResult:
 
 
 class CircuitAnalyzer:
-    """Perform static analysis on a :class:`~quasar.circuit.Circuit`."""
+    """Perform static analysis on a :class:`~quasar.circuit.Circuit`.
+
+    The analyzer assumes the underlying circuit is immutable: it caches the
+    circuit's topological order and reuses it across metric computations.
+    """
 
     def __init__(self, circuit: Circuit, estimator: Optional[CostEstimator] = None, chi: int = 4):
         self.circuit = circuit
         self.estimator = estimator or CostEstimator()
         self.chi = chi
+        self._topological_cache: Optional[List[Gate]] = None
+
+    def _topological_order(self) -> List[Gate]:
+        """Return the circuit's topological order, caching the result."""
+
+        if self._topological_cache is None:
+            self._topological_cache = list(self.circuit.topological())
+        return self._topological_cache
 
     # ------------------------------------------------------------------
     def gate_distribution(self) -> Dict[str, int]:
         """Return the frequency of each gate type in the circuit."""
 
-        return dict(Counter(g.gate for g in self.circuit.topological()))
+        return dict(Counter(g.gate for g in self._topological_order()))
 
     # ------------------------------------------------------------------
     def _entanglement_graph(self) -> Dict[int, Set[int]]:
         """Build an undirected graph from multi-qubit gates."""
 
         graph: Dict[int, Set[int]] = defaultdict(set)
-        for gate in self.circuit.topological():
+        for gate in self._topological_order():
             qubits = gate.qubits
             if len(qubits) < 2:
                 continue
@@ -109,7 +121,7 @@ class CircuitAnalyzer:
         isolated = [q for q in range(self.circuit.num_qubits) if q not in graph]
         component_sizes.extend([1] * len(isolated))
 
-        multi_qubit_gate_count = sum(1 for g in self.circuit.topological() if len(g.qubits) > 1)
+        multi_qubit_gate_count = sum(1 for g in self._topological_order() if len(g.qubits) > 1)
 
         if component_sizes:
             max_size = max(component_sizes)
@@ -155,7 +167,7 @@ class CircuitAnalyzer:
             "non_multiple_of_pi": 0,
         }
         angles: Counter[float] = Counter()
-        for gate in self.circuit.topological():
+        for gate in self._topological_order():
             if not gate.params:
                 continue
             angle = float(next(iter(gate.params.values())))
@@ -184,7 +196,7 @@ class CircuitAnalyzer:
             "SWAP",
         }
         counts = {"clifford": 0, "non_clifford": 0}
-        for g in self.circuit.topological():
+        for g in self._topological_order():
             name = g.gate.upper()
             is_clifford = False
             if name in clifford_gate_names:
@@ -238,7 +250,7 @@ class CircuitAnalyzer:
                 parent[rb] = ra
 
         annotations: List[str] = []
-        for gate in self.circuit.topological():
+        for gate in self._topological_order():
             qubits = gate.qubits
             if len(qubits) < 2:
                 tag = "none"
@@ -262,7 +274,7 @@ class CircuitAnalyzer:
         from .planner import _supported_backends
 
         compat: List[List[str]] = []
-        for gate in self.circuit.topological():
+        for gate in self._topological_order():
             backends = _supported_backends(
                 [gate], circuit=self.circuit, estimator=self.estimator
             )
