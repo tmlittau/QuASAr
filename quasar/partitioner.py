@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Set
 
 from .ssd import SSD, SSDPartition, ConversionLayer, PartitionTraceEntry
@@ -106,6 +107,23 @@ class Partitioner:
         current_backend: Backend | None = None
         current_cost: Cost | None = None
 
+        @dataclass
+        class _PendingSwitch:
+            start_index: int
+            gate_index: int
+            source_backend: Backend
+            source_cost: Cost
+            boundary: Set[int]
+            target_backend: Backend
+            boundary_tuple: Tuple[int, ...] = ()
+            rank: int | None = None
+            frontier: int | None = None
+            primitive: str | None = None
+            conversion_cost: Cost | None = None
+            target_cost: Cost | None = None
+
+        pending_switch: _PendingSwitch | None = None
+
         from .circuit import Circuit
         from .sparsity import sparsity_estimate
         from .symmetry import (
@@ -143,6 +161,168 @@ class Partitioner:
                 frontier=frontier,
             )
             return boundary_tuple, size, rank, frontier, conv_est.primitive, conv_est.cost
+
+        def _gate_statistics(
+            gate_seq: List['Gate'],
+        ) -> Tuple[Set[int], int, int, int, int, int]:
+            qubits = {q for g in gate_seq for q in g.qubits}
+            num_gates = len(gate_seq)
+            num_meas = sum(
+                1 for g in gate_seq if g.gate.upper() in {"MEASURE", "RESET"}
+            )
+            num_1q = sum(
+                1
+                for g in gate_seq
+                if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            )
+            num_2q = sum(1 for g in gate_seq if len(g.qubits) > 1)
+            num_t = sum(1 for g in gate_seq if g.gate.upper() in {"T", "TDG"})
+            return qubits, num_gates, num_meas, num_1q, num_2q, num_t
+
+        def _estimate_cost(
+            backend: Backend,
+            gate_seq: List['Gate'],
+        ) -> Cost:
+            if not gate_seq:
+                return Cost(0.0, 0.0)
+            (
+                qubits,
+                num_gates,
+                num_meas,
+                num_1q,
+                num_2q,
+                num_t,
+            ) = _gate_statistics(gate_seq)
+            num_qubits = len(qubits)
+            if backend == Backend.TABLEAU:
+                return self.estimator.tableau(num_qubits, num_gates, num_meas=num_meas)
+            if backend == Backend.EXTENDED_STABILIZER:
+                num_clifford = max(0, num_gates - num_t - num_meas)
+                return self.estimator.extended_stabilizer(
+                    num_qubits,
+                    num_clifford,
+                    num_t,
+                    num_meas=num_meas,
+                    depth=num_gates,
+                )
+            if backend == Backend.MPS:
+                return self.estimator.mps(
+                    num_qubits,
+                    num_1q + num_meas,
+                    num_2q,
+                    chi=4,
+                    svd=True,
+                )
+            if backend == Backend.DECISION_DIAGRAM:
+                return self.estimator.decision_diagram(
+                    num_gates=num_gates,
+                    frontier=num_qubits,
+                )
+            return self.estimator.statevector(
+                num_qubits,
+                num_1q,
+                num_2q,
+                num_meas,
+            )
+
+        def _combine_costs(*costs: Cost) -> Cost:
+            valid = [c for c in costs if c is not None]
+            if not valid:
+                return Cost(0.0, 0.0)
+            time = sum(c.time for c in valid)
+            memory = max(c.memory for c in valid)
+            log_depth = max(c.log_depth for c in valid)
+            conversion = sum(c.conversion for c in valid)
+            replay = sum(c.replay for c in valid)
+            return Cost(time=time, memory=memory, log_depth=log_depth, conversion=conversion, replay=replay)
+
+        def _cost_key(cost: Cost) -> Tuple[float, float]:
+            return cost.memory, cost.time
+
+        def _maybe_finalize_pending_switch() -> None:
+            nonlocal pending_switch, current_gates, current_qubits, current_backend, current_cost
+            if pending_switch is None:
+                return
+            suffix = current_gates[pending_switch.start_index :]
+            if not suffix:
+                pending_switch = None
+                return
+            suffix_cost = _estimate_cost(pending_switch.target_backend, suffix)
+            if pending_switch.boundary_tuple == () and pending_switch.boundary:
+                (
+                    boundary_tuple,
+                    boundary_size,
+                    rank,
+                    frontier,
+                    primitive,
+                    conv_cost,
+                ) = _conversion_diagnostics(
+                    pending_switch.source_backend,
+                    pending_switch.target_backend,
+                    pending_switch.boundary,
+                )
+                pending_switch.boundary_tuple = boundary_tuple
+                pending_switch.rank = rank
+                pending_switch.frontier = frontier
+                pending_switch.primitive = primitive
+                pending_switch.conversion_cost = conv_cost
+                if boundary_size == 0:
+                    pending_switch.boundary_tuple = ()
+            if pending_switch.boundary and (
+                pending_switch.conversion_cost is None
+                or pending_switch.primitive is None
+            ):
+                pending_switch = None
+                return
+            total_current = _estimate_cost(pending_switch.source_backend, current_gates)
+            current_cost = total_current
+            if pending_switch.boundary and pending_switch.conversion_cost is None:
+                return
+            prefix_cost = pending_switch.source_cost
+            conversion_cost = pending_switch.conversion_cost
+            combined = _combine_costs(
+                prefix_cost,
+                conversion_cost if conversion_cost is not None else Cost(0.0, 0.0),
+                suffix_cost,
+            )
+            if _cost_key(combined) < _cost_key(total_current):
+                prefix = current_gates[: pending_switch.start_index]
+                if prefix:
+                    partitions.extend(
+                        self._build_partitions(
+                            prefix,
+                            pending_switch.source_backend,
+                            prefix_cost,
+                        )
+                    )
+                if pending_switch.boundary_tuple and conversion_cost is not None and pending_switch.primitive:
+                    conversions.append(
+                        ConversionLayer(
+                            boundary=pending_switch.boundary_tuple,
+                            source=pending_switch.source_backend,
+                            target=pending_switch.target_backend,
+                            rank=pending_switch.rank,
+                            frontier=pending_switch.frontier,
+                            primitive=pending_switch.primitive,
+                            cost=conversion_cost,
+                        )
+                    )
+                _emit_trace(
+                    gate_index=pending_switch.gate_index,
+                    gate_name=current_gates[pending_switch.start_index].gate,
+                    source=pending_switch.source_backend,
+                    target=pending_switch.target_backend,
+                    boundary=pending_switch.boundary,
+                    applied=True,
+                    reason="deferred_backend_switch",
+                )
+                current_gates = suffix.copy()
+                current_qubits = {q for g in current_gates for q in g.qubits}
+                current_backend = pending_switch.target_backend
+                current_cost = suffix_cost
+                pending_switch = None
+            else:
+                pending_switch.target_cost = suffix_cost
 
         def _emit_trace(
             *,
@@ -215,14 +395,16 @@ class Partitioner:
                     )
                 current_gates = trial_gates
                 current_qubits = trial_qubits
-                current_cost = cost_trial
+                current_cost = _estimate_cost(current_backend, current_gates)
+                pending_switch = None
+                _maybe_finalize_pending_switch()
                 continue
 
             if current_backend is None:
                 current_gates = trial_gates
                 current_qubits = trial_qubits
                 current_backend = backend_trial
-                current_cost = cost_trial
+                current_cost = _estimate_cost(current_backend, current_gates)
                 continue
 
             if backend_trial != current_backend:
@@ -307,6 +489,7 @@ class Partitioner:
                     current_qubits = s_qubits
                     current_backend = s_backend
                     current_cost = s_cost
+                    pending_switch = None
                     continue
 
                 # If no multi-qubit gate has been processed yet, simply switch
@@ -326,81 +509,48 @@ class Partitioner:
                     current_gates = trial_gates
                     current_qubits = trial_qubits
                     current_backend = backend_trial
-                    current_cost = cost_trial
+                    current_cost = _estimate_cost(current_backend, current_gates)
+                    pending_switch = None
                     continue
 
-                # Finalise current partition before switching backends
-                partitions.extend(
-                    self._build_partitions(
-                        current_gates, current_backend, current_cost
-                    )
-                )
-
                 boundary = current_qubits & future_qubits[idx]
-                (
-                    boundary_tuple,
-                    boundary_size,
-                    rank,
-                    frontier,
-                    primitive,
-                    conv_cost,
-                ) = _conversion_diagnostics(current_backend, backend_trial, boundary)
-                if (
-                    boundary_size
-                    and primitive is not None
-                    and conv_cost is not None
-                ):
-                    conversions.append(
-                        ConversionLayer(
-                            boundary=boundary_tuple,
-                            source=current_backend,
-                            target=backend_trial,
-                            rank=rank,
-                            frontier=frontier,
-                            primitive=primitive,
-                            cost=conv_cost,
-                        )
+                if pending_switch is None:
+                    pending_switch = _PendingSwitch(
+                        start_index=len(current_gates),
+                        gate_index=idx,
+                        source_backend=current_backend,
+                        source_cost=_estimate_cost(current_backend, current_gates),
+                        boundary=set(boundary),
+                        target_backend=backend_trial,
                     )
+                else:
+                    pending_switch.gate_index = idx
+                    pending_switch.target_backend = backend_trial
+                    pending_switch.boundary |= set(boundary)
+                    pending_switch.boundary_tuple = ()
+                    pending_switch.rank = None
+                    pending_switch.frontier = None
+                    pending_switch.primitive = None
+                    pending_switch.conversion_cost = None
                 _emit_trace(
                     gate_index=idx,
                     gate_name=gate.gate,
                     source=current_backend,
                     target=backend_trial,
                     boundary=boundary,
-                    applied=True,
-                    reason="backend_switch",
+                    applied=False,
+                    reason="deferred_switch_candidate",
                 )
-
-                current_gates = [gate]
-                current_qubits = set(gate.qubits)
-                # Start the new fragment using the backend decided for the
-                # extended gate sequence (``backend_trial``).
-                if backend_trial == Backend.TABLEAU:
-                    current_cost = self.estimator.tableau(len(current_qubits), 1)
-                elif backend_trial == Backend.MPS:
-                    is_meas = gate.gate.upper() in {"MEASURE", "RESET"}
-                    num_1q = 1 if len(gate.qubits) == 1 or is_meas else 0
-                    num_2q = 1 if len(gate.qubits) > 1 else 0
-                    current_cost = self.estimator.mps(
-                        len(current_qubits), num_1q, num_2q, chi=4, svd=True
-                    )
-                elif backend_trial == Backend.DECISION_DIAGRAM:
-                    current_cost = self.estimator.decision_diagram(
-                        num_gates=1, frontier=len(current_qubits)
-                    )
-                else:
-                    is_meas = gate.gate.upper() in {"MEASURE", "RESET"}
-                    num_1q = 1 if len(gate.qubits) == 1 and not is_meas else 0
-                    num_2q = 1 if len(gate.qubits) > 1 else 0
-                    num_meas = 1 if is_meas else 0
-                    current_cost = self.estimator.statevector(
-                        len(current_qubits), num_1q, num_2q, num_meas
-                    )
-                current_backend = backend_trial
+                current_gates = trial_gates
+                current_qubits = trial_qubits
+                current_cost = _estimate_cost(current_backend, current_gates)
+                _maybe_finalize_pending_switch()
+                continue
             else:
                 current_gates = trial_gates
                 current_qubits = trial_qubits
-                current_cost = cost_trial
+                current_cost = _estimate_cost(current_backend, current_gates)
+                _maybe_finalize_pending_switch()
 
         if current_gates:
             partitions.extend(
