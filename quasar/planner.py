@@ -11,7 +11,7 @@ an optimal execution plan.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Iterable, Set, Tuple, Hashable
+from typing import Any, Dict, List, Optional, Iterable, Set, Tuple, Hashable, Sequence, Iterator
 
 from .cost import Backend, Cost, CostEstimator
 from quasar_convert import ConversionEngine
@@ -213,6 +213,57 @@ class PlanResult:
 # ---------------------------------------------------------------------------
 
 
+class _GateSegmentView(Sequence["Gate"]):
+    """Lightweight view over a contiguous subset of ``gates``."""
+
+    __slots__ = ("_gates", "_start", "_end", "_qubits")
+
+    def __init__(self, gates: List["Gate"], start: int, end: int):
+        self._gates = gates
+        self._start = start
+        self._end = end
+        self._qubits: frozenset[int] | None = None
+
+    def __len__(self) -> int:
+        return self._end - self._start
+
+    def __iter__(self) -> Iterator["Gate"]:
+        for idx in range(self._start, self._end):
+            yield self._gates[idx]
+
+    def __getitem__(self, item: int | slice) -> "Gate" | "_GateSegmentView" | List["Gate"]:
+        length = len(self)
+        if isinstance(item, slice):
+            start, stop, step = item.indices(length)
+            if step == 1:
+                return _GateSegmentView(
+                    self._gates, self._start + start, self._start + stop
+                )
+            return [self[i] for i in range(start, stop, step)]
+        if item < 0:
+            item += length
+        if item < 0 or item >= length:
+            raise IndexError("segment index out of range")
+        return self._gates[self._start + item]
+
+    @property
+    def start(self) -> int:
+        return self._start
+
+    @property
+    def end(self) -> int:
+        return self._end
+
+    @property
+    def qubits(self) -> frozenset[int]:
+        if self._qubits is None:
+            qubits: Set[int] = set()
+            for gate in self:
+                qubits.update(gate.qubits)
+            self._qubits = frozenset(qubits)
+        return self._qubits
+
+
 def _add_cost(a: Cost, b: Cost, *, parallel: bool = False) -> Cost:
     """Combine two cost estimates.
 
@@ -365,10 +416,14 @@ def _supported_backends(
         if amplitude_rotation_diversity is None:
             amplitude_rotation_diversity = getattr(circuit, "amplitude_rotation_diversity", None)
 
-    gates = list(gates)
-    names = [g.gate.upper() for g in gates]
-    num_gates = len(gates)
-    qubits = {q for g in gates for q in g.qubits}
+    if isinstance(gates, Sequence):
+        gate_seq: Sequence[Gate] = gates
+    else:
+        gate_seq = tuple(gates)
+
+    names = [g.gate.upper() for g in gate_seq]
+    num_gates = len(gate_seq)
+    qubits = {q for g in gate_seq for q in g.qubits}
     num_qubits = len(qubits)
 
     clifford = names and all(name in CLIFFORD_GATES for name in names)
@@ -390,7 +445,7 @@ def _supported_backends(
     amp_rot = amplitude_rotation_diversity if amplitude_rotation_diversity is not None else 0
     rot = max(phase_rot, amp_rot)
     nnz = int((1 - sparse) * (2 ** num_qubits))
-    multi = [g for g in gates if len(g.qubits) > 1]
+    multi = [g for g in gate_seq if len(g.qubits) > 1]
     local = bool(multi) and all(
         len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
     )
@@ -427,10 +482,10 @@ def _supported_backends(
 
     candidates: List[Backend] = []
     mps_metric = False
-    num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
+    num_meas = sum(1 for g in gate_seq if g.gate.upper() in {"MEASURE", "RESET"})
     num_1q = sum(
         1
-        for g in gates
+        for g in gate_seq
         if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
     )
     num_2q = num_gates - num_1q - num_meas
@@ -477,7 +532,7 @@ def _supported_backends(
 
         return ranking
 
-    if all(len(g.qubits) <= 2 for g in gates):
+    if all(len(g.qubits) <= 2 for g in gate_seq):
         chi_cap = estimator.chi_max
         if chi_cap is not None and chi_cap > 1:
             cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi_cap)
@@ -538,14 +593,21 @@ def _circuit_depth(gates: Iterable["Gate"]) -> int:
     without requiring a full :class:`Circuit` instance.
     """
 
-    gate_list = list(gates)
-    if not gate_list:
+    if isinstance(gates, Sequence):
+        gate_seq: Sequence[Gate] = gates
+    else:
+        gate_seq = tuple(gates)
+
+    if not gate_seq:
         return 0
-    gate_set = {id(g): g for g in gate_list}
+
+    gate_ids = [id(gate_seq[idx]) for idx in range(len(gate_seq))]
+    gate_set = {gate_ids[idx]: gate_seq[idx] for idx in range(len(gate_seq))}
     indegree: Dict[int, int] = {
-        id(g): sum(1 for p in g.predecessors if id(p) in gate_set) for g in gate_list
+        gate_ids[idx]: sum(1 for p in gate_seq[idx].predecessors if id(p) in gate_set)
+        for idx in range(len(gate_seq))
     }
-    ready = [g for g in gate_list if indegree[id(g)] == 0]
+    ready = [gate_seq[idx] for idx in range(len(gate_seq)) if indegree[gate_ids[idx]] == 0]
     depth = 0
     while ready:
         depth += 1
@@ -1006,9 +1068,8 @@ class Planner:
             def extend(self, end: int) -> None:
                 if end <= self.end:
                     return
-                for offset, gate in enumerate(
-                    self.gates[self.end : end], start=self.end
-                ):
+                for offset in range(self.end, end):
+                    gate = self.gates[offset]
                     if not gate.qubits:
                         continue
                     indices: List[int] = []
@@ -1120,25 +1181,23 @@ class Planner:
                 num_2q = prefix_2q[i] - prefix_2q[j]
                 num_t_segment = prefix_t[i] - prefix_t[j]
 
-                segment: List["Gate"] | None = None
+                segment: _GateSegmentView | None = None
                 segment_qubits: Set[int] | None = None
                 segment_groups: List[
                     Tuple[Tuple[int, ...], List["Gate"]]
                 ] | None = None
                 segment_depth: int | None = None
 
-                def ensure_segment() -> List["Gate"]:
+                def ensure_segment() -> _GateSegmentView:
                     nonlocal segment
                     if segment is None:
-                        segment = gates[j:i]
+                        segment = _GateSegmentView(gates, j, i)
                     return segment
 
                 def ensure_qubits() -> Set[int]:
                     nonlocal segment_qubits
                     if segment_qubits is None:
-                        segment_qubits = {
-                            q for gate in ensure_segment() for q in gate.qubits
-                        }
+                        segment_qubits = set(ensure_segment().qubits)
                     return segment_qubits
 
                 def ensure_groups() -> List[Tuple[Tuple[int, ...], List["Gate"]]]:
