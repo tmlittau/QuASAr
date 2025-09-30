@@ -1554,7 +1554,7 @@ class Planner:
             provided limits.
         """
 
-        gates = circuit.simplify_classical_controls()
+        gates = circuit.ensure_simplified()
         diagnostics = PlanDiagnostics() if explain else None
         names = [g.gate.upper() for g in gates]
         clifford_circuit = bool(names) and all(
