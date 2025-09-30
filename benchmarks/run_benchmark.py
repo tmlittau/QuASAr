@@ -530,7 +530,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Enable tuned planner settings for large simplified circuits."
+            "Enable tuned planner settings when the forced or simplified"
+            " circuit is large."
             " Use --no-estimate-large-planner to keep the default planner"
             " behaviour."
         ),
@@ -540,7 +541,8 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=LARGE_GATE_THRESHOLD_DEFAULT,
         help=(
-            "Gate count on the simplified circuit that triggers the tuned"
+            "Gate count that triggers the tuned planner based on the larger of"
+            " the forced and simplified circuits"
             " planner (set to 0 to disable, default: %(default)s)."
         ),
     )

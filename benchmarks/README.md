@@ -110,19 +110,21 @@ selections:
   seconds (use ``0`` to omit runtime conversion).
 * ``--calibration`` – provide a JSON file with calibrated cost coefficients.
 * ``--estimate-large-planner`` / ``--no-estimate-large-planner`` – toggle the
-  tuned planner configuration that accelerates estimates for very large
-  classically simplified circuits.
+  tuned planner configuration that accelerates estimates when either the forced
+  or classically simplified circuits are very large.
 * ``--estimate-large-threshold`` – gate-count threshold for enabling the tuned
-  planner (``0`` disables the heuristic).
+  planner using the larger of the forced and simplified circuits (``0``
+  disables the heuristic).
 * ``--estimate-large-batch-size`` / ``--estimate-large-horizon`` /
   ``--estimate-large-quick-max-*`` – override the coarse planner parameters used
   once the threshold is exceeded.
 
-When enabled (the default) the runner inspects the simplified circuit and, for
-gate counts above the threshold, instantiates a planner with a wider batch size,
-a finite DP horizon and explicit quick-path limits.  This keeps small and
-medium-sized circuits on the exhaustive search while ensuring that the
-highly-clustered showcase variants complete promptly.
+When enabled (the default) the runner inspects both the forced and simplified
+circuits and, for gate counts above the threshold, instantiates a planner with a
+wider batch size, a finite DP horizon and explicit quick-path limits.  This
+keeps small and medium-sized circuits on the exhaustive search while ensuring
+that highly-clustered showcase variants – even those that only shrink after
+classical simplification – complete promptly.
 
 The standalone helper ``benchmarks/bench_utils/estimate_theoretical_requirements.py``
 offers the same flags when you only need analytical estimates.  For example:
