@@ -193,3 +193,47 @@ def test_classical_controlled_circuit_triggers_tuned_planner(
     assert planner is not base_planner
     quasar_note = next(rec.note for rec in records if rec.framework == "quasar")
     assert quasar_note and "tuned planner" in quasar_note
+
+
+def test_collect_estimates_invokes_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = _make_spec("fake", 10)
+    estimator = CostEstimator()
+
+    record = EstimateRecord(
+        circuit=spec.name,
+        qubits=1,
+        framework="quasar",
+        backend="stub",
+        supported=True,
+        time_ops=1.0,
+        memory_bytes=2.0,
+        note="note",
+    )
+
+    def fake_estimate_width(*_args, **_kwargs):
+        return [record], ["msg"]
+
+    class DummyProgress:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def advance(self, *_args, **_kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(runner, "_estimate_width", fake_estimate_width)
+    monkeypatch.setattr(runner, "ProgressReporter", DummyProgress)
+
+    seen: list[EstimateRecord] = []
+
+    result = runner.collect_estimates(
+        [spec],
+        (),
+        estimator,
+        record_callback=seen.append,
+    )
+
+    assert result == [record]
+    assert seen == [record]

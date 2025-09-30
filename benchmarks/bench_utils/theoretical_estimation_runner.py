@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parent
@@ -466,6 +466,7 @@ def collect_estimates(
     enable_large_planner: bool = True,
     large_gate_threshold: int | None = LARGE_GATE_THRESHOLD_DEFAULT,
     large_planner_kwargs: Mapping[str, object] | None = None,
+    record_callback: Callable[[EstimateRecord], None] | None = None,
 ) -> list[EstimateRecord]:
     """Return all estimate records for ``specs`` using ``estimator``.
 
@@ -476,6 +477,12 @@ def collect_estimates(
     ``large_planner_kwargs``.  This keeps smaller circuits on the full dynamic
     programming path while bounding planning time for large, highly clustered
     circuits that only shrink after simplification.
+
+    When ``record_callback`` is provided it is invoked for every
+    :class:`EstimateRecord` as soon as the corresponding circuit width has been
+    processed.  This mirrors the benchmark storage behaviour so that external
+    consumers (such as the SQLite database) can persist partial results during
+    long-running estimation sweeps.
     """
 
     spec_list = list(specs)
@@ -501,6 +508,9 @@ def collect_estimates(
                         large_planner_kwargs=large_planner_kwargs,
                     )
                     ordered.setdefault(spec_index, []).append((position, width_records))
+                    if record_callback:
+                        for record in width_records:
+                            record_callback(record)
                     if progress:
                         for message in messages:
                             progress.advance(message)
@@ -529,6 +539,9 @@ def collect_estimates(
                             progress.close()
                         raise
                     ordered.setdefault(spec_index, []).append((position, width_records))
+                    if record_callback:
+                        for record in width_records:
+                            record_callback(record)
                     if progress:
                         for message in messages:
                             progress.advance(message)
