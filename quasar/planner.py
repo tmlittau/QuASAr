@@ -10,6 +10,7 @@ cumulative cost up to a given gate index and acts as a backpointer to recover
 an optimal execution plan.
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, Iterator
 
@@ -1069,7 +1070,27 @@ class Planner:
         from .sparsity import adaptive_dd_sparsity_threshold
         eps = self.epsilon if epsilon is None else epsilon
         window = self.horizon if horizon is None else horizon
+        def _normalize_for_bound(cost: Cost | None) -> Cost | None:
+            if cost is None:
+                return None
+            if self.perf_prio == "time":
+                return Cost(
+                    time=cost.time,
+                    memory=cost.memory,
+                    log_depth=cost.log_depth,
+                    conversion=cost.conversion,
+                    replay=cost.replay,
+                )
+            return Cost(
+                time=cost.memory,
+                memory=cost.time,
+                log_depth=cost.log_depth,
+                conversion=cost.conversion,
+                replay=cost.replay,
+            )
+
         bound = upper_bound
+        normalized_bound = _normalize_for_bound(bound)
         width = len({q for g in gates for q in g.qubits})
         nnz_estimate = None
         if sparsity is not None:
@@ -1480,7 +1501,11 @@ class Planner:
                     continue
                 for backend, sim_cost in candidates:
                     for prev_backend, prev_entry in table[j].items():
-                        if bound is not None and _dominates(bound, prev_entry.cost, eps):
+                        if normalized_bound is not None and _dominates(
+                            normalized_bound,
+                            _normalize_for_bound(prev_entry.cost),
+                            eps,
+                        ):
                             continue
                         conv_cost = Cost(0.0, 0.0)
                         if prev_backend is not None and prev_backend != backend:
@@ -1540,7 +1565,12 @@ class Planner:
                         total_cost = _add_cost(
                             _add_cost(prev_entry.cost, conv_cost), sim_cost
                         )
-                        if bound is not None and _dominates(bound, total_cost, eps):
+                        normalized_total = _normalize_for_bound(total_cost)
+                        if normalized_bound is not None and normalized_total is not None and _dominates(
+                            normalized_bound,
+                            normalized_total,
+                            eps,
+                        ):
                             continue
                         entry = table[i].get(backend)
                         if entry is None or _better(total_cost, entry.cost, self.perf_prio):
@@ -1559,6 +1589,7 @@ class Planner:
                             if i == n:
                                 if bound is None or _better(total_cost, bound, self.perf_prio):
                                     bound = total_cost
+                                    normalized_bound = _normalize_for_bound(bound)
             if table[i]:
                 table[i] = _prune_epsilon(
                     table[i], epsilon=eps, perf_prio=self.perf_prio
@@ -1948,6 +1979,14 @@ class Planner:
             diagnostics.single_backend = single_backend_choice
             diagnostics.single_cost = single_cost
 
+        dp_upper_bound: Cost | None = None
+        if (
+            single_backend_choice is not None
+            and math.isfinite(single_cost.time)
+            and math.isfinite(single_cost.memory)
+        ):
+            dp_upper_bound = single_cost
+
         quick = single_backend_choice is not None
         if self.quick_max_qubits is not None and num_qubits > self.quick_max_qubits:
             quick = False
@@ -2000,6 +2039,7 @@ class Planner:
             phase_rotation_diversity=circuit.phase_rotation_diversity,
             amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
             horizon=self.horizon,
+            upper_bound=dp_upper_bound,
             stage="pre",
             diagnostics=diagnostics,
         )
@@ -2055,6 +2095,7 @@ class Planner:
                 phase_rotation_diversity=circuit.phase_rotation_diversity,
                 amplitude_rotation_diversity=circuit.amplitude_rotation_diversity,
                 horizon=self.horizon,
+                upper_bound=dp_upper_bound,
                 stage="coarse",
                 diagnostics=diagnostics,
             )
