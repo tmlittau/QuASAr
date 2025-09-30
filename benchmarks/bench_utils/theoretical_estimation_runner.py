@@ -127,10 +127,16 @@ def _prepare_planner(
     enable_large_planner: bool,
     large_gate_threshold: int | None,
     large_planner_kwargs: Mapping[str, object] | None,
+    max_gate_count: int | None = None,
 ) -> tuple[Planner, bool]:
     """Return a planner for ``circuit`` and whether tuning was applied."""
 
     gate_count = _gate_count(circuit)
+    if max_gate_count is not None:
+        if gate_count is None:
+            gate_count = max_gate_count
+        else:
+            gate_count = max(gate_count, max_gate_count)
     use_tuned = _should_use_tuned_planner(
         gate_count,
         enable_large_planner=enable_large_planner,
@@ -374,6 +380,14 @@ def estimate_circuit(
             )
         return records
 
+    forced_gate_count = _gate_count(forced)
+    auto_gate_count = _gate_count(auto)
+    max_gate_count = None
+    for count in (forced_gate_count, auto_gate_count):
+        if count is None:
+            continue
+        max_gate_count = count if max_gate_count is None else max(max_gate_count, count)
+
     forced_analyzer = CircuitAnalyzer(forced, estimator=estimator)
     forced_resources = forced_analyzer.resource_estimates()
 
@@ -399,6 +413,7 @@ def estimate_circuit(
         enable_large_planner=enable_large_planner,
         large_gate_threshold=large_gate_threshold,
         large_planner_kwargs=large_planner_kwargs,
+        max_gate_count=max_gate_count,
     )
     quasar_record = _estimate_quasar_record(
         planner=selected_planner,
@@ -454,13 +469,13 @@ def collect_estimates(
 ) -> list[EstimateRecord]:
     """Return all estimate records for ``specs`` using ``estimator``.
 
-    The helper inspects the classically simplified circuit before invoking the
-    planner.  When ``enable_large_planner`` is true and the simplified gate
-    count exceeds ``large_gate_threshold`` a new planner instance is created
-    using ``LARGE_PLANNER_OVERRIDES_DEFAULT`` merged with
+    The helper inspects both the forced and classically simplified circuits
+    before invoking the planner.  When ``enable_large_planner`` is true and the
+    larger of the two gate counts exceeds ``large_gate_threshold`` a new planner
+    instance is created using ``LARGE_PLANNER_OVERRIDES_DEFAULT`` merged with
     ``large_planner_kwargs``.  This keeps smaller circuits on the full dynamic
     programming path while bounding planning time for large, highly clustered
-    circuits.
+    circuits that only shrink after simplification.
     """
 
     spec_list = list(specs)

@@ -4,11 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from benchmarks.bench_utils import circuits
 from benchmarks.bench_utils.paper_figures import CircuitSpec
 from benchmarks.bench_utils import theoretical_estimation_runner as runner
 from benchmarks.bench_utils.theoretical_estimation_utils import EstimateRecord
 from quasar.cost import CostEstimator
 from quasar.planner import Planner
+import quasar.circuit as circuit_module
 
 
 class FakeCircuit:
@@ -122,3 +124,72 @@ def test_large_planner_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["planner"] is base_planner
     quasar_note = next(rec.note for rec in records if rec.framework == "quasar")
     assert quasar_note == "base"
+
+
+def test_classical_controlled_circuit_triggers_tuned_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    estimator = CostEstimator()
+    base_planner = Planner(estimator=estimator, perf_prio="time")
+
+    def fast_refresh(self):
+        self._num_gates = len(self.gates)
+        self.metadata = {"gate_count": len(self.gates)}
+        self._depth = 0
+        self.ssd = None
+        self.sparsity = 0.0
+        self.symmetry = 0.0
+        self.phase_rotation_diversity = 0.0
+        self.amplitude_rotation_diversity = 0.0
+        self.rotation_diversity = 0.0
+        self.cost_estimates = {}
+        self._is_simplified = True
+
+    monkeypatch.setattr(circuit_module.Circuit, "_refresh_metadata", fast_refresh)
+
+    spec = CircuitSpec(
+        "classical_controlled_fanout",
+        circuits.classical_controlled_fanout_circuit,
+        (24,),
+        None,
+    )
+
+    forced = runner.paper_figures._build_circuit(
+        spec, 24, use_classical_simplification=False
+    )
+    auto = runner.paper_figures._build_circuit(
+        spec, 24, use_classical_simplification=True
+    )
+    assert runner._gate_count(forced) > runner.LARGE_GATE_THRESHOLD_DEFAULT
+    assert runner._gate_count(auto) < runner.LARGE_GATE_THRESHOLD_DEFAULT
+
+    captured: dict[str, object] = {}
+
+    def fake_quasar_record(**kwargs):
+        captured["planner"] = kwargs["planner"]
+        return EstimateRecord(
+            circuit=spec.name,
+            qubits=24,
+            framework="quasar",
+            backend="stub",
+            supported=True,
+            time_ops=1.0,
+            memory_bytes=1.0,
+            note="base",
+        )
+
+    monkeypatch.setattr(runner, "CircuitAnalyzer", FakeAnalyzer)
+    monkeypatch.setattr(runner, "_estimate_quasar_record", fake_quasar_record)
+
+    records = runner.estimate_circuit(
+        spec,
+        24,
+        estimator,
+        (),
+        base_planner,
+    )
+
+    planner = captured["planner"]
+    assert planner is not base_planner
+    quasar_note = next(rec.note for rec in records if rec.framework == "quasar")
+    assert quasar_note and "tuned planner" in quasar_note
