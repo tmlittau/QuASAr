@@ -64,6 +64,125 @@ class DPEntry:
     prev_backend: Optional[Backend]
 
 
+@dataclass(frozen=True)
+class SupportedBackendMetrics:
+    """Pre-computed metrics describing a gate segment.
+
+    The planner can forward these metrics to :func:`_supported_backends` to
+    avoid recomputing basic statistics such as gate counts, locality and
+    sparsity derived features.  All values mirror the information that the
+    helper previously collected internally.
+    """
+
+    num_gates: int
+    num_qubits: int
+    num_meas: int
+    num_1q: int
+    num_2q: int
+    num_t: int
+    clifford: bool
+    clifford_plus_t: bool
+    has_multi_qubit: bool
+    local_multi_qubit: bool
+    two_qubit_only: bool
+    sparsity: float | None = None
+    phase_rotation_diversity: int | None = None
+    amplitude_rotation_diversity: int | None = None
+
+    @classmethod
+    def from_gates(
+        cls,
+        gates: Iterable["Gate"],
+        *,
+        sparsity: float | None = None,
+        phase_rotation_diversity: int | None = None,
+        amplitude_rotation_diversity: int | None = None,
+    ) -> "SupportedBackendMetrics":
+        """Build metrics by inspecting ``gates`` directly."""
+
+        gate_list = list(gates)
+        names = [g.gate.upper() for g in gate_list]
+        num_gates = len(gate_list)
+        qubits = {q for g in gate_list for q in g.qubits}
+        num_qubits = len(qubits)
+        meas_ops = {"MEASURE", "RESET"}
+        num_meas = sum(1 for name in names if name in meas_ops)
+        num_1q = sum(
+            1
+            for gate, name in zip(gate_list, names)
+            if len(gate.qubits) == 1 and name not in meas_ops
+        )
+        num_2q = num_gates - num_1q - num_meas
+        num_t = sum(1 for name in names if name in {"T", "TDG"})
+        multi = [g for g in gate_list if len(g.qubits) > 1]
+        local = bool(multi) and all(
+            len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
+        )
+        two_qubit_only = all(len(g.qubits) <= 2 for g in gate_list)
+        clifford = bool(names) and all(name in CLIFFORD_GATES for name in names)
+        clifford_t = bool(names) and all(
+            name in CLIFFORD_PLUS_T_GATES for name in names
+        )
+        return cls(
+            num_gates=num_gates,
+            num_qubits=num_qubits,
+            num_meas=num_meas,
+            num_1q=num_1q,
+            num_2q=num_2q,
+            num_t=num_t,
+            clifford=clifford,
+            clifford_plus_t=clifford_t,
+            has_multi_qubit=bool(multi),
+            local_multi_qubit=local,
+            two_qubit_only=two_qubit_only,
+            sparsity=sparsity,
+            phase_rotation_diversity=phase_rotation_diversity,
+            amplitude_rotation_diversity=amplitude_rotation_diversity,
+        )
+
+    @classmethod
+    def from_gate(
+        cls,
+        gate: "Gate",
+        *,
+        sparsity: float | None = None,
+        phase_rotation_diversity: int | None = None,
+        amplitude_rotation_diversity: int | None = None,
+    ) -> "SupportedBackendMetrics":
+        """Return metrics for a single gate."""
+
+        name = gate.gate.upper()
+        qubits = tuple(gate.qubits)
+        qubit_set = set(qubits)
+        meas_ops = {"MEASURE", "RESET"}
+        is_measure = name in meas_ops
+        is_1q = len(qubits) == 1 and not is_measure
+        num_meas = 1 if is_measure else 0
+        num_1q = 1 if is_1q else 0
+        num_2q = 1 - num_1q - num_meas
+        has_multi = len(qubits) > 1 and not is_measure
+        local_multi = (
+            has_multi
+            and len(qubits) == 2
+            and abs(qubits[0] - qubits[1]) == 1
+        )
+        return cls(
+            num_gates=1,
+            num_qubits=len(qubit_set),
+            num_meas=num_meas,
+            num_1q=num_1q,
+            num_2q=num_2q,
+            num_t=1 if name in {"T", "TDG"} else 0,
+            clifford=name in CLIFFORD_GATES,
+            clifford_plus_t=name in CLIFFORD_PLUS_T_GATES,
+            has_multi_qubit=has_multi,
+            local_multi_qubit=local_multi,
+            two_qubit_only=len(qubits) <= 2,
+            sparsity=sparsity,
+            phase_rotation_diversity=phase_rotation_diversity,
+            amplitude_rotation_diversity=amplitude_rotation_diversity,
+        )
+
 @dataclass
 class ConversionEstimate:
     """Diagnostic record of a conversion estimate between backends."""
@@ -324,6 +443,7 @@ def _prune_epsilon(
 def _supported_backends(
     gates: Iterable[Gate],
     *,
+    metrics: SupportedBackendMetrics | None = None,
     sparsity: float | None = None,
     circuit: "Circuit" | None = None,
     phase_rotation_diversity: int | None = None,
@@ -338,8 +458,12 @@ def _supported_backends(
     ----------
     gates:
         Gate sequence under consideration.
+    metrics:
+        Optional pre-computed statistics describing ``gates``.  When omitted the
+        helper derives the metrics on demand.
     sparsity:
-        Optional sparsity metric for the overall circuit.
+        Optional sparsity metric for the overall circuit.  Overrides
+        ``metrics.sparsity`` when provided.
     circuit:
         Circuit providing heuristic metrics.  Explicit ``sparsity`` and
         rotation-diversity arguments take precedence when supplied.
@@ -357,21 +481,65 @@ def _supported_backends(
         limit for the estimated cost.
     """
 
+    metrics_sparsity = metrics.sparsity if metrics is not None else None
+    metrics_phase = metrics.phase_rotation_diversity if metrics is not None else None
+    metrics_amp = (
+        metrics.amplitude_rotation_diversity if metrics is not None else None
+    )
+
     if circuit is not None:
-        if sparsity is None:
-            sparsity = getattr(circuit, "sparsity", None)
-        if phase_rotation_diversity is None:
-            phase_rotation_diversity = getattr(circuit, "phase_rotation_diversity", None)
-        if amplitude_rotation_diversity is None:
-            amplitude_rotation_diversity = getattr(circuit, "amplitude_rotation_diversity", None)
+        if sparsity is None and metrics_sparsity is None:
+            metrics_sparsity = getattr(circuit, "sparsity", None)
+        if phase_rotation_diversity is None and metrics_phase is None:
+            metrics_phase = getattr(circuit, "phase_rotation_diversity", None)
+        if amplitude_rotation_diversity is None and metrics_amp is None:
+            metrics_amp = getattr(circuit, "amplitude_rotation_diversity", None)
 
-    gates = list(gates)
-    names = [g.gate.upper() for g in gates]
-    num_gates = len(gates)
-    qubits = {q for g in gates for q in g.qubits}
-    num_qubits = len(qubits)
+    sparse_input = sparsity if sparsity is not None else metrics_sparsity
+    phase_input = (
+        phase_rotation_diversity
+        if phase_rotation_diversity is not None
+        else metrics_phase
+    )
+    amp_input = (
+        amplitude_rotation_diversity
+        if amplitude_rotation_diversity is not None
+        else metrics_amp
+    )
 
-    clifford = names and all(name in CLIFFORD_GATES for name in names)
+    metrics_obj = metrics
+    if metrics_obj is None:
+        metrics_obj = SupportedBackendMetrics.from_gates(
+            gates,
+            sparsity=sparse_input,
+            phase_rotation_diversity=phase_input,
+            amplitude_rotation_diversity=amp_input,
+        )
+
+    num_gates = metrics_obj.num_gates
+    num_qubits = metrics_obj.num_qubits
+    num_meas = metrics_obj.num_meas
+    num_1q = metrics_obj.num_1q
+    num_2q = metrics_obj.num_2q
+    num_t = metrics_obj.num_t
+
+    sparse_value = (
+        sparse_input
+        if sparse_input is not None
+        else (metrics_obj.sparsity if metrics_obj.sparsity is not None else 0.0)
+    )
+    phase_value = (
+        phase_input
+        if phase_input is not None
+        else (metrics_obj.phase_rotation_diversity or 0)
+    )
+    amp_value = (
+        amp_input
+        if amp_input is not None
+        else (metrics_obj.amplitude_rotation_diversity or 0)
+    )
+
+    clifford = metrics_obj.clifford
     if allow_tableau and clifford:
         if estimator is not None:
             cost = estimator.tableau(num_qubits, num_gates)
@@ -380,20 +548,16 @@ def _supported_backends(
                 return []
         return [Backend.TABLEAU]
 
-    clifford_t = names and all(name in CLIFFORD_PLUS_T_GATES for name in names)
-    num_t = sum(1 for name in names if name in {"T", "TDG"})
+    clifford_t = metrics_obj.clifford_plus_t
 
     candidates: List[Backend] = []
 
-    sparse = sparsity if sparsity is not None else 0.0
-    phase_rot = phase_rotation_diversity if phase_rotation_diversity is not None else 0
-    amp_rot = amplitude_rotation_diversity if amplitude_rotation_diversity is not None else 0
-    rot = max(phase_rot, amp_rot)
+    sparse = sparse_value if sparse_value is not None else 0.0
+    phase_rot = phase_value
+    amp_rot = amp_value
+    rot = max(phase_rot or 0, amp_rot or 0)
     nnz = int((1 - sparse) * (2 ** num_qubits))
-    multi = [g for g in gates if len(g.qubits) > 1]
-    local = bool(multi) and all(
-        len(g.qubits) == 2 and abs(g.qubits[0] - g.qubits[1]) == 1 for g in multi
-    )
+    local = metrics_obj.local_multi_qubit
     from .sparsity import adaptive_dd_sparsity_threshold
 
     s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
@@ -427,13 +591,6 @@ def _supported_backends(
 
     candidates: List[Backend] = []
     mps_metric = False
-    num_meas = sum(1 for g in gates if g.gate.upper() in {"MEASURE", "RESET"})
-    num_1q = sum(
-        1
-        for g in gates
-        if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
-    )
-    num_2q = num_gates - num_1q - num_meas
     num_clifford = max(0, num_gates - num_t - num_meas)
 
     if estimator is None:
@@ -477,7 +634,7 @@ def _supported_backends(
 
         return ranking
 
-    if all(len(g.qubits) <= 2 for g in gates):
+    if metrics_obj.two_qubit_only:
         chi_cap = estimator.chi_max
         if chi_cap is not None and chi_cap > 1:
             cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi_cap)
@@ -1087,6 +1244,10 @@ class Planner:
         prefix_2q = [0] * (n + 1)
         prefix_meas = [0] * (n + 1)
         prefix_t = [0] * (n + 1)
+        prefix_non_clifford = [0] * (n + 1)
+        prefix_non_clifford_t = [0] * (n + 1)
+        prefix_non_local = [0] * (n + 1)
+        prefix_gt_two = [0] * (n + 1)
         for idx, gate in enumerate(gates, start=1):
             name = gate.gate.upper()
             is_measure = name in meas_ops
@@ -1096,6 +1257,20 @@ class Planner:
             prefix_2q[idx] = prefix_2q[idx - 1] + (1 if is_multi else 0)
             prefix_meas[idx] = prefix_meas[idx - 1] + (1 if is_measure else 0)
             prefix_t[idx] = prefix_t[idx - 1] + (1 if name in t_ops else 0)
+            prefix_non_clifford[idx] = prefix_non_clifford[idx - 1] + (
+                1 if name not in CLIFFORD_GATES else 0
+            )
+            prefix_non_clifford_t[idx] = prefix_non_clifford_t[idx - 1] + (
+                1 if name not in CLIFFORD_PLUS_T_GATES else 0
+            )
+            non_local = 0
+            if is_multi:
+                if len(gate.qubits) != 2 or abs(gate.qubits[0] - gate.qubits[1]) != 1:
+                    non_local = 1
+            prefix_non_local[idx] = prefix_non_local[idx - 1] + non_local
+            prefix_gt_two[idx] = prefix_gt_two[idx - 1] + (
+                1 if len(gate.qubits) > 2 else 0
+            )
 
         table: List[Dict[Optional[Backend], DPEntry]] = [dict() for _ in range(n + 1)]
         infeasible_segments: List[Tuple[int, int, List[Tuple[Backend, Cost]]]] = []
@@ -1156,9 +1331,37 @@ class Planner:
                         segment_depth = _circuit_depth(ensure_segment())
                     return segment_depth
 
+                segment_qubits = ensure_qubits()
+                num_qubits = len(segment_qubits)
+                multi_count = prefix_2q[i] - prefix_2q[j]
+                non_local_count = prefix_non_local[i] - prefix_non_local[j]
+                gt_two_count = prefix_gt_two[i] - prefix_gt_two[j]
+                non_clifford_count = prefix_non_clifford[i] - prefix_non_clifford[j]
+                non_clifford_t_count = (
+                    prefix_non_clifford_t[i] - prefix_non_clifford_t[j]
+                )
+                segment_metrics = SupportedBackendMetrics(
+                    num_gates=num_gates,
+                    num_qubits=num_qubits,
+                    num_meas=num_meas,
+                    num_1q=num_1q,
+                    num_2q=num_2q,
+                    num_t=num_t_segment,
+                    clifford=(num_gates > 0 and non_clifford_count == 0),
+                    clifford_plus_t=(num_gates > 0 and non_clifford_t_count == 0),
+                    has_multi_qubit=multi_count > 0,
+                    local_multi_qubit=(multi_count > 0 and non_local_count == 0),
+                    two_qubit_only=gt_two_count == 0,
+                    sparsity=sparsity,
+                    phase_rotation_diversity=phase_rotation_diversity,
+                    amplitude_rotation_diversity=amplitude_rotation_diversity,
+                )
+
+                segment_list = ensure_segment()
                 backends = self._order_backends(
                     _supported_backends(
-                        ensure_segment(),
+                        segment_list,
+                        metrics=segment_metrics,
                         sparsity=sparsity,
                         phase_rotation_diversity=phase_rotation_diversity,
                         amplitude_rotation_diversity=amplitude_rotation_diversity,
@@ -1168,7 +1371,6 @@ class Planner:
                     ),
                     dd_metric=dd_metric,
                 )
-                num_qubits = len(ensure_qubits())
                 requires_true_depth = num_qubits > 1 and num_2q > 0
                 if forced_backend is not None:
                     if forced_backend not in backends:
@@ -1210,7 +1412,8 @@ class Planner:
                     if max_memory is not None:
                         if not backends:
                             retry_backends = _supported_backends(
-                                ensure_segment(),
+                                segment_list,
+                                metrics=segment_metrics,
                                 sparsity=sparsity,
                                 phase_rotation_diversity=phase_rotation_diversity,
                                 amplitude_rotation_diversity=amplitude_rotation_diversity,

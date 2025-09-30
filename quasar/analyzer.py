@@ -271,12 +271,16 @@ class CircuitAnalyzer:
     def method_compatibility(self) -> List[List[str]]:
         """Return compatible simulation backends for each gate."""
 
-        from .planner import _supported_backends
+        from .planner import SupportedBackendMetrics, _supported_backends
 
         compat: List[List[str]] = []
         for gate in self._topological_order():
+            metrics = SupportedBackendMetrics.from_gate(gate)
             backends = _supported_backends(
-                [gate], circuit=self.circuit, estimator=self.estimator
+                [gate],
+                metrics=metrics,
+                circuit=self.circuit,
+                estimator=self.estimator,
             )
             methods = [b.name.lower() for b in backends]
             gate.compatible_methods = methods

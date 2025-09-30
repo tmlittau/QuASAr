@@ -331,7 +331,7 @@ class Circuit:
     def _annotate_gates(self) -> None:
         """Attach per-gate metadata such as entanglement and costs."""
 
-        from .planner import _supported_backends
+        from .planner import SupportedBackendMetrics, _supported_backends
 
         estimator = CostEstimator()
         max_index = max((q for g in self.gates for q in g.qubits), default=-1)
@@ -362,7 +362,10 @@ class Circuit:
                 else:
                     gate.entanglement = "modifies"
 
-            backends = _supported_backends([gate], circuit=self, estimator=estimator)
+            metrics = SupportedBackendMetrics.from_gate(gate)
+            backends = _supported_backends(
+                [gate], metrics=metrics, circuit=self, estimator=estimator
+            )
             gate.compatible_methods = [b.name.lower() for b in backends]
             resources: Dict[str, Cost] = {}
             num_qubits = (max(qubits) + 1) if qubits else 0
