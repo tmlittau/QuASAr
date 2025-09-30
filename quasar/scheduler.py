@@ -554,6 +554,16 @@ class Scheduler:
 
         gates = circuit.simplify_classical_controls()
 
+        def _refresh_ssd_descriptor() -> None:
+            """Ensure the circuit SSD mirrors the latest partition layout."""
+
+            ssd = getattr(circuit, "ssd", None)
+            if ssd is None:
+                return
+            ssd.hierarchy = None
+            ssd.fingerprint = tuple(part.fingerprint for part in ssd.partitions)
+            ssd.build_metadata()
+
         backend_choice = self.select_backend(
             circuit,
             backend=backend,
@@ -598,6 +608,7 @@ class Scheduler:
                         cost=quick_cost,
                     )
                 ]
+                _refresh_ssd_descriptor()
                 if max_time is not None and quick_cost.time > max_time:
                     raise ValueError("Estimated runtime exceeds max_time")
                 return plan
@@ -744,6 +755,7 @@ class Scheduler:
             ]
             circuit.ssd.conversions = []
             plan.explicit_conversions = []
+        _refresh_ssd_descriptor()
         if not hasattr(plan, "replay_ssd"):
             plan.replay_ssd = {}
         sims: Dict[tuple[frozenset[int], Backend], tuple[object, tuple[int, ...]]] = {}
