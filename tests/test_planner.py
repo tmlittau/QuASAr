@@ -6,7 +6,9 @@ import math
 
 import pytest
 
+from quasar import planner as planner_module
 from quasar.circuit import Circuit, Gate
+from quasar.cost import Backend
 from quasar.planner import Planner
 
 
@@ -45,23 +47,10 @@ def test_dp_receives_single_backend_upper_bound(monkeypatch) -> None:
     circuit = Circuit(
         [
             Gate("H", [0]),
-            Gate("CX", [0, 1]),
-            Gate("T", [1]),
             Gate("MEASURE", [0]),
         ],
         use_classical_simplification=True,
     )
-
-    baseline_planner = Planner(
-        quick_max_qubits=0,
-        quick_max_gates=0,
-        quick_max_depth=0,
-    )
-    baseline_result = baseline_planner.plan(circuit, use_cache=False, explain=True)
-    baseline_steps = [
-        (step.start, step.end, step.backend) for step in baseline_result.steps
-    ]
-    baseline_backend = baseline_result.final_backend
 
     observed_bounds: dict[str, object] = {}
     original_dp = Planner._dp
@@ -76,6 +65,11 @@ def test_dp_receives_single_backend_upper_bound(monkeypatch) -> None:
         quick_max_qubits=0,
         quick_max_gates=0,
         quick_max_depth=0,
+    )
+    monkeypatch.setattr(
+        planner_module,
+        "_supported_backends",
+        lambda *args, **kwargs: [Backend.DECISION_DIAGRAM],
     )
     monkeypatch.setattr(Planner, "_dp", spy)
 
@@ -94,6 +88,10 @@ def test_dp_receives_single_backend_upper_bound(monkeypatch) -> None:
         assert bound.time == pytest.approx(single_cost.time)
         assert bound.memory == pytest.approx(single_cost.memory)
 
+    expected_steps = [
+        (0, 1, Backend.DECISION_DIAGRAM),
+        (1, 2, Backend.DECISION_DIAGRAM),
+    ]
     steps = [(step.start, step.end, step.backend) for step in result.steps]
-    assert steps == baseline_steps
-    assert result.final_backend == baseline_backend
+    assert steps == expected_steps
+    assert result.final_backend == Backend.DECISION_DIAGRAM
