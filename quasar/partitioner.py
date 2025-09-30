@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Set
 from .ssd import SSD, SSDPartition, ConversionLayer, PartitionTraceEntry
 from .cost import Backend, CostEstimator, Cost
 from .method_selector import MethodSelector, NoFeasibleBackendError
+from .metrics import FragmentMetrics
 
 if TYPE_CHECKING:  # pragma: no cover
     from .circuit import Circuit, Gate
@@ -106,6 +107,7 @@ class Partitioner:
         current_qubits: Set[int] = set()
         current_backend: Backend | None = None
         current_cost: Cost | None = None
+        current_metrics: FragmentMetrics | None = None
 
         @dataclass
         class _PendingSwitch:
@@ -123,22 +125,6 @@ class Partitioner:
             target_cost: Cost | None = None
 
         pending_switch: _PendingSwitch | None = None
-
-        from .circuit import Circuit
-        from .sparsity import sparsity_estimate
-        from .symmetry import (
-            phase_rotation_diversity as rot_phase,
-            amplitude_rotation_diversity as rot_amp,
-        )
-
-        def _metrics(gate_seq: List['Gate']) -> Tuple[float, int, int]:
-            """Return sparsity and rotation metrics for ``gate_seq``."""
-            frag = Circuit(gate_seq, use_classical_simplification=False)
-            return (
-                sparsity_estimate(frag),
-                rot_phase(frag),
-                rot_amp(frag),
-            )
 
         def _conversion_diagnostics(
             source: Backend | None,
@@ -240,7 +226,7 @@ class Partitioner:
             return cost.memory, cost.time
 
         def _maybe_finalize_pending_switch() -> None:
-            nonlocal pending_switch, current_gates, current_qubits, current_backend, current_cost
+            nonlocal pending_switch, current_gates, current_qubits, current_backend, current_cost, current_metrics
             if pending_switch is None:
                 return
             suffix = current_gates[pending_switch.start_index :]
@@ -317,6 +303,7 @@ class Partitioner:
                     reason="deferred_backend_switch",
                 )
                 current_gates = suffix.copy()
+                current_metrics = FragmentMetrics.from_gates(current_gates)
                 current_qubits = {q for g in current_gates for q in g.qubits}
                 current_backend = pending_switch.target_backend
                 current_cost = suffix_cost
@@ -366,8 +353,15 @@ class Partitioner:
         for idx, gate in enumerate(gates):
             trial_gates = current_gates + [gate]
             trial_qubits = current_qubits | set(gate.qubits)
-            s_est, pr_div, ar_div = _metrics(trial_gates)
-            backend_trial, cost_trial = self.selector.select(
+            if current_metrics is None:
+                trial_metrics = FragmentMetrics()
+            else:
+                trial_metrics = current_metrics.copy()
+            trial_metrics.update(gate)
+            s_est = trial_metrics.sparsity
+            pr_div = trial_metrics.phase_rotation_diversity
+            ar_div = trial_metrics.amplitude_rotation_diversity
+            backend_trial, _ = self.selector.select(
                 trial_gates,
                 len(trial_qubits),
                 sparsity=s_est,
@@ -395,6 +389,7 @@ class Partitioner:
                     )
                 current_gates = trial_gates
                 current_qubits = trial_qubits
+                current_metrics = trial_metrics
                 current_cost = _estimate_cost(current_backend, current_gates)
                 pending_switch = None
                 _maybe_finalize_pending_switch()
@@ -404,6 +399,7 @@ class Partitioner:
                 current_gates = trial_gates
                 current_qubits = trial_qubits
                 current_backend = backend_trial
+                current_metrics = trial_metrics
                 current_cost = _estimate_cost(current_backend, current_gates)
                 continue
 
@@ -419,7 +415,10 @@ class Partitioner:
                         p_qubits = {
                             q for g in prefix for q in g.qubits
                         }
-                        ps, pr, ar = _metrics(prefix)
+                        p_metrics = FragmentMetrics.from_gates(prefix)
+                        ps = p_metrics.sparsity
+                        pr = p_metrics.phase_rotation_diversity
+                        ar = p_metrics.amplitude_rotation_diversity
                         p_backend, p_cost = self.selector.select(
                             prefix,
                             len(p_qubits),
@@ -440,7 +439,10 @@ class Partitioner:
                     s_qubits = {
                         q for g in s_gates for q in g.qubits
                     }
-                    ss, sr, ar = _metrics(s_gates)
+                    s_metrics = FragmentMetrics.from_gates(s_gates)
+                    ss = s_metrics.sparsity
+                    sr = s_metrics.phase_rotation_diversity
+                    ar = s_metrics.amplitude_rotation_diversity
                     s_backend, s_cost = self.selector.select(
                         s_gates,
                         len(s_qubits),
@@ -488,6 +490,7 @@ class Partitioner:
                     current_gates = s_gates
                     current_qubits = s_qubits
                     current_backend = s_backend
+                    current_metrics = s_metrics
                     current_cost = s_cost
                     pending_switch = None
                     continue
@@ -509,6 +512,7 @@ class Partitioner:
                     current_gates = trial_gates
                     current_qubits = trial_qubits
                     current_backend = backend_trial
+                    current_metrics = trial_metrics
                     current_cost = _estimate_cost(current_backend, current_gates)
                     pending_switch = None
                     continue
@@ -543,12 +547,14 @@ class Partitioner:
                 )
                 current_gates = trial_gates
                 current_qubits = trial_qubits
+                current_metrics = trial_metrics
                 current_cost = _estimate_cost(current_backend, current_gates)
                 _maybe_finalize_pending_switch()
                 continue
             else:
                 current_gates = trial_gates
                 current_qubits = trial_qubits
+                current_metrics = trial_metrics
                 current_cost = _estimate_cost(current_backend, current_gates)
                 _maybe_finalize_pending_switch()
 
