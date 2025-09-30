@@ -1070,27 +1070,20 @@ class Planner:
         from .sparsity import adaptive_dd_sparsity_threshold
         eps = self.epsilon if epsilon is None else epsilon
         window = self.horizon if horizon is None else horizon
-        def _normalize_for_bound(cost: Cost | None) -> Cost | None:
+        def _bound_key(cost: Cost | None) -> tuple[float, float] | None:
             if cost is None:
                 return None
             if self.perf_prio == "time":
-                return Cost(
-                    time=cost.time,
-                    memory=cost.memory,
-                    log_depth=cost.log_depth,
-                    conversion=cost.conversion,
-                    replay=cost.replay,
-                )
-            return Cost(
-                time=cost.memory,
-                memory=cost.time,
-                log_depth=cost.log_depth,
-                conversion=cost.conversion,
-                replay=cost.replay,
-            )
+                return (cost.time, cost.memory)
+            return (cost.memory, cost.time)
+
+        def _dominates_key(
+            a: tuple[float, float], b: tuple[float, float], epsilon: float
+        ) -> bool:
+            return a[0] <= b[0] * (1 + epsilon) and a[1] <= b[1] * (1 + epsilon)
 
         bound = upper_bound
-        normalized_bound = _normalize_for_bound(bound)
+        bound_key = _bound_key(bound)
         width = len({q for g in gates for q in g.qubits})
         nnz_estimate = None
         if sparsity is not None:
@@ -1501,10 +1494,11 @@ class Planner:
                     continue
                 for backend, sim_cost in candidates:
                     for prev_backend, prev_entry in table[j].items():
-                        if normalized_bound is not None and _dominates(
-                            normalized_bound,
-                            _normalize_for_bound(prev_entry.cost),
-                            eps,
+                        prev_key = _bound_key(prev_entry.cost)
+                        if (
+                            bound_key is not None
+                            and prev_key is not None
+                            and _dominates_key(bound_key, prev_key, eps)
                         ):
                             continue
                         conv_cost = Cost(0.0, 0.0)
@@ -1565,11 +1559,11 @@ class Planner:
                         total_cost = _add_cost(
                             _add_cost(prev_entry.cost, conv_cost), sim_cost
                         )
-                        normalized_total = _normalize_for_bound(total_cost)
-                        if normalized_bound is not None and normalized_total is not None and _dominates(
-                            normalized_bound,
-                            normalized_total,
-                            eps,
+                        total_key = _bound_key(total_cost)
+                        if (
+                            bound_key is not None
+                            and total_key is not None
+                            and _dominates_key(bound_key, total_key, eps)
                         ):
                             continue
                         entry = table[i].get(backend)
@@ -1589,7 +1583,7 @@ class Planner:
                             if i == n:
                                 if bound is None or _better(total_cost, bound, self.perf_prio):
                                     bound = total_cost
-                                    normalized_bound = _normalize_for_bound(bound)
+                                    bound_key = total_key
             if table[i]:
                 table[i] = _prune_epsilon(
                     table[i], epsilon=eps, perf_prio=self.perf_prio
