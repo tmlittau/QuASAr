@@ -74,27 +74,36 @@ def _tensor_statevectors(
     ``merged_qubits``.
     """
 
-    num_qubits = len(merged_qubits)
-    result = np.zeros(1 << num_qubits, dtype=complex)
-    left_positions = [merged_qubits.index(q) for q in left_qubits]
-    right_positions = [merged_qubits.index(q) for q in right_qubits]
-
     left_state = np.asarray(left_state, dtype=complex)
     right_state = np.asarray(right_state, dtype=complex)
 
-    for basis in range(1 << num_qubits):
-        bits = [(basis >> i) & 1 for i in range(num_qubits)]
-        left_index = 0
-        for offset, pos in enumerate(left_positions):
-            left_index |= bits[pos] << offset
-        right_index = 0
-        for offset, pos in enumerate(right_positions):
-            right_index |= bits[pos] << offset
-        amplitude_left = left_state[left_index] if left_positions else 1.0
-        amplitude_right = right_state[right_index] if right_positions else 1.0
-        result[basis] = amplitude_left * amplitude_right
+    num_qubits = len(merged_qubits)
+    if num_qubits == 0:
+        return np.array([1.0 + 0.0j])
 
-    return result
+    merged_index = {q: i for i, q in enumerate(merged_qubits)}
+    combined = np.ones((2,) * num_qubits, dtype=complex)
+
+    if left_qubits:
+        left_tensor = left_state.reshape((2,) * len(left_qubits), order="F")
+        broadcast_shape = (2,) * len(left_qubits) + (1,) * (num_qubits - len(left_qubits))
+        left_tensor = left_tensor.reshape(broadcast_shape, order="F")
+        combined *= left_tensor
+
+    if right_qubits:
+        right_tensor = right_state.reshape((2,) * len(right_qubits), order="F")
+        target_axes = [merged_index[q] for q in right_qubits]
+        if len(right_qubits) > 1:
+            perm = np.argsort(target_axes)
+            right_tensor = np.transpose(right_tensor, axes=perm)
+            target_axes = [target_axes[i] for i in perm]
+        shape = [1] * num_qubits
+        for axis in target_axes:
+            shape[axis] = 2
+        right_tensor = right_tensor.reshape(tuple(shape), order="F")
+        combined *= right_tensor
+
+    return combined.reshape(-1, order="F")
 
 
 def merge_subsystems(
