@@ -56,6 +56,7 @@ try:  # package execution
     )
     from .bench_utils.theoretical_estimation_utils import (
         OPS_PER_SECOND_DEFAULT,
+        EstimateRecord,
         build_dataframe,
         build_summary,
         load_estimator,
@@ -85,6 +86,7 @@ except ImportError:  # pragma: no cover - script execution fallback
     )
     from bench_utils.theoretical_estimation_utils import (  # type: ignore
         OPS_PER_SECOND_DEFAULT,
+        EstimateRecord,
         build_dataframe,
         build_summary,
         load_estimator,
@@ -231,6 +233,26 @@ def generate_theoretical_estimates(
     throughput = ops_per_second if ops_per_second and ops_per_second > 0 else None
     estimator = load_estimator(calibration)
     specs = resolve_estimation_specs(circuits, groups, default_group="showcase")
+    method = "theoretical_estimate"
+
+    def store_record(record: EstimateRecord) -> None:
+        if database is None:
+            return
+        database.insert_estimation(
+            record={
+                "circuit": record.circuit,
+                "qubits": record.qubits,
+                "framework": record.framework,
+                "backend": record.backend,
+                "supported": record.supported,
+                "time_ops": record.time_ops,
+                "approx_seconds": record.approx_seconds(throughput),
+                "memory_bytes": record.memory_bytes,
+                "note": record.note,
+            },
+            method=method,
+        )
+
     records = collect_estimates(
         specs,
         paper_figures.BACKENDS,
@@ -239,26 +261,10 @@ def generate_theoretical_estimates(
         enable_large_planner=enable_large_planner,
         large_gate_threshold=large_gate_threshold,
         large_planner_kwargs=large_planner_kwargs,
+        record_callback=store_record if database is not None else None,
     )
     detail = build_dataframe(records, throughput)
     summary = build_summary(detail)
-    if database is not None:
-        method = "theoretical_estimate"
-        for rec in records:
-            database.insert_estimation(
-                record={
-                    "circuit": rec.circuit,
-                    "qubits": rec.qubits,
-                    "framework": rec.framework,
-                    "backend": rec.backend,
-                    "supported": rec.supported,
-                    "time_ops": rec.time_ops,
-                    "approx_seconds": rec.approx_seconds(throughput),
-                    "memory_bytes": rec.memory_bytes,
-                    "note": rec.note,
-                },
-                method=method,
-            )
     return detail, summary, throughput
 
 
