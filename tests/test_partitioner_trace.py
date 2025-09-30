@@ -59,8 +59,56 @@ class FakeEstimator:
     def decision_diagram(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=1.0, memory=2.0)
 
+    def extended_stabilizer(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return Cost(time=1.0, memory=2.0)
+
     def statevector(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=1.0, memory=2.0)
+
+
+@dataclass
+class LinearEstimator:
+    """Estimator with linear gate-dependent costs for backlog testing."""
+
+    prefix_rate: float
+    suffix_rate: float
+    conversion_cost: float
+
+    def conversion(  # type: ignore[no-untyped-def]
+        self,
+        source,
+        target,
+        num_qubits,
+        rank,
+        frontier,
+        **_kwargs,
+    ) -> ConversionEstimate:
+        return ConversionEstimate(
+            "FAKE",
+            Cost(time=self.conversion_cost, memory=1.0, log_depth=float(frontier)),
+        )
+
+    def tableau(self, _num_qubits, num_gates, **_kwargs):  # type: ignore[no-untyped-def]
+        return Cost(time=self.prefix_rate * num_gates, memory=1.0)
+
+    def mps(  # type: ignore[no-untyped-def]
+        self,
+        _num_qubits,
+        num_1q,
+        num_2q,
+        *_args,
+        **_kwargs,
+    ) -> Cost:
+        return Cost(time=self.suffix_rate * (num_1q + num_2q), memory=1.0)
+
+    def decision_diagram(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return Cost(time=1000.0, memory=1.0)
+
+    def extended_stabilizer(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return Cost(time=1000.0, memory=1.0)
+
+    def statevector(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return Cost(time=1000.0, memory=1.0)
 
 
 def build_circuit(*gates: Gate) -> Circuit:
@@ -144,7 +192,7 @@ def test_trace_marks_single_qubit_preamble_switch() -> None:
     )
 
 
-def test_trace_callback_receives_applied_cut() -> None:
+def test_trace_records_deferred_switch_candidate() -> None:
     estimator = FakeEstimator()
     selector = DummySelector(
         [
@@ -155,20 +203,73 @@ def test_trace_callback_receives_applied_cut() -> None:
     partitioner = Partitioner(estimator=estimator, selector=selector)
     circuit = build_circuit(Gate("CX", [0, 1]), Gate("T", [0]))
 
-    events: List[PartitionTraceEntry] = []
-    ssd = partitioner.partition(circuit, trace=events.append)
+    ssd = partitioner.partition(circuit, debug=True)
 
-    assert events
-    assert events == ssd.trace
-    entry = events[0]
+    assert len(ssd.trace) == 1
+    entry = ssd.trace[0]
     assert_trace_entry(
         entry,
-        reason="backend_switch",
+        reason="deferred_switch_candidate",
+        applied=False,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+    )
+    assert not ssd.conversions
+
+
+def test_deferred_switch_materialises_when_cost_favourable() -> None:
+    estimator = LinearEstimator(prefix_rate=10.0, suffix_rate=1.0, conversion_cost=12.0)
+    selector = DummySelector(
+        [
+            (Backend.TABLEAU, Cost(time=1.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+        ]
+    )
+    partitioner = Partitioner(estimator=estimator, selector=selector)
+    circuit = build_circuit(
+        Gate("CX", [0, 1]),
+        Gate("T", [0]),
+        Gate("T", [0]),
+    )
+
+    ssd = partitioner.partition(circuit, debug=True)
+
+    assert len(ssd.conversions) == 1
+    assert len(ssd.trace) == 3
+    first_candidate, second_candidate, applied = ssd.trace
+    assert_trace_entry(
+        first_candidate,
+        reason="deferred_switch_candidate",
+        applied=False,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+    )
+    assert first_candidate.gate_index == 1
+    assert_trace_entry(
+        second_candidate,
+        reason="deferred_switch_candidate",
+        applied=False,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+    )
+    assert second_candidate.gate_index == 2
+    assert_trace_entry(
+        applied,
+        reason="deferred_backend_switch",
         applied=True,
         source=Backend.TABLEAU,
         target=Backend.MPS,
         boundary_size=1,
     )
-    assert entry.cost is not None
-    assert entry.cost.time == estimator.conversion_time * entry.boundary_size
+    assert applied.gate_index == 2
+    conversion = ssd.conversions[0]
+    assert conversion.source == Backend.TABLEAU
+    assert conversion.target == Backend.MPS
+    backends = [part.backend for part in ssd.partitions]
+    assert Backend.TABLEAU in backends
+    assert Backend.MPS in backends
 
