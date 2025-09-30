@@ -62,6 +62,7 @@ class DPEntry:
     cost: Cost
     prev_index: int
     prev_backend: Optional[Backend]
+    parallel: Tuple[Tuple[int, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -338,18 +339,24 @@ class PlanResult:
         steps: List[PlanStep] = []
         i = index
         b = backend
-        part = Partitioner()
+        part: Partitioner | None = None
         while i > 0 and b is not None:
             entry = self.table[i][b]
-            segment = self.gates[entry.prev_index : i]
-            groups = part.parallel_groups(segment)
-            qubits = tuple(g[0] for g in groups) if groups else ()
+            parallel_groups: Tuple[Tuple[int, ...], ...] | None = getattr(
+                entry, "parallel", None
+            )
+            if parallel_groups is None:
+                if part is None:
+                    part = Partitioner()
+                segment = self.gates[entry.prev_index : i]
+                groups = part.parallel_groups(segment)
+                parallel_groups = tuple(g[0] for g in groups) if groups else ()
             steps.append(
                 PlanStep(
                     start=entry.prev_index,
                     end=i,
                     backend=b,
-                    parallel=qubits,
+                    parallel=parallel_groups,
                 )
             )
             i = entry.prev_index
@@ -1537,10 +1544,17 @@ class Planner:
                             continue
                         entry = table[i].get(backend)
                         if entry is None or _better(total_cost, entry.cost, self.perf_prio):
+                            cached_groups = ensure_groups()
+                            parallel_qubits = (
+                                tuple(group[0] for group in cached_groups)
+                                if cached_groups
+                                else ()
+                            )
                             table[i][backend] = DPEntry(
                                 cost=total_cost,
                                 prev_index=j,
                                 prev_backend=prev_backend,
+                                parallel=parallel_qubits,
                             )
                             if i == n:
                                 if bound is None or _better(total_cost, bound, self.perf_prio):

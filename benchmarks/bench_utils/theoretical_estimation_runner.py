@@ -29,7 +29,6 @@ else:  # pragma: no cover - package import path
 
 from quasar.analyzer import CircuitAnalyzer
 from quasar.cost import Backend, Cost, CostEstimator
-from quasar.partitioner import Partitioner
 from quasar.planner import (
     Planner,
     _add_cost,
@@ -173,7 +172,6 @@ def _estimate_plan_cost(planner: Planner, plan) -> tuple[Cost, bool, int]:
     """
 
     estimator = planner.estimator
-    part = Partitioner()
     gates = list(plan.gates)
     steps = list(plan.steps)
     total = Cost(time=0.0, memory=0.0)
@@ -183,9 +181,32 @@ def _estimate_plan_cost(planner: Planner, plan) -> tuple[Cost, bool, int]:
         segment = gates[step.start : step.end]
         if not segment:
             continue
-        groups = part.parallel_groups(segment)
-        if len(groups) > 1:
-            cost = _parallel_simulation_cost(estimator, step.backend, groups)
+        parallel_qubits = tuple(tuple(sorted(grp)) for grp in step.parallel)
+        group_data: list[tuple[tuple[int, ...], list]] = []
+        if parallel_qubits and len(parallel_qubits) > 1:
+            mapping = {q: idx for idx, grp in enumerate(parallel_qubits) for q in grp}
+            grouped_gates: list[list] = [[] for _ in parallel_qubits]
+            valid = True
+            for gate in segment:
+                indices: set[int] = set()
+                for qubit in gate.qubits:
+                    idx = mapping.get(qubit)
+                    if idx is None:
+                        valid = False
+                        break
+                    indices.add(idx)
+                if not valid or len(indices) != 1:
+                    valid = False
+                    break
+                group_idx = indices.pop()
+                grouped_gates[group_idx].append(gate)
+            if valid:
+                group_data = [
+                    (parallel_qubits[idx], grouped_gates[idx])
+                    for idx in range(len(parallel_qubits))
+                ]
+        if group_data and len(group_data) > 1:
+            cost = _parallel_simulation_cost(estimator, step.backend, group_data)
             used_parallel = True
         else:
             num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
