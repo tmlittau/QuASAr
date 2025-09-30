@@ -191,8 +191,19 @@ When ``Planner.plan`` is invoked with ``explain=True`` the returned
 ``PlanDiagnostics`` object exposes a ``backend_selection`` mapping with the
 same diagnostic payload.  Each entry captures the heuristics, estimated costs
 and the reasons why candidates were accepted or rejected, making it easier to
-trace planning decisions without relying solely on console output. When a
-backend switch is applied, the planner also records the chosen conversion
-primitive together with ``boundary_size``, ``rank`` and ``frontier``; refer to
-[conversion_primitives.md](conversion_primitives.md) for the glossary and the
-helper utilities that reproduce these trace entries.【F:quasar/partitioner.py†L132-L201】【F:quasar/ssd.py†L18-L160】
+trace planning decisions without relying solely on console output.  The
+``reason`` field reflects the planner's backlog-aware workflow: repeated
+``deferred_switch_candidate`` entries track a pending backend change, while
+``deferred_backend_switch`` marks the point where the conversion becomes
+cheaper than continuing with the current backend.  Additional reasons such as
+``statevector_lock`` and ``single_qubit_preamble`` capture fast-path rejections
+for dense fragments and single-qubit prefixes respectively.【F:quasar/partitioner.py†L283-L399】【F:quasar/partitioner.py†L495-L508】【F:quasar/partitioner.py†L536-L547】
+
+Rank and frontier diagnostics in these traces come from the conversion helper
+inside the partitioner.  Boundaries fall back to ``2**|boundary|`` when no
+external rank model is supplied, and the estimator's chosen primitive plus its
+cost are carried over to any emitted `ConversionLayer`, keeping the diagnostic
+output aligned with the conversion glossary.【F:quasar/partitioner.py†L143-L201】【F:quasar/partitioner.py†L298-L308】 Refer to the
+[Partitioning Theory reference](partitioning_theory.md#single-method-backlog-and-deferred-conversions)
+for a narrative walkthrough of the backlog logic and how it interacts with the
+sequential fragment tracker.
