@@ -11,7 +11,7 @@ an optimal execution plan.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Iterable, Set, Tuple, Hashable
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, Iterator
 
 from .cost import Backend, Cost, CostEstimator
 from quasar_convert import ConversionEngine
@@ -62,6 +62,37 @@ class DPEntry:
     cost: Cost
     prev_index: int
     prev_backend: Optional[Backend]
+
+
+@dataclass(frozen=True)
+class GateSegmentView(Iterable["Gate"]):
+    """Lightweight view over a contiguous slice of gates.
+
+    The view stores only start and end indices into the original ``gates``
+    sequence and therefore avoids creating temporary lists when iterated
+    multiple times.
+    """
+
+    gates: List["Gate"]
+    start: int
+    end: int
+
+    def __post_init__(self) -> None:
+        if self.start < 0 or self.end < self.start:
+            raise ValueError("Invalid segment bounds")
+
+    def __iter__(self) -> Iterator["Gate"]:
+        for idx in range(self.start, self.end):
+            yield self.gates[idx]
+
+    def __len__(self) -> int:  # pragma: no cover - trivial
+        return self.end - self.start
+
+    def qubits(self) -> Set[int]:
+        qubits: Set[int] = set()
+        for gate in self:
+            qubits.update(gate.qubits)
+        return qubits
 
 
 @dataclass(frozen=True)
@@ -1163,9 +1194,8 @@ class Planner:
             def extend(self, end: int) -> None:
                 if end <= self.end:
                     return
-                for offset, gate in enumerate(
-                    self.gates[self.end : end], start=self.end
-                ):
+                for offset in range(self.end, end):
+                    gate = self.gates[offset]
                     if not gate.qubits:
                         continue
                     indices: List[int] = []
@@ -1295,25 +1325,17 @@ class Planner:
                 num_2q = prefix_2q[i] - prefix_2q[j]
                 num_t_segment = prefix_t[i] - prefix_t[j]
 
-                segment: List["Gate"] | None = None
+                segment_view = GateSegmentView(gates, j, i)
                 segment_qubits: Set[int] | None = None
                 segment_groups: List[
                     Tuple[Tuple[int, ...], List["Gate"]]
                 ] | None = None
                 segment_depth: int | None = None
 
-                def ensure_segment() -> List["Gate"]:
-                    nonlocal segment
-                    if segment is None:
-                        segment = gates[j:i]
-                    return segment
-
                 def ensure_qubits() -> Set[int]:
                     nonlocal segment_qubits
                     if segment_qubits is None:
-                        segment_qubits = {
-                            q for gate in ensure_segment() for q in gate.qubits
-                        }
+                        segment_qubits = segment_view.qubits()
                     return segment_qubits
 
                 def ensure_groups() -> List[Tuple[Tuple[int, ...], List["Gate"]]]:
@@ -1328,7 +1350,7 @@ class Planner:
                 def ensure_depth() -> int:
                     nonlocal segment_depth
                     if segment_depth is None:
-                        segment_depth = _circuit_depth(ensure_segment())
+                        segment_depth = _circuit_depth(segment_view)
                     return segment_depth
 
                 segment_qubits = ensure_qubits()
@@ -1357,10 +1379,9 @@ class Planner:
                     amplitude_rotation_diversity=amplitude_rotation_diversity,
                 )
 
-                segment_list = ensure_segment()
                 backends = self._order_backends(
                     _supported_backends(
-                        segment_list,
+                        segment_view,
                         metrics=segment_metrics,
                         sparsity=sparsity,
                         phase_rotation_diversity=phase_rotation_diversity,
@@ -1412,7 +1433,7 @@ class Planner:
                     if max_memory is not None:
                         if not backends:
                             retry_backends = _supported_backends(
-                                segment_list,
+                                segment_view,
                                 metrics=segment_metrics,
                                 sparsity=sparsity,
                                 phase_rotation_diversity=phase_rotation_diversity,
