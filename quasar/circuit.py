@@ -161,6 +161,7 @@ class Circuit:
         self._num_qubits = self._infer_qubit_count()
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         # Track classical state: 0/1 for classical qubits, ``None`` for quantum.
+        self._is_simplified = False
         if self.use_classical_simplification:
             self.classical_state: List[int | None] = [0] * (max_index + 1)
         else:
@@ -168,24 +169,7 @@ class Circuit:
         if self.use_classical_simplification:
             self.simplify_classical_controls()
         else:
-            self._build_dag()
-            self._annotate_gates()
-            self._num_gates = len(self.gates)
-            self._depth = self._compute_depth()
-            self.ssd = self._create_ssd()
-            self.cost_estimates = self._estimate_costs()
-            from .sparsity import sparsity_estimate
-            self.sparsity = sparsity_estimate(self)
-            from .symmetry import (
-                symmetry_score,
-                phase_rotation_diversity,
-                amplitude_rotation_diversity,
-            )
-            self.symmetry = symmetry_score(self)
-            self.phase_rotation_diversity = phase_rotation_diversity(self)
-            self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
-            # Backward compatibility
-            self.rotation_diversity = self.phase_rotation_diversity
+            self._refresh_metadata()
 
     # ------------------------------------------------------------------
     # JSON serialisation helpers
@@ -297,6 +281,30 @@ class Circuit:
             else:
                 expanded.append(gate)
         self.gates = expanded
+
+    def _refresh_metadata(self) -> None:
+        """Recompute derived circuit metadata after gate updates."""
+
+        self._build_dag()
+        self._annotate_gates()
+        self._num_gates = len(self.gates)
+        self._depth = self._compute_depth()
+        self.ssd = self._create_ssd()
+        from .sparsity import sparsity_estimate
+        from .symmetry import (
+            symmetry_score,
+            phase_rotation_diversity,
+            amplitude_rotation_diversity,
+        )
+
+        self.sparsity = sparsity_estimate(self)
+        self.symmetry = symmetry_score(self)
+        self.phase_rotation_diversity = phase_rotation_diversity(self)
+        self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
+        # Backward compatibility
+        self.rotation_diversity = self.phase_rotation_diversity
+        self.cost_estimates = self._estimate_costs()
+        self._is_simplified = True
 
     # ------------------------------------------------------------------
     # Classical state tracking and simplification
@@ -474,6 +482,9 @@ class Circuit:
         if not self.use_classical_simplification:
             return self.gates
 
+        if self._is_simplified:
+            return self.gates
+
         new_gates: List[Gate] = []
         phase_only = {"Z", "S", "T", "SDG", "TDG", "RZ", "P"}
 
@@ -546,24 +557,20 @@ class Circuit:
             new_gates.append(gate)
 
         self.gates = new_gates
-        self._build_dag()
-        self._annotate_gates()
-        self._num_gates = len(new_gates)
-        self._depth = self._compute_depth()
-        self.ssd = self._create_ssd()
-        from .sparsity import sparsity_estimate
-        from .symmetry import (
-            symmetry_score,
-            phase_rotation_diversity,
-            amplitude_rotation_diversity,
-        )
-        self.sparsity = sparsity_estimate(self)
-        self.symmetry = symmetry_score(self)
-        self.phase_rotation_diversity = phase_rotation_diversity(self)
-        self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
-        self.rotation_diversity = self.phase_rotation_diversity
-        self.cost_estimates = self._estimate_costs()
+        self._refresh_metadata()
         return new_gates
+
+    def ensure_simplified(self) -> List[Gate]:
+        """Ensure circuit metadata matches current simplification settings."""
+
+        if self.use_classical_simplification:
+            if not self._is_simplified:
+                self.simplify_classical_controls()
+            return self.gates
+
+        if not self._is_simplified:
+            self._refresh_metadata()
+        return self.gates
 
     def enable_classical_simplification(self) -> None:
         """Enable classical control simplification on an existing circuit.
@@ -578,6 +585,7 @@ class Circuit:
         self.use_classical_simplification = True
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         self.classical_state = [0] * (max_index + 1)
+        self._is_simplified = False
         self.simplify_classical_controls()
 
     def disable_classical_simplification(self) -> None:
@@ -589,24 +597,8 @@ class Circuit:
         self.use_classical_simplification = False
         max_index = max((q for gate in self.gates for q in gate.qubits), default=-1)
         self.classical_state = [None] * (max_index + 1)
-        self._build_dag()
-        self._annotate_gates()
-        self._num_gates = len(self.gates)
-        self._depth = self._compute_depth()
-        self.ssd = self._create_ssd()
-        from .sparsity import sparsity_estimate
-        from .symmetry import (
-            symmetry_score,
-            phase_rotation_diversity,
-            amplitude_rotation_diversity,
-        )
-
-        self.sparsity = sparsity_estimate(self)
-        self.symmetry = symmetry_score(self)
-        self.phase_rotation_diversity = phase_rotation_diversity(self)
-        self.amplitude_rotation_diversity = amplitude_rotation_diversity(self)
-        self.rotation_diversity = self.phase_rotation_diversity
-        self.cost_estimates = self._estimate_costs()
+        self._is_simplified = False
+        self._refresh_metadata()
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -771,6 +763,12 @@ class Circuit:
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
+    @property
+    def is_simplified(self) -> bool:
+        """Whether the circuit metadata reflects the simplified gate list."""
+
+        return self._is_simplified
+
     @property
     def depth(self) -> int:
         """Total circuit depth."""
