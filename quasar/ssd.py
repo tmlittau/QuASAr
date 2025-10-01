@@ -467,7 +467,7 @@ class SSD:
                 part.resources = {"time": part.cost.time, "memory": part.cost.memory}
 
         for conv in self.conversions:
-            boundary = set(conv.boundary)
+            boundary = set(conv.full_boundary or conv.boundary)
             involved = [i for i, qs in enumerate(qubit_sets) if qs & boundary]
             if len(involved) < 2:
                 continue
@@ -1076,6 +1076,13 @@ class ConversionLayer:
         Estimated cost of performing the conversion.
     window:
         Dense window size used by local-window conversions (``None`` otherwise).
+    retained:
+        Optional tuple of qubits that remain with the source backend when a
+        partial conversion is applied.
+    full_boundary:
+        Original set of boundary qubits prior to any partial conversion.  When
+        ``None`` the conversion applies to all qubits listed in
+        :attr:`boundary`.
     """
 
     boundary: Tuple[int, ...]
@@ -1086,6 +1093,8 @@ class ConversionLayer:
     primitive: str
     cost: Cost
     window: int | None = None
+    retained: Tuple[int, ...] = ()
+    full_boundary: Tuple[int, ...] | None = None
 
 
 @dataclass

@@ -10,6 +10,8 @@ cumulative cost up to a given gate index and acts as a backpointer to recover
 an optimal execution plan.
 """
 
+import math
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, Iterator
 
@@ -482,6 +484,18 @@ def _prune_epsilon(
     return pruned
 
 
+def _soft_penalty(value: float, threshold: float, softness: float) -> float:
+    """Return a smooth penalty score for values beyond ``threshold``."""
+
+    if threshold <= 0:
+        return 0.0 if value > 0 else 1.0
+    if value <= threshold:
+        return 1.0
+    overshoot = value / threshold - 1.0
+    softness = max(1.0, softness)
+    return 1.0 / (1.0 + overshoot**softness)
+
+
 def _supported_backends(
     gates: Iterable[Gate],
     *,
@@ -599,23 +613,35 @@ def _supported_backends(
     amp_rot = amp_value
     rot = max(phase_rot or 0, amp_rot or 0)
     nnz = int((1 - sparse) * (2 ** num_qubits))
+    nnz = max(1, nnz)
     local = metrics_obj.local_multi_qubit
     from .sparsity import adaptive_dd_sparsity_threshold
 
     s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
     amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparse)
-    passes = (
-        sparse >= s_thresh
-        and nnz <= config.DEFAULT.dd_nnz_threshold
-        and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-        and amp_rot <= amp_thresh
-    )
+    passes = sparse >= s_thresh and nnz <= config.DEFAULT.dd_nnz_threshold
+    softness = max(1.0, config.DEFAULT.dd_rotation_softness)
+    hybrid_frontier = 0
+    if num_qubits > 0 and nnz > 0:
+        hybrid_frontier = min(num_qubits, int(math.ceil(math.log2(nnz))))
+    if num_gates and hybrid_frontier == 0:
+        hybrid_frontier = 1
+    hybrid_penalty = max(0, num_qubits - hybrid_frontier)
+    hybrid_replay = 0
+    if num_qubits > 0 and num_gates > 0:
+        hybrid_replay = int(round(num_gates * hybrid_penalty / max(num_qubits, 1)))
     dd_metric = False
     if passes:
         s_score = sparse / s_thresh if s_thresh > 0 else 0.0
+        s_score = min(max(s_score, 0.0), 1.2)
         nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
-        phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-        amp_score = 1 - amp_rot / amp_thresh
+        nnz_score = min(max(nnz_score, -1.0), 1.0)
+        phase_score = _soft_penalty(
+            phase_rot,
+            config.DEFAULT.dd_phase_rotation_diversity_threshold,
+            softness,
+        )
+        amp_score = _soft_penalty(amp_rot, amp_thresh, softness)
         weight_sum = (
             config.DEFAULT.dd_sparsity_weight
             + config.DEFAULT.dd_nnz_weight
@@ -662,7 +688,7 @@ def _supported_backends(
             print(
                 "[backend-selection] ",
                 f"sparsity={sparse:.6f} rotation_diversity={rot:.6f} nnz={nnz} ",
-                f"locality={local} candidates={ranking_str}",
+                f"hybrid_frontier={hybrid_frontier} locality={local} candidates={ranking_str}",
             )
 
         if config.DEFAULT.backend_selection_log:
@@ -686,7 +712,15 @@ def _supported_backends(
     costs: Dict[Backend, Cost] = {}
     # Estimates rely on calibrated coefficients for realistic costs.
     if dd_metric:
-        dd_cost = estimator.decision_diagram(num_gates=num_gates, frontier=num_qubits)
+        dd_cost = estimator.decision_diagram(
+            num_gates=num_gates,
+            frontier=num_qubits,
+            sparsity=sparse,
+            phase_rotation_diversity=phase_rot,
+            amplitude_rotation_diversity=amp_rot,
+            converted_frontier=hybrid_frontier,
+            hybrid_replay_gates=hybrid_replay,
+        )
         if max_memory is None or dd_cost.memory <= max_memory:
             costs[Backend.DECISION_DIAGRAM] = dd_cost
     if mps_metric:
@@ -1524,22 +1558,50 @@ class Planner:
                         if prev_backend is not None and prev_backend != backend:
                             boundary = boundaries[j]
                             if boundary:
-                                compressed = _compressed_terms(j, len(boundary))
-                                rank = compressed
-                                frontier = len(boundary)
+                                boundary_list = sorted(boundary)
+                                compressed = _compressed_terms(j, len(boundary_list))
+                                converted_frontier = len(boundary_list)
+                                if compressed > 0 and boundary_list:
+                                    converted_frontier = min(
+                                        len(boundary_list),
+                                        int(math.ceil(math.log2(compressed))),
+                                    )
+                                if converted_frontier == 0 and boundary_list:
+                                    converted_frontier = 1
+                                if converted_frontier <= 0:
+                                    continue
+                                boundary_set = set(boundary_list)
+                                converted_list = list(boundary_list)
+                                if converted_frontier < len(boundary_list):
+                                    counts: Counter[int] = Counter()
+                                    segment = gates[j:i]
+                                    for gate in segment:
+                                        for qubit in gate.qubits:
+                                            if qubit in boundary_set:
+                                                counts[qubit] += 1
+                                    ordered = sorted(
+                                        boundary_list,
+                                        key=lambda q: (-counts.get(q, 0), q),
+                                    )
+                                    converted_list = ordered[:converted_frontier]
+                                converted = tuple(sorted(converted_list))
+                                frontier = len(converted)
+                                if frontier == 0:
+                                    continue
+                                rank = min(compressed, 1 << frontier)
                                 window = self.estimator.derive_conversion_window(
-                                    len(boundary),
+                                    frontier,
                                     rank=rank,
-                                    compressed_terms=compressed,
+                                    compressed_terms=rank,
                                 )
                                 conv_est = self.estimator.conversion(
                                     prev_backend,
                                     backend,
-                                    num_qubits=len(boundary),
+                                    num_qubits=frontier,
                                     rank=rank,
                                     frontier=frontier,
                                     window=window,
-                                    compressed_terms=compressed,
+                                    compressed_terms=rank,
                                     chi_cap=self.staging_chi_cap,
                                 )
                                 est_time = conv_est.cost.time
@@ -1548,7 +1610,7 @@ class Planner:
                                 if self.conversion_engine is not None:
                                     try:
                                         ce_time, ce_mem = self.conversion_engine.estimate_cost(
-                                            len(boundary), backend
+                                            frontier, backend
                                         )
                                         est_time = max(est_time, ce_time)
                                         est_mem = max(est_mem, ce_mem)
@@ -1566,7 +1628,7 @@ class Planner:
                                             end=i,
                                             source=prev_backend,
                                             target=backend,
-                                            boundary=boundary,
+                                            boundary=converted,
                                             cost=conv_cost,
                                             primitive=primitive,
                                             feasible=False,
@@ -1581,7 +1643,7 @@ class Planner:
                                         end=i,
                                         source=prev_backend,
                                         target=backend,
-                                        boundary=boundary,
+                                        boundary=converted,
                                         cost=conv_cost,
                                         primitive=primitive,
                                         window=conv_est.window,
@@ -1715,34 +1777,63 @@ class Planner:
             boundary = sorted(prefix_qubits[cut] & future_qubits[cut])
             if not boundary:
                 continue
+            full_boundary = tuple(boundary)
             compressed = compressed_for_cut(cut, len(boundary))
-            rank = compressed
-            frontier = len(boundary)
+            converted_frontier = len(boundary)
+            if compressed > 0 and len(boundary) > 0:
+                converted_frontier = min(
+                    len(boundary), int(math.ceil(math.log2(compressed)))
+                )
+            if converted_frontier == 0 and boundary:
+                converted_frontier = 1
+            if converted_frontier <= 0:
+                continue
+            boundary_set = set(boundary)
+            converted_list = list(boundary)
+            if converted_frontier < len(boundary):
+                counts: Counter[int] = Counter()
+                segment = gates[step.start : step.end]
+                for gate in segment:
+                    for qubit in gate.qubits:
+                        if qubit in boundary_set:
+                            counts[qubit] += 1
+                ordered = sorted(
+                    boundary, key=lambda q: (-counts.get(q, 0), q)
+                )
+                converted_list = ordered[:converted_frontier]
+            converted = tuple(sorted(converted_list))
+            retained = tuple(sorted(boundary_set - set(converted)))
+            frontier = len(converted)
+            if frontier == 0:
+                continue
+            effective_rank = min(compressed, 1 << frontier)
             window = self.estimator.derive_conversion_window(
-                len(boundary),
-                rank=rank,
-                compressed_terms=compressed,
+                frontier,
+                rank=effective_rank,
+                compressed_terms=effective_rank,
             )
             conv_est = self.estimator.conversion(
                 prev.backend,
                 step.backend,
-                num_qubits=len(boundary),
-                rank=rank,
+                num_qubits=frontier,
+                rank=effective_rank,
                 frontier=frontier,
                 window=window,
-                compressed_terms=compressed,
+                compressed_terms=effective_rank,
                 chi_cap=self.staging_chi_cap,
             )
             layers.append(
                 ConversionLayer(
-                    boundary=tuple(boundary),
+                    boundary=converted,
                     source=prev.backend,
                     target=step.backend,
-                    rank=rank,
+                    rank=effective_rank,
                     frontier=frontier,
                     primitive=conv_est.primitive,
                     cost=conv_est.cost,
                     window=conv_est.window,
+                    retained=retained,
+                    full_boundary=full_boundary,
                 )
             )
         return layers

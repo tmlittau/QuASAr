@@ -157,6 +157,9 @@ class Config:
     dd_amplitude_rotation_diversity_threshold: int = _int_from_env(
         "QUASAR_DD_AMPLITUDE_ROTATION_DIVERSITY_THRESHOLD", 16
     )
+    dd_rotation_softness: float = _float_from_env(
+        "QUASAR_DD_ROTATION_SOFTNESS", 1.5
+    )
     backend_selection_log: str | None = os.getenv("QUASAR_BACKEND_SELECTION_LOG")
     verbose_selection: bool = _bool_from_env("QUASAR_VERBOSE_SELECTION", False)
     coeff_ema_decay: float = _float_from_env("QUASAR_COEFF_EMA_DECAY", 0.5)

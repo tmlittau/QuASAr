@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Backend selection based on multi-criteria constraints."""
 
+import math
 from types import SimpleNamespace
 from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING
 
@@ -110,6 +111,18 @@ def _statistics(qubits: Sequence[int], gates: Sequence['Gate']) -> Dict[str, Any
         "num_2q": num_2q,
         "num_t": num_t,
     }
+
+
+def _soft_penalty(value: float, threshold: float, softness: float) -> float:
+    """Return a smooth penalty in ``[0, 1]`` for exceeding ``threshold``."""
+
+    if threshold <= 0:
+        return 0.0 if value > 0 else 1.0
+    if value <= threshold:
+        return 1.0
+    overshoot = value / threshold - 1.0
+    softness = max(1.0, softness)
+    return 1.0 / (1.0 + overshoot**softness)
 
 
 class NoFeasibleBackendError(RuntimeError):
@@ -516,6 +529,7 @@ class MethodSelector:
         from .sparsity import adaptive_dd_sparsity_threshold
 
         nnz = int((1 - sparse) * (2**num_qubits))
+        nnz = max(1, nnz)
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
         amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparse)
         size_override = num_qubits <= 10 and nnz <= config.DEFAULT.dd_nnz_threshold
@@ -535,11 +549,20 @@ class MethodSelector:
             bonus = 1.0 + max(0, 10 - num_qubits) / 5.0
             effective_sparse = min(1.0, max(sparse, s_thresh * bonus))
         passes = (
-            effective_sparse >= s_thresh
-            and nnz <= config.DEFAULT.dd_nnz_threshold
-            and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-            and amp_rot <= amp_thresh
+            effective_sparse >= s_thresh and nnz <= config.DEFAULT.dd_nnz_threshold
         )
+        softness = max(1.0, config.DEFAULT.dd_rotation_softness)
+        hybrid_frontier = 0
+        if num_qubits > 0 and nnz > 0:
+            hybrid_frontier = min(num_qubits, int(math.ceil(math.log2(nnz))))
+        if num_gates and hybrid_frontier == 0:
+            hybrid_frontier = 1
+        hybrid_penalty = max(0, num_qubits - hybrid_frontier)
+        hybrid_replay = 0
+        if num_qubits > 0 and num_gates > 0:
+            hybrid_replay = int(
+                round(num_gates * hybrid_penalty / max(num_qubits, 1))
+            )
         dd_metric = False
         if diag is not None:
             metrics = diag.setdefault("metrics", {})
@@ -550,6 +573,8 @@ class MethodSelector:
                     "amplitude_rotation_diversity": amp_rot,
                     "nnz": nnz,
                     "local": False,
+                    "dd_hybrid_frontier": hybrid_frontier,
+                    "dd_hybrid_penalty": hybrid_penalty,
                 }
             )
             metrics["dd_size_override"] = structure_override
@@ -557,9 +582,15 @@ class MethodSelector:
 
         if passes:
             s_score = effective_sparse / s_thresh if s_thresh > 0 else 0.0
+            s_score = min(max(s_score, 0.0), 1.2)
             nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
-            phase_score = 1 - phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-            amp_score = 1 - amp_rot / amp_thresh
+            nnz_score = min(max(nnz_score, -1.0), 1.0)
+            phase_score = _soft_penalty(
+                phase_rot,
+                config.DEFAULT.dd_phase_rotation_diversity_threshold,
+                softness,
+            )
+            amp_score = _soft_penalty(amp_rot, amp_thresh, softness)
             weight_sum = (
                 config.DEFAULT.dd_sparsity_weight
                 + config.DEFAULT.dd_nnz_weight
@@ -578,11 +609,15 @@ class MethodSelector:
                 metrics = diag.setdefault("metrics", {})
                 metrics["decision_diagram_metric"] = metric
                 metrics["dd_metric_threshold"] = config.DEFAULT.dd_metric_threshold
+                metrics["dd_phase_score"] = phase_score
+                metrics["dd_amplitude_score"] = amp_score
+                metrics["dd_hybrid_replay"] = hybrid_replay
             if not dd_metric and diag_backends is not None:
                 diag_backends[Backend.DECISION_DIAGRAM] = {
                     "feasible": False,
                     "reasons": ["metric below threshold"],
                     "metric": metric,
+                    "hybrid_frontier": hybrid_frontier,
                 }
         elif diag_backends is not None:
             reasons = []
@@ -590,13 +625,18 @@ class MethodSelector:
                 reasons.append("sparsity below threshold")
             if nnz > config.DEFAULT.dd_nnz_threshold:
                 reasons.append("nnz above threshold")
-            if phase_rot > config.DEFAULT.dd_phase_rotation_diversity_threshold:
-                reasons.append("phase diversity above threshold")
-            if amp_rot > amp_thresh:
-                reasons.append("amplitude diversity above threshold")
+            phase_ratio = phase_rot / max(
+                config.DEFAULT.dd_phase_rotation_diversity_threshold, 1
+            )
+            amp_ratio = amp_rot / max(amp_thresh, 1)
+            if phase_ratio > 1:
+                reasons.append("phase diversity incurs penalty")
+            if amp_ratio > 1:
+                reasons.append("amplitude diversity incurs penalty")
             diag_backends[Backend.DECISION_DIAGRAM] = {
                 "feasible": False,
                 "reasons": reasons,
+                "hybrid_frontier": hybrid_frontier,
             }
 
         # Characterise locality for matrix product state simulation.
@@ -633,13 +673,36 @@ class MethodSelector:
             metrics["mps_max_interaction_distance"] = max_interaction_distance
 
         if dd_metric:
-            dd_costs = [
-                self.estimator.decision_diagram(
-                    num_gates=stats["num_gates"],
-                    frontier=stats["num_qubits"],
+            dd_costs: list[Cost] = []
+            for stats in metrics_seq:
+                sub_qubits = stats["num_qubits"]
+                sub_gates = stats["num_gates"]
+                sub_nnz = max(1, int((1 - sparse) * (2**sub_qubits)))
+                sub_frontier = 0
+                if sub_qubits > 0 and sub_nnz > 0:
+                    sub_frontier = min(
+                        sub_qubits, int(math.ceil(math.log2(sub_nnz)))
+                    )
+                if sub_gates and sub_frontier == 0:
+                    sub_frontier = 1
+                sub_penalty = max(0, sub_qubits - sub_frontier)
+                sub_replay = 0
+                if sub_qubits > 0 and sub_gates > 0 and sub_penalty > 0:
+                    sub_replay = int(
+                        round(sub_gates * sub_penalty / max(sub_qubits, 1))
+                    )
+                dd_costs.append(
+                    self.estimator.decision_diagram(
+                        num_gates=sub_gates,
+                        frontier=sub_qubits,
+                        sparsity=sparse,
+                        phase_rotation_diversity=phase_rot,
+                        amplitude_rotation_diversity=amp_rot,
+                        entanglement_entropy=entanglement,
+                        converted_frontier=sub_frontier,
+                        hybrid_replay_gates=sub_replay,
+                    )
                 )
-                for stats in metrics_seq
-            ]
             dd_cost = _sequential_cost(dd_costs)
             dd_reasons: list[str] = []
             feasible = True
@@ -659,6 +722,8 @@ class MethodSelector:
                 }
                 if diag is not None and "metrics" in diag and "decision_diagram_metric" in diag["metrics"]:
                     entry["metric"] = diag["metrics"]["decision_diagram_metric"]
+                entry["hybrid_frontier"] = hybrid_frontier
+                entry["hybrid_penalty"] = hybrid_penalty
                 diag_backends[Backend.DECISION_DIAGRAM] = entry
 
         if total_multi:

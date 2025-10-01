@@ -8,7 +8,7 @@ import quasar.config as config
 
 from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circuit
 from benchmarks.circuits import grover_circuit
-from quasar.circuit import Circuit
+from quasar.circuit import Circuit, Gate
 from quasar.cost import Backend, CostEstimator
 from quasar.method_selector import MethodSelector
 from quasar.sparsity import sparsity_estimate
@@ -79,6 +79,41 @@ def test_small_grover_prefers_decision_diagrams(width: int) -> None:
         dd_cost = dd_entry["cost"]
 
         assert dd_cost.time <= mps_cost.time
+
+
+def test_rotation_soft_penalty_enables_dd() -> None:
+    """Moderate rotation diversity should no longer block DD selection."""
+
+    gates = [
+        Gate("CX", [0, 1]),
+        Gate("CZ", [1, 2]),
+        Gate("RZ", [0], {"phi": 0.125}),
+        Gate("RZ", [1], {"phi": 0.333}),
+        Gate("RZ", [2], {"phi": 0.625}),
+        Gate("T", [3]),
+    ]
+    circuit = Circuit(gates, use_classical_simplification=False)
+    estimator = CostEstimator()
+    selector = MethodSelector(estimator)
+
+    phase_div = config.DEFAULT.dd_phase_rotation_diversity_threshold + 4
+    amp_div = max(1, config.DEFAULT.dd_amplitude_rotation_diversity_threshold // 2)
+
+    diagnostics: dict[str, object] = {}
+    backend, _ = selector.select(
+        circuit.gates,
+        circuit.num_qubits,
+        sparsity=0.92,
+        phase_rotation_diversity=phase_div,
+        amplitude_rotation_diversity=amp_div,
+        diagnostics=diagnostics,
+    )
+
+    assert backend is Backend.DECISION_DIAGRAM
+    metrics = diagnostics["metrics"]
+    assert metrics["dd_phase_score"] < 1.0
+    dd_entry = diagnostics["backends"][Backend.DECISION_DIAGRAM]
+    assert dd_entry["feasible"] is True
 
 
 def test_layered_circuit_prefers_mps(monkeypatch) -> None:
