@@ -223,6 +223,8 @@ class CostEstimator:
             "dd_two_qubit_weight": 0.22,
             "dd_frontier_weight": 0.35,
             "dd_modifier_floor": 0.05,
+            "dd_hybrid_conversion_weight": 0.12,
+            "dd_hybrid_replay_weight": 0.18,
             # Conversion primitives -----------------------------------------
             # Boundary-to-boundary SVD and copy steps from the QuASAr draft.
             "b2b_svd": 4.0,
@@ -774,6 +776,8 @@ class CostEstimator:
         amplitude_rotation_diversity: float | None = None,
         entanglement_entropy: float | None = None,
         two_qubit_ratio: float | None = None,
+        converted_frontier: int | None = None,
+        hybrid_replay_gates: int = 0,
     ) -> Cost:
         """Estimate cost for decision diagram simulation.
 
@@ -785,11 +789,15 @@ class CostEstimator:
         an edge cache, each tunable via calibration coefficients.
         """
 
+        active_frontier = converted_frontier if converted_frontier is not None else frontier
+        if active_frontier < 0:
+            active_frontier = 0
+
         threshold = 2
-        if frontier < threshold:
-            base_nodes = frontier
+        if active_frontier < threshold:
+            base_nodes = active_frontier
         else:
-            base_nodes = frontier * math.log2(frontier)
+            base_nodes = active_frontier * math.log2(active_frontier)
 
         sparse = min(max(sparsity if sparsity is not None else 0.0, 0.0), 1.0)
         phase_rot = phase_rotation_diversity or 0.0
@@ -799,7 +807,7 @@ class CostEstimator:
         entropy_norm = entropy / max(math.log2(frontier + 1) if frontier else 1.0, 1.0)
         mix = two_qubit_ratio or 0.0
         modifier = 1.0
-        modifier += self.coeff.get("dd_frontier_weight", 0.0) * math.log2(frontier + 1)
+        modifier += self.coeff.get("dd_frontier_weight", 0.0) * math.log2(active_frontier + 1)
         modifier += self.coeff.get("dd_rotation_penalty", 0.0) * rotation
         modifier += self.coeff.get("dd_entropy_penalty", 0.0) * entropy_norm
         modifier += self.coeff.get("dd_two_qubit_weight", 0.0) * mix
@@ -817,8 +825,27 @@ class CostEstimator:
         base_mem = self.coeff.get("dd_base_mem", 0.0)
         memory = base_mem + self.coeff.get("dd_mem", 1.0) * (node_table + cache)
 
-        depth = math.log2(frontier) if frontier > 0 else 0.0
-        return Cost(time=time, memory=memory, log_depth=depth)
+        depth = math.log2(active_frontier) if active_frontier > 0 else 0.0
+
+        hybrid_penalty = max(0, frontier - active_frontier)
+        conversion_overhead = (
+            self.coeff.get("dd_hybrid_conversion_weight", 0.0)
+            * max(num_gates, 1)
+            * hybrid_penalty
+        )
+        replay_overhead = (
+            self.coeff.get("dd_hybrid_replay_weight", 0.0)
+            * max(hybrid_replay_gates, 0)
+            * max(hybrid_penalty, 0)
+        )
+
+        return Cost(
+            time=time,
+            memory=memory,
+            log_depth=depth,
+            conversion=conversion_overhead,
+            replay=replay_overhead,
+        )
 
     # Conversion cost estimation -------------------------------------
 
