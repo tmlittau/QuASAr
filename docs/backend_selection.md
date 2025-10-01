@@ -199,6 +199,37 @@ cheaper than continuing with the current backend.  Additional reasons such as
 ``statevector_lock`` and ``single_qubit_preamble`` capture fast-path rejections
 for dense fragments and single-qubit prefixes respectively.【F:quasar/partitioner.py†L283-L399】【F:quasar/partitioner.py†L495-L508】【F:quasar/partitioner.py†L536-L547】
 
+### Replaying planner choices
+
+The exported metrics can be fed back into the documentation utilities to
+reproduce the selector's decision path.  The helper
+``docs.utils.partitioning_analysis.replay_backend_selection`` consumes the
+``backend_selection['single']['metrics']`` mapping (or any fragment-specific
+entry) and rebuilds the feasibility table using the same thresholds as
+:class:`MethodSelector`.  This allows researchers to compare the planner's
+choice with alternative resource limits or metric tweaks without rerunning the
+full circuit analysis:
+
+```python
+from quasar.planner import Planner
+from quasar.circuit import Circuit, Gate
+from quasar.cost import CostEstimator
+from docs.utils.partitioning_analysis import replay_backend_selection
+
+planner = Planner(estimator=CostEstimator(), quick_max_qubits=32)
+circuit = Circuit([Gate("H", [0]), Gate("CX", [0, 1]), Gate("T", [1])])
+plan = planner.plan(circuit, explain=True)
+metrics = dict(plan.diagnostics.backend_selection["single"]["metrics"])
+metrics["fragments"] = [dict(entry) for entry in metrics["fragments"]]
+
+backend, diagnostics = replay_backend_selection(metrics)
+assert backend == plan.final_backend
+```
+
+Supplying a different ``max_memory`` or ``selection_metric`` lets users test how
+the recorded fragment would fare under alternative constraints, enabling direct
+comparisons between the exported plan and hypothetical settings.
+
 ### Fragment metrics
 
 Explaining backend choices also benefits from structural statistics about each
