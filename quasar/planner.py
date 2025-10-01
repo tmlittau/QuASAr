@@ -351,7 +351,7 @@ class PlanResult:
             )
             if parallel_groups is None:
                 if part is None:
-                    part = Partitioner()
+                    part = Partitioner(staging_chi_cap=self.staging_chi_cap)
                 segment = self.gates[entry.prev_index : i]
                 groups = part.parallel_groups(segment)
                 parallel_groups = tuple(g[0] for g in groups) if groups else ()
@@ -869,6 +869,7 @@ class Planner:
         horizon: int | None = None,
         epsilon: float = 0.01,
         selector: MethodSelector | None = None,
+        staging_chi_cap: int | None = config.DEFAULT.st_chi_cap,
         conversion_engine: ConversionEngine | None = None,
     ):
         """Create a new planner instance.
@@ -915,6 +916,10 @@ class Planner:
         conversion_engine:
             Optional conversion engine supplying refined cost estimates for
             backend switches.
+        staging_chi_cap:
+            Upper bound on the staged conversion bond dimension. Defaults to
+            ``config.DEFAULT.st_chi_cap`` and is forwarded to the cost model
+            when evaluating ST primitives.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -935,6 +940,11 @@ class Planner:
         self.horizon = horizon
         self.epsilon = epsilon
         self.conversion_engine = conversion_engine
+        self.staging_chi_cap = None
+        if staging_chi_cap is not None:
+            cap = max(1, int(staging_chi_cap))
+            self.staging_chi_cap = cap
+            self.estimator.coeff["st_chi_cap"] = float(cap)
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -1530,6 +1540,7 @@ class Planner:
                                     frontier=frontier,
                                     window=window,
                                     compressed_terms=compressed,
+                                    chi_cap=self.staging_chi_cap,
                                 )
                                 est_time = conv_est.cost.time
                                 est_mem = conv_est.cost.memory
@@ -1720,6 +1731,7 @@ class Planner:
                 frontier=frontier,
                 window=window,
                 compressed_terms=compressed,
+                chi_cap=self.staging_chi_cap,
             )
             layers.append(
                 ConversionLayer(
@@ -1958,7 +1970,7 @@ class Planner:
                 raise ValueError("Requested backend exceeds memory threshold")
             if max_time is not None and cost.time > max_time:
                 raise ValueError("Requested backend exceeds time threshold")
-            part = Partitioner()
+            part = Partitioner(staging_chi_cap=self.staging_chi_cap)
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(start=0, end=len(gates), backend=backend, parallel=parallel)
@@ -2007,7 +2019,7 @@ class Planner:
                 diagnostics.backend_selection["single"] = single_selection
             self._print_selection_diagnostics(single_selection, stage="single")
 
-        part = Partitioner()
+        part = Partitioner(staging_chi_cap=self.staging_chi_cap)
         groups = part.parallel_groups(gates) if num_qubits > 1 else []
         if single_backend_choice is not None and len(groups) > 1:
             par_cost = _parallel_simulation_cost(
@@ -2034,7 +2046,7 @@ class Planner:
                 (threshold is None or single_cost.memory <= threshold)
                 and (max_time is None or single_cost.time <= max_time)
             ):
-                part = Partitioner()
+                part = Partitioner(staging_chi_cap=self.staging_chi_cap)
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
                 step = PlanStep(
@@ -2089,7 +2101,7 @@ class Planner:
             and (threshold is None or single_cost.memory <= threshold)
             and (max_time is None or single_cost.time <= max_time)
         ):
-            part = Partitioner()
+            part = Partitioner(staging_chi_cap=self.staging_chi_cap)
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(
@@ -2151,7 +2163,7 @@ class Planner:
             and (threshold is None or single_cost.memory <= threshold)
             and (max_time is None or single_cost.time <= max_time)
         ):
-            part = Partitioner()
+            part = Partitioner(staging_chi_cap=self.staging_chi_cap)
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(
@@ -2198,7 +2210,7 @@ class Planner:
         refined_steps: List[PlanStep] = []
         prev_backend: Optional[Backend] = None
         total_cost = Cost(time=0.0, memory=0.0)
-        part = Partitioner()
+        part = Partitioner(staging_chi_cap=self.staging_chi_cap)
         for step in coarse.steps:
             segment = gates[step.start : step.end]
             try:

@@ -7,6 +7,7 @@ from .ssd import SSD, SSDPartition, ConversionLayer, PartitionTraceEntry
 from .cost import Backend, CostEstimator, Cost
 from .method_selector import MethodSelector, NoFeasibleBackendError
 from .metrics import FragmentMetrics
+from . import config
 
 if TYPE_CHECKING:  # pragma: no cover
     from .circuit import Circuit, Gate
@@ -41,12 +42,18 @@ class Partitioner:
         max_memory: float | None = None,
         max_time: float | None = None,
         target_accuracy: float | None = None,
+        staging_chi_cap: int | None = config.DEFAULT.st_chi_cap,
     ):
         self.estimator = estimator or CostEstimator()
         self.selector = selector or MethodSelector(self.estimator)
         self.max_memory = max_memory
         self.max_time = max_time
         self.target_accuracy = target_accuracy
+        self.staging_chi_cap = None
+        if staging_chi_cap is not None:
+            cap = max(1, int(staging_chi_cap))
+            self.staging_chi_cap = cap
+            self.estimator.coeff["st_chi_cap"] = float(cap)
 
     def partition(
         self,
@@ -172,6 +179,7 @@ class Partitioner:
                 frontier=frontier,
                 window=window,
                 compressed_terms=compressed_terms,
+                chi_cap=self.staging_chi_cap,
             )
             return (
                 boundary_tuple,

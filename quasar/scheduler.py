@@ -623,7 +623,11 @@ class Scheduler:
                 return plan
 
         if self.conversion_engine is None:
-            self.conversion_engine = ConversionEngine()
+            cap = config.DEFAULT.st_chi_cap
+            kwargs: Dict[str, int] = {}
+            if cap is not None:
+                kwargs["st_chi_cap"] = max(1, int(cap))
+            self.conversion_engine = ConversionEngine(**kwargs)
         if self.planner is None:
             self.planner = Planner(
                 quick_max_qubits=self.quick_max_qubits,
@@ -631,6 +635,7 @@ class Scheduler:
                 quick_max_depth=self.quick_max_depth,
                 backend_order=self.backend_order,
                 conversion_engine=self.conversion_engine,
+                staging_chi_cap=getattr(self.conversion_engine, "st_chi_cap", None),
             )
         elif getattr(self.planner, "conversion_engine", None) is None:
             self.planner.conversion_engine = self.conversion_engine
