@@ -1087,6 +1087,15 @@ class ConversionLayer:
         Original set of boundary qubits prior to any partial conversion.  When
         ``None`` the conversion applies to all qubits listed in
         :attr:`boundary`.
+    residual_backend:
+        Backend that continues to represent :attr:`retained` qubits after a
+        partial conversion.  ``None`` when all qubits move to the target
+        backend.
+    converted_terms:
+        Estimated number of amplitudes materialised for the converted subset.
+        The value corresponds to the ingestion term used by the cost model and
+        is useful for validating fidelity when only part of the frontier moves
+        between backends.
     """
 
     boundary: Tuple[int, ...]
@@ -1099,6 +1108,8 @@ class ConversionLayer:
     window: int | None = None
     retained: Tuple[int, ...] = ()
     full_boundary: Tuple[int, ...] | None = None
+    residual_backend: Backend | None = None
+    converted_terms: int | None = None
 
 
 @dataclass

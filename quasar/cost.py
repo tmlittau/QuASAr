@@ -65,6 +65,7 @@ class ConversionEstimate:
     primitive: str
     cost: Cost
     window: Optional[int] = None
+    ingest_terms: Optional[int] = None
 
 
 @dataclass
@@ -1099,7 +1100,20 @@ class CostEstimator:
         primitive, detail = min(details.items(), key=lambda kv: kv[1].cost.time)
         if math.isinf(detail.cost.time):
             primitive = "Full"
-        return ConversionEstimate(primitive=primitive, cost=detail.cost, window=detail.window)
+        ingest_terms = (
+            compressed_terms if compressed_terms is not None else 2**num_qubits
+        )
+        try:
+            ingest_terms_int = int(round(ingest_terms))
+        except TypeError:
+            ingest_terms_int = int(ingest_terms)
+        ingest_terms_int = max(1, ingest_terms_int)
+        return ConversionEstimate(
+            primitive=primitive,
+            cost=detail.cost,
+            window=detail.window,
+            ingest_terms=ingest_terms_int,
+        )
 
 
 __all__ = [

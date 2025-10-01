@@ -50,10 +50,13 @@ def test_plan_records_wide_conversion_window() -> None:
 
     assert layers
     layer = layers[0]
-    assert layer.frontier == 5
-    assert layer.boundary == (0, 1, 2, 3, 4)
-    assert layer.retained == (5,)
+    assert layer.frontier == 1
+    assert layer.boundary == (0,)
+    assert layer.retained == (1, 2, 3, 4, 5)
     assert layer.full_boundary == (0, 1, 2, 3, 4, 5)
+    assert layer.residual_backend == Backend.TABLEAU
+    assert layer.converted_terms is not None
+    assert layer.rank == layer.converted_terms
     if layer.primitive == "LW":
         assert layer.window == 5
     else:

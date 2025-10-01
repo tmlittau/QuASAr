@@ -118,6 +118,7 @@ def test_conversion_window_reflects_entanglement() -> None:
     )
     assert estimate.primitive == selected_primitive
     assert estimate.window == selected_detail.window
+    assert estimate.ingest_terms == 64
 
 
 def test_staged_conversion_respects_cap_hint() -> None:

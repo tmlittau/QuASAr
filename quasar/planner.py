@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, Iterator
 
-from .cost import Backend, Cost, CostEstimator
+from .cost import Backend, Cost, CostEstimator, ConversionEstimate
 from quasar_convert import ConversionEngine
 from .partitioner import CLIFFORD_GATES, CLIFFORD_PLUS_T_GATES, Partitioner
 from .sparsity import BRANCHING_GATES, is_controlled
@@ -1823,51 +1823,96 @@ class Planner:
             if converted_frontier <= 0:
                 continue
             boundary_set = set(boundary)
-            converted_list = list(boundary)
-            if converted_frontier < len(boundary):
-                counts: Counter[int] = Counter()
-                segment = gates[step.start : step.end]
-                for gate in segment:
-                    for qubit in gate.qubits:
-                        if qubit in boundary_set:
-                            counts[qubit] += 1
-                ordered = sorted(
-                    boundary, key=lambda q: (-counts.get(q, 0), q)
-                )
-                converted_list = ordered[:converted_frontier]
-            converted = tuple(sorted(converted_list))
-            retained = tuple(sorted(boundary_set - set(converted)))
-            frontier = len(converted)
-            if frontier == 0:
+            segment = gates[step.start : step.end]
+            scores: Dict[int, float] = {qubit: 0.0 for qubit in boundary}
+            partners: Dict[int, Set[int]] = {qubit: set() for qubit in boundary}
+            for gate in segment:
+                qubits = getattr(gate, "qubits", ())
+                if not qubits:
+                    continue
+                qubit_set = set(qubits)
+                involved = qubit_set & boundary_set
+                if not involved:
+                    continue
+                if len(qubits) == 1:
+                    for qubit in involved:
+                        scores[qubit] += 0.1
+                    continue
+                outside = qubit_set - boundary_set
+                for qubit in involved:
+                    scores[qubit] += 1.0
+                    if outside:
+                        scores[qubit] += 2.0 * len(outside)
+                        partners[qubit].update(outside)
+            for qubit, partner_set in partners.items():
+                scores[qubit] += 0.5 * len(partner_set)
+            ordered = sorted(boundary, key=lambda q: (-scores.get(q, 0.0), q))
+            boundary_size = len(boundary)
+            limit = min(converted_frontier, boundary_size)
+            if limit <= 0:
                 continue
-            effective_rank = min(compressed, 1 << frontier)
-            window = self.estimator.derive_conversion_window(
-                frontier,
-                rank=effective_rank,
-                compressed_terms=effective_rank,
-            )
-            conv_est = self.estimator.conversion(
-                prev.backend,
-                step.backend,
-                num_qubits=frontier,
-                rank=effective_rank,
-                frontier=frontier,
-                window=window,
-                compressed_terms=effective_rank,
-                chi_cap=self.staging_chi_cap,
-            )
+            candidate_sizes: Set[int] = set(range(1, limit + 1))
+            candidate_sizes.add(boundary_size)
+            log_rank = math.log2(compressed) if compressed > 1 else 0.0
+            best_choice: Optional[
+                Tuple[Tuple[int, ...], Tuple[int, ...], int, int, ConversionEstimate, Backend | None]
+            ] = None
+            for size in sorted(candidate_sizes):
+                size = min(size, boundary_size)
+                subset = tuple(sorted(ordered[:size]))
+                if not subset:
+                    continue
+                subset_set = set(subset)
+                retained = tuple(sorted(boundary_set - subset_set))
+                frontier = len(subset)
+                if frontier == 0:
+                    continue
+                fraction = frontier / boundary_size if boundary_size else 1.0
+                approx_log = log_rank * fraction
+                if approx_log <= 0.0:
+                    subset_terms = 1
+                else:
+                    subset_terms = int(2 ** math.ceil(approx_log))
+                subset_terms = max(1, min(1 << frontier, subset_terms))
+                conv_est = self.estimator.conversion(
+                    prev.backend,
+                    step.backend,
+                    num_qubits=frontier,
+                    rank=subset_terms,
+                    frontier=frontier,
+                    compressed_terms=subset_terms,
+                    chi_cap=self.staging_chi_cap,
+                )
+                residual_backend = prev.backend if retained else None
+                choice = (
+                    subset,
+                    retained,
+                    frontier,
+                    subset_terms,
+                    conv_est,
+                    residual_backend,
+                )
+                if best_choice is None or _better(
+                    conv_est.cost, best_choice[4].cost, self.perf_prio
+                ):
+                    best_choice = choice
+            if best_choice is None:
+                continue
+            converted, retained, frontier, subset_terms, conv_est, residual_backend = best_choice
             layers.append(
                 ConversionLayer(
                     boundary=converted,
                     source=prev.backend,
                     target=step.backend,
-                    rank=effective_rank,
+                    rank=subset_terms,
                     frontier=frontier,
                     primitive=conv_est.primitive,
                     cost=conv_est.cost,
                     window=conv_est.window,
                     retained=retained,
                     full_boundary=full_boundary,
+                    residual_backend=residual_backend,
+                    converted_terms=conv_est.ingest_terms,
                 )
             )
         return layers
