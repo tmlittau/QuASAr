@@ -129,7 +129,7 @@ default values are defined in ``quasar/config.py`` and may be overridden either
 programmatically or via environment variables at import time:
 
 * ``QUASAR_QUICK_MAX_QUBITS`` – maximum number of qubits for the quick-path
-  estimate.  Set to ``None`` to disable.
+  estimate.  Set to ``None`` (the default) to disable.
 * ``QUASAR_QUICK_MAX_GATES`` – maximum gate count for quick-path planning.
 * ``QUASAR_QUICK_MAX_DEPTH`` – maximum circuit depth for quick-path planning.
 * ``QUASAR_BACKEND_ORDER`` – comma-separated preference list of backends
@@ -138,37 +138,50 @@ programmatically or via environment variables at import time:
 The same parameters can be passed directly to :class:`Planner` and
 :class:`Scheduler` constructors to override the defaults on a per-instance
 basis, allowing runtime tuning without relying on environment variables.
-
-The default quick-path limits are tuned using
-``benchmarks/quick_analysis_benchmark.py`` and currently favour circuits of
-approximately 12 qubits, 240 gates and depth 60, offering substantial
-speedups for small problems.
+Quick-path heuristics are disabled unless explicit thresholds are provided—by
+default all three configuration values are ``None``.  Use
+``benchmarks/bench_utils/quick_analysis_benchmark.py`` to calibrate suitable
+limits when enabling the feature; the script writes the resulting timings to
+``benchmarks/quick_analysis_results.csv`` for later inspection.
 
 ### Automatic single-backend selection
 
-When a circuit's size falls below *all* ``QUASAR_QUICK_MAX_*`` thresholds,
-the planner skips dynamic programming and schedules the entire circuit on
-the cheapest backend in the configured preference order.  These thresholds
-can be tuned via the environment variables above or by supplying
-``quick_max_qubits``, ``quick_max_gates`` and ``quick_max_depth`` to
-:class:`Planner` or :class:`Scheduler`.
+When a circuit's size falls below *all* configured quick-path thresholds, the
+planner skips dynamic programming and schedules the entire circuit on the
+cheapest backend in the configured preference order.  These thresholds can be
+tuned via the environment variables above or by supplying ``quick_max_qubits``,
+``quick_max_gates`` and ``quick_max_depth`` to :class:`Planner` and
+:class:`Scheduler`.
 
 ```python
 import time
-from quasar import Circuit, SimulationEngine, Planner
+from quasar import Circuit, Planner, Scheduler, SimulationEngine
 
 circ = Circuit([
     {"gate": "H", "qubits": [0]},
     {"gate": "CX", "qubits": [0, 1]},
 ])
 
-engine = SimulationEngine()
+planner = Planner(quick_max_qubits=4, quick_max_gates=32, quick_max_depth=16)
+scheduler = Scheduler(
+    planner=planner,
+    quick_max_qubits=planner.quick_max_qubits,
+    quick_max_gates=planner.quick_max_gates,
+    quick_max_depth=planner.quick_max_depth,
+)
+engine = SimulationEngine(
+    planner=planner,
+    scheduler=scheduler,
+    memory_threshold=float("inf"),
+)
+
 start = time.perf_counter()
 engine.simulate(circ)  # quick path uses a single backend
 print(f"quick path: {time.perf_counter() - start:.3f}s")
 
-planner = Planner(quick_max_qubits=None, quick_max_gates=None, quick_max_depth=None)
-engine = SimulationEngine(planner=planner)
+planner.quick_max_qubits = planner.quick_max_gates = planner.quick_max_depth = None
+scheduler.quick_max_qubits = scheduler.quick_max_gates = scheduler.quick_max_depth = None
+
 start = time.perf_counter()
 engine.simulate(circ)  # full planner is slower on tiny circuits
 print(f"full planning: {time.perf_counter() - start:.3f}s")

@@ -55,7 +55,7 @@ loudly.
 `SimulationEngine.simulate` accepts several optional parameters:
 
 - `backend` prefers a specific backend (for example
-  `Backend.STATEVECTOR` or `Backend.STIM_TABLEAU`).
+  `Backend.STATEVECTOR` or `Backend.TABLEAU`).
 - `memory_threshold` overrides the automatically detected memory ceiling for the
   dense statevector backend.
 - `target_accuracy`, `max_time` and `optimization_level` are forwarded to the
