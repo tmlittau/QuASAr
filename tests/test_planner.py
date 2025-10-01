@@ -52,3 +52,40 @@ def test_plan_records_wide_conversion_window() -> None:
     layer = layers[0]
     assert layer.primitive == "LW"
     assert layer.window == 5
+
+
+def test_single_backend_choice_reflects_fragment_sparsity() -> None:
+    """Planner's single-backend estimate should react to sparsity metrics."""
+
+    planner = Planner()
+    gates = [
+        Gate("H", [0]),
+        Gate("RY", [0], params={"theta": 0.2}),
+        Gate("CX", [0, 1]),
+        Gate("CX", [1, 2]),
+        Gate("RY", [2], params={"theta": 0.4}),
+        Gate("CX", [2, 3]),
+        Gate("RY", [3], params={"theta": 0.6}),
+        Gate("CX", [3, 4]),
+        Gate("RY", [4], params={"theta": 0.8}),
+    ]
+
+    dense_backend, _ = planner._single_backend(
+        gates,
+        max_memory=None,
+        sparsity=0.05,
+        phase_rotation_diversity=40,
+        amplitude_rotation_diversity=0,
+        max_time=1500,
+    )
+    sparse_backend, _ = planner._single_backend(
+        gates,
+        max_memory=None,
+        sparsity=0.9,
+        phase_rotation_diversity=40,
+        amplitude_rotation_diversity=0,
+        max_time=1500,
+    )
+
+    assert dense_backend == Backend.STATEVECTOR
+    assert sparse_backend == Backend.MPS
