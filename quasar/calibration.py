@@ -234,7 +234,16 @@ def latest_coefficients() -> Dict[str, float] | None:
 
     if not CALIBRATION_DIR.exists():
         return None
-    files = sorted(CALIBRATION_DIR.glob("coeff_v*.json"))
+    def _version_key(path: Path) -> tuple[int, str]:
+        stem = path.stem
+        try:
+            suffix = stem.split("v", 1)[1]
+            version = int("".join(ch for ch in suffix if ch.isdigit()))
+        except (IndexError, ValueError):
+            version = -1
+        return (version, stem)
+
+    files = sorted(CALIBRATION_DIR.glob("coeff_v*.json"), key=_version_key)
     if not files:
         return None
     return load_coefficients(files[-1])

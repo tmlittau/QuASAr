@@ -47,18 +47,19 @@ characteristics of the target hardware.
 
 ## Running the benchmarks
 
-Run the benchmarking utility in ``tools/`` to measure the cost of the
-supported simulation backends and conversion primitives:
+Run the benchmarking utility bundled with the package to measure the cost
+of the supported simulation backends and conversion primitives:
 
 ```bash
-python tools/benchmark_coefficients.py
+python -m quasar.calibration --output coeff.json
 ```
 
-Each invocation writes a new versioned JSON file under the top-level
-``calibration/`` directory, e.g. ``calibration/coeff_v1.json``.  The
-latest available file is loaded automatically by
-:class:`~quasar.cost.CostEstimator` when instantiated with default
-arguments.
+Each invocation produces a JSON coefficient table.  After validating the
+measurements, replace ``calibration/coeff_v1.json`` with the new values
+and commit the update so that packaged installations ship with the
+current baseline.  :func:`~quasar.calibration.latest_coefficients` will
+automatically return the newest ``coeff_v*.json`` file distributed with
+the project.
 
 Existing estimators can be updated in place using the calibration
 helpers:
@@ -74,3 +75,20 @@ if coeff:
 
 These utilities allow coefficients to be tuned once and reused across
 runs on the same hardware.
+
+## Deployment calibration – March 2024
+
+The default coefficient table bundled with this repository was refreshed
+using the command sequence above.  The benchmarks were executed on the
+deployment machine with the following profile:
+
+- **CPU**: Intel(R) Xeon(R) Platinum 8370C @ 2.80 GHz (5 cores, 1 thread
+  per core)
+- **Memory**: 9.9 GiB total RAM available to the container environment
+- **Virtualisation**: KVM virtual machine with single NUMA node
+
+The resulting ``calibration/coeff_v1.json`` encodes the measured
+coefficients under the ``"coeff"`` field and preserves the hardware
+summary above for traceability.  Subsequent calibrations should append a
+new ``coeff_vN.json`` file and document the hardware and procedure in a
+new subsection.

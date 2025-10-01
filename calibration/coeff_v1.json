@@ -1,4 +1,34 @@
 {
   "version": 1,
-  "coeff": {}
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+    "cores": 5,
+    "threads_per_core": 1,
+    "memory_gib": 9.9
+  },
+  "coeff": {
+    "b2b_copy": 4.069376018378534e-08,
+    "b2b_svd": 4.069376018378534e-08,
+    "dd_base_mem": 1771.0,
+    "dd_base_time": 0.00036534399987431243,
+    "dd_gate": 4.190250024294073e-08,
+    "dd_mem": 1.0,
+    "full_extract": 1.7070313163003448e-08,
+    "lw_extract": 5.8000068747787736e-08,
+    "mps_base_mem": 49915.0,
+    "mps_base_time": 0.0025509780007269,
+    "mps_gate_1q": 4.1283281291271125e-08,
+    "mps_gate_2q": 3.974572753584482e-08,
+    "mps_mem": 64.0,
+    "mps_trunc": 3.862812662921063e-08,
+    "st_stage": 8.497460868284179e-08,
+    "sv_base_mem": 85028.0,
+    "sv_base_time": 0.007043011999485316,
+    "sv_bytes_per_amp": 2.0,
+    "sv_gate_1q": 4.4264062495358306e-08,
+    "sv_gate_2q": 4.4264062495358306e-08,
+    "sv_meas": 4.4264062495358306e-08,
+    "tab_gate": 4.12475003486179e-08,
+    "tab_mem": 1.0
+  }
 }
