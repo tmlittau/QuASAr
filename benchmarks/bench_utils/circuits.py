@@ -985,7 +985,7 @@ def _build_diag_layers(
     layers: int,
     rng: Random,
 ) -> Tuple[List[Gate], List[int], List[bool]]:
-    """Return diagonal layers composed of repeated-angle ``CRZ``/``CCZ`` gates."""
+    """Return diagonal layers with repeated angles and shared controls."""
 
     if layers <= 0 or num_qubits <= 0:
         return [], [], []
@@ -1001,25 +1001,19 @@ def _build_diag_layers(
     offsets: List[int] = []
     non_clifford_layers: List[bool] = []
 
-    for _ in range(layers):
+    for layer in range(layers):
         offsets.append(len(gates))
-        phi = rng.uniform(0.05, 1.4)
+        phi = (layer % 8 + 1) * (math.pi / 16.0)
         for block in block_layout:
-            if len(block) >= 2:
-                for control, target in zip(block[:-1], block[1:]):
-                    gates.append(Gate("CRZ", [control, target], {"phi": phi}))
-            if len(block) >= 3:
-                for a, b, c in zip(block[:-2], block[1:-1], block[2:]):
-                    gates.append(Gate("CCZ", [a, b, c]))
-        if len(block_layout) > 1:
-            for left, right in zip(block_layout[:-1], block_layout[1:]):
-                if not left or not right:
+            if len(block) < 2:
+                continue
+            controls = block[: min(3, len(block))]
+            for target in block:
+                if target in controls:
                     continue
-                gates.append(Gate("CRZ", [left[-1], right[0]], {"phi": phi}))
-                if len(left) >= 2:
-                    gates.append(Gate("CCZ", [left[-2], left[-1], right[0]]))
-                if len(right) >= 2:
-                    gates.append(Gate("CCZ", [left[-1], right[0], right[1]]))
+                gates.append(Gate("CRZ", [controls[0], target], {"phi": phi}))
+            if len(controls) >= 2 and len(block) >= 4:
+                gates.append(Gate("CCZ", [controls[0], controls[1], block[-1]]))
         non_clifford_layers.append(True)
 
     return gates, offsets, non_clifford_layers
@@ -1180,9 +1174,9 @@ def clustered_entanglement_circuit(
             )
         elif stage == "diag":
             if random_index >= len(random_depths):
-                stage_depth = random_depths[-1]
+                stage_depth = random_depths[-1] or 2
             else:
-                stage_depth = random_depths[random_index]
+                stage_depth = max(1, random_depths[random_index])
             random_index += 1
             stage_gates, offsets, non_flags = _build_diag_layers(
                 num_qubits, blocks, stage_depth, rng
@@ -1199,11 +1193,11 @@ def clustered_entanglement_circuit(
             )
         elif stage == "xblock_random":
             if random_index >= len(random_depths):
-                stage_depth = random_depths[-1]
+                burst_layers = 2
             else:
-                stage_depth = random_depths[random_index]
+                burst_layers = max(1, min(3, random_depths[random_index]))
             random_index += 1
-            include_flags = [True] * stage_depth
+            include_flags = [True] * burst_layers
             stage_gates, offsets, non_flags = _build_layers_from_flags(
                 num_qubits,
                 include_flags,
@@ -1214,21 +1208,14 @@ def clustered_entanglement_circuit(
             layer_offsets.extend(adjusted_offsets)
             summary.update(
                 {
-                    "depth": stage_depth,
-                    "layers": stage_depth,
+                    "layers": burst_layers,
                     "non_clifford_layers": sum(non_flags),
                     "offsets": adjusted_offsets,
                 }
             )
         elif stage == "global_qft":
-            stage_gates = _qft_spec(num_qubits)
-            summary.update(
-                {
-                    "layers": max(0, num_qubits),
-                    "non_clifford_layers": max(0, num_qubits - 2),
-                    "offsets": [],
-                }
-            )
+            stage_gates = list(_qft_spec(num_qubits))
+            summary["layers"] = None
         elif stage == "qft":
             stage_gates = _build_block_local_stage(blocks, _qft_spec)
             summary["layers"] = None
@@ -1364,7 +1351,7 @@ def clustered_w_qft_circuit(
 def clustered_w_random_xburst_random_circuit(
     num_qubits: int,
     *,
-    block_size: int = 5,
+    block_size: int = 8,
     depth: int | Sequence[int] | None = None,
     seed: int | None = 1337,
 ) -> Circuit:
@@ -1372,7 +1359,7 @@ def clustered_w_random_xburst_random_circuit(
 
     stage_depths: int | Sequence[int]
     if depth is None:
-        stage_depths = (360, 240)
+        stage_depths = (400, 2, 400)
     else:
         stage_depths = depth
     return clustered_entanglement_circuit(
@@ -1408,7 +1395,7 @@ def clustered_ghz_random_qft_circuit(
 def clustered_ghz_random_globalqft_random_circuit(
     num_qubits: int,
     *,
-    block_size: int = 5,
+    block_size: int = 8,
     depth: int | Sequence[int] | None = None,
     seed: int | None = 1337,
 ) -> Circuit:
@@ -1416,7 +1403,7 @@ def clustered_ghz_random_globalqft_random_circuit(
 
     stage_depths: int | Sequence[int]
     if depth is None:
-        stage_depths = (400, 200)
+        stage_depths = (600, 0, 600)
     else:
         stage_depths = depth
     return clustered_entanglement_circuit(
@@ -1432,7 +1419,7 @@ def clustered_ghz_random_globalqft_random_circuit(
 def clustered_ghz_diag_globalqft_diag_circuit(
     num_qubits: int,
     *,
-    block_size: int = 5,
+    block_size: int = 8,
     depth: int | Sequence[int] | None = None,
     seed: int | None = 1337,
 ) -> Circuit:
@@ -1440,7 +1427,7 @@ def clustered_ghz_diag_globalqft_diag_circuit(
 
     stage_depths: int | Sequence[int]
     if depth is None:
-        stage_depths = (320, 320)
+        stage_depths = (3, 0, 3)
     else:
         stage_depths = depth
     return clustered_entanglement_circuit(
@@ -1460,7 +1447,7 @@ def layered_clifford_nonclifford_circuit(
     *,
     seed: int | None = 2025,
     islands: int | None = None,
-    island_len: int | None = None,
+    island_len: int = 2,
     island_gap: int | None = None,
 ) -> Circuit:
     """Build a layered circuit transitioning from Clifford to non-Clifford gates.
@@ -1482,19 +1469,18 @@ def layered_clifford_nonclifford_circuit(
     post_clifford_layers = depth - clifford_layers
     include_flags = [False] * clifford_layers
 
-    cadence = (islands, island_len, island_gap)
-    if any(param is not None for param in cadence):
-        if not all(param is not None for param in cadence):
-            raise ValueError(
-                "islands, island_len and island_gap must be provided together"
-            )
-        assert islands is not None and island_len is not None and island_gap is not None
+    if islands is not None and post_clifford_layers > 0:
         if islands <= 0:
             raise ValueError("islands must be a positive integer")
         if island_len <= 0:
             raise ValueError("island_len must be a positive integer")
-        if island_gap < 0:
+        if island_gap is not None and island_gap < 0:
             raise ValueError("island_gap must be non-negative")
+        computed_gap = island_gap
+        if computed_gap is None:
+            tail = post_clifford_layers
+            windows = max(1, islands)
+            computed_gap = max(1, tail // windows)
 
         post_flags: List[bool] = []
         for idx in range(islands):
@@ -1504,9 +1490,9 @@ def layered_clifford_nonclifford_circuit(
             post_flags.extend([True] * min(island_len, remaining))
             if len(post_flags) >= post_clifford_layers:
                 break
-            if idx < islands - 1 and island_gap > 0:
+            if idx < islands - 1 and computed_gap > 0:
                 remaining = post_clifford_layers - len(post_flags)
-                post_flags.extend([False] * min(island_gap, remaining))
+                post_flags.extend([False] * min(computed_gap, remaining))
         if len(post_flags) < post_clifford_layers:
             post_flags.extend([False] * (post_clifford_layers - len(post_flags)))
         if post_flags and not any(post_flags):
@@ -1566,10 +1552,10 @@ def layered_clifford_magic_islands_circuit(
     num_qubits: int,
     *,
     depth: int = 2000,
-    fraction_clifford: float = 0.8,
-    islands: int = 20,
-    island_len: int = 4,
-    island_gap: int = 16,
+    fraction_clifford: float = 0.9,
+    islands: int = 16,
+    island_len: int = 2,
+    island_gap: int | None = None,
     seed: int | None = 2025,
 ) -> Circuit:
     """Variant with spaced non-Clifford windows for magic-state "islands"."""
@@ -1703,19 +1689,15 @@ def classical_controlled_circuit(
         if layer > 0 and layer % toggle_period == 0:
             flip_qubit = classical[(layer // toggle_period) % len(classical)]
             gates.append(Gate("X", [flip_qubit]))
-        in_diag_slab = bool(
+        force_cz = bool(
+            cz_window_period is not None and layer % cz_window_period == 0
+        )
+        in_diag_window = bool(
             diag_fixed_phi is not None
-            and (
-                diag_period is None
-                or (layer % (2 * diag_period)) < diag_period
-            )
+            and (diag_period is not None)
+            and (layer % diag_period in (1, 2, 3))
         )
-        in_cz_window = bool(
-            cz_window_period is not None
-            and (layer % (2 * cz_window_period)) < cz_window_period
-        )
-        force_cz = in_cz_window or in_diag_slab
-        layer_phi = diag_fixed_phi if in_diag_slab else None
+        layer_phi = diag_fixed_phi if in_diag_window else None
         for target in quantum:
             theta = ((layer + 1) * (target + 1)) % 31 / 31 * math.pi
             phi = (
@@ -1728,17 +1710,20 @@ def classical_controlled_circuit(
         for idx, ctrl in enumerate(classical):
             target = quantum[(layer * fanout + idx) % len(quantum)]
             pattern = (layer + idx) % 3
-            if pattern == 0:
-                gates.append(Gate("CX", [ctrl, target]))
-            elif pattern == 1 or force_cz:
+            if force_cz:
                 gates.append(Gate("CZ", [ctrl, target]))
             else:
-                angle = (
-                    layer_phi
-                    if layer_phi is not None
-                    else ((layer + 1) * (idx + 1)) % 23 / 23 * math.pi
-                )
-                gates.append(Gate("CRZ", [ctrl, target], {"phi": angle}))
+                if pattern == 0:
+                    gates.append(Gate("CX", [ctrl, target]))
+                elif pattern == 1:
+                    gates.append(Gate("CZ", [ctrl, target]))
+                else:
+                    angle = (
+                        layer_phi
+                        if layer_phi is not None
+                        else ((layer + 1) * (idx + 1)) % 23 / 23 * math.pi
+                    )
+                    gates.append(Gate("CRZ", [ctrl, target], {"phi": angle}))
 
     circuit = Circuit(gates, use_classical_simplification=False)
     metadata = {
@@ -1752,42 +1737,26 @@ def classical_controlled_circuit(
         "fanout": fanout,
         "seed": seed,
     }
-    if diag_fixed_phi is not None:
-        metadata["diag_fixed_phi"] = diag_fixed_phi
-    if diag_period is not None:
-        metadata["diag_period"] = diag_period
-    if cz_window_period is not None:
-        metadata["cz_window_period"] = cz_window_period
+    metadata["diag_fixed_phi"] = diag_fixed_phi
+    metadata["diag_period"] = diag_period
+    metadata["cz_window_period"] = cz_window_period
     setattr(circuit, "metadata", metadata)
     setattr(circuit, "classical_qubits", tuple(classical))
     setattr(circuit, "quantum_qubits", tuple(quantum))
     return circuit
 
 
-def classical_controlled_dd_sandwich_circuit(
-    num_qubits: int,
-    *,
-    depth: int = 1800,
-    classical_qubits: int | Iterable[int] = 10,
-    toggle_period: int = 48,
-    fanout: int = 3,
-    seed: int | None = 424242,
-    diag_fixed_phi: float = math.pi / 2,
-    diag_period: int = 96,
-    cz_window_period: int = 64,
-) -> Circuit:
+def classical_controlled_dd_sandwich_circuit(num_qubits: int) -> Circuit:
     """Classical-control variant sandwiching a DD-friendly diagonal slab."""
 
     return classical_controlled_circuit(
         num_qubits,
-        depth=depth,
-        classical_qubits=classical_qubits,
-        toggle_period=toggle_period,
-        fanout=fanout,
-        seed=seed,
-        diag_fixed_phi=diag_fixed_phi,
-        diag_period=diag_period,
-        cz_window_period=cz_window_period,
+        depth=1500,
+        toggle_period=48,
+        fanout=3,
+        diag_fixed_phi=math.pi / 4,
+        diag_period=16,
+        cz_window_period=64,
     )
 
 
