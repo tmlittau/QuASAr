@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Backend selection based on multi-criteria constraints."""
 
+from types import SimpleNamespace
 from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING
 
 from .cost import Backend, Cost, CostEstimator
@@ -378,6 +379,39 @@ class MethodSelector:
             if metrics_seq
             else 0
         )
+        sparse = min(max(sparsity if sparsity is not None else 0.0, 0.0), 1.0)
+        phase_rot = float(phase_rotation_diversity or 0)
+        amp_rot = float(amplitude_rotation_diversity or 0)
+        rotation_total = phase_rot + amp_rot
+        rotation_density = rotation_total / max(num_gates, 1) if num_gates else 0.0
+        rotation_density = min(max(rotation_density, 0.0), 1.0)
+        if gates:
+            qubit_set = sorted({q for gate in gates for q in gate.qubits})
+            remap = {q: i for i, q in enumerate(qubit_set)}
+            if qubit_set:
+                remapped = [
+                    SimpleNamespace(qubits=[remap[q] for q in gate.qubits])
+                    for gate in gates
+                ]
+                entanglement_qubits = len(qubit_set)
+                entanglement = self.estimator.entanglement_entropy(
+                    entanglement_qubits, remapped
+                )
+            else:
+                entanglement = 0.0
+        else:
+            entanglement = 0.0
+        if diag is not None:
+            metrics = diag.setdefault("metrics", {})
+            metrics.update(
+                {
+                    "sparsity": sparse,
+                    "phase_rotation_diversity": phase_rot,
+                    "amplitude_rotation_diversity": amp_rot,
+                    "rotation_density": rotation_density,
+                    "entanglement_entropy": entanglement,
+                }
+            )
 
         if allow_tableau and names and all(n in CLIFFORD_GATES for n in names):
             tableau_costs = [
@@ -481,9 +515,6 @@ class MethodSelector:
         # ------------------------------------------------------------------
         from .sparsity import adaptive_dd_sparsity_threshold
 
-        sparse = sparsity if sparsity is not None else 0.0
-        phase_rot = phase_rotation_diversity or 0
-        amp_rot = amplitude_rotation_diversity or 0
         nnz = int((1 - sparse) * (2**num_qubits))
         s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
         amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparse)
@@ -672,18 +703,26 @@ class MethodSelector:
                 )
             if over_extent:
                 locality_reasons.append("interaction span exceeds extent threshold")
-            mps_costs = [
-                self.estimator.mps(
-                    stats["num_qubits"],
-                    stats["num_1q"] + stats["num_meas"],
-                    stats["num_2q"],
-                    chi=chi,
-                    svd=True,
-                    long_range_fraction=long_range_fraction,
-                    long_range_extent=long_range_extent,
+            capture_mps_details = diag_backends is not None
+            mps_detail: dict[str, float] | None = {} if capture_mps_details else None
+            mps_costs: list[Cost] = []
+            for idx, stats in enumerate(metrics_seq):
+                detail_arg = mps_detail if capture_mps_details and idx == 0 else None
+                mps_costs.append(
+                    self.estimator.mps(
+                        stats["num_qubits"],
+                        stats["num_1q"] + stats["num_meas"],
+                        stats["num_2q"],
+                        chi=chi,
+                        svd=True,
+                        entanglement_entropy=entanglement,
+                        sparsity=sparse,
+                        rotation_diversity=rotation_density,
+                        long_range_fraction=long_range_fraction,
+                        long_range_extent=long_range_extent,
+                        details=detail_arg,
+                    )
                 )
-                for stats in metrics_seq
-            ]
             mps_cost = _sequential_cost(mps_costs)
             mps_reasons: list[str] = []
             feasible = True
@@ -709,6 +748,8 @@ class MethodSelector:
                     "long_range_extent": long_range_extent,
                     "max_interaction_distance": max_interaction_distance,
                 }
+                if mps_detail:
+                    entry["modifiers"] = dict(mps_detail)
                 if locality_reasons:
                     entry["locality_warnings"] = locality_reasons
                 if chi_cap is not None:
@@ -726,15 +767,23 @@ class MethodSelector:
                 "max_interaction_distance": 0,
             }
 
-        sv_costs = [
-            self.estimator.statevector(
-                stats["num_qubits"],
-                stats["num_1q"],
-                stats["num_2q"],
-                stats["num_meas"],
+        capture_sv_details = diag_backends is not None
+        sv_detail: dict[str, float] | None = {} if capture_sv_details else None
+        sv_costs: list[Cost] = []
+        for idx, stats in enumerate(metrics_seq):
+            detail_arg = sv_detail if capture_sv_details and idx == 0 else None
+            sv_costs.append(
+                self.estimator.statevector(
+                    stats["num_qubits"],
+                    stats["num_1q"],
+                    stats["num_2q"],
+                    stats["num_meas"],
+                    sparsity=sparse,
+                    rotation_diversity=rotation_density,
+                    entanglement_entropy=entanglement,
+                    details=detail_arg,
+                )
             )
-            for stats in metrics_seq
-        ]
         sv_cost = _sequential_cost(sv_costs)
         sv_reasons: list[str] = []
         sv_feasible = True
@@ -747,11 +796,14 @@ class MethodSelector:
         if sv_feasible:
             candidates[Backend.STATEVECTOR] = sv_cost
         if diag_backends is not None:
-            diag_backends[Backend.STATEVECTOR] = {
+            entry = {
                 "feasible": sv_feasible,
                 "reasons": sv_reasons,
                 "cost": sv_cost,
             }
+            if sv_detail:
+                entry["modifiers"] = dict(sv_detail)
+            diag_backends[Backend.STATEVECTOR] = entry
 
         if not candidates:
             if diag is not None:

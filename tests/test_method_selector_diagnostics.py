@@ -57,15 +57,27 @@ def test_method_selector_populates_diagnostics() -> None:
     assert backends[Backend.MPS]["long_range_fraction"] == pytest.approx(1.0)
     assert backends[Backend.MPS]["long_range_extent"] == pytest.approx(0.5)
     assert backends[Backend.MPS]["max_interaction_distance"] == 2
+    assert "modifiers" in backends[Backend.MPS]
+    mps_mod = backends[Backend.MPS]["modifiers"]
+    assert mps_mod["sparsity"] == pytest.approx(1.0)
+    assert mps_mod["rotation_diversity"] == pytest.approx(0.0)
+    assert mps_mod["time_modifier"] >= 0.1
 
     metrics = diag["metrics"]
     assert metrics["local"] is False
     assert metrics["mps_long_range_fraction"] == pytest.approx(1.0)
     assert metrics["mps_long_range_extent"] == pytest.approx(0.5)
     assert metrics["mps_max_interaction_distance"] == 2
+    assert metrics["entanglement_entropy"] >= 0.0
 
     # The selected backend is marked accordingly in the diagnostics.
     assert backends[backend]["selected"] is True
+
+    sv_entry = backends[Backend.STATEVECTOR]
+    assert "modifiers" in sv_entry
+    sv_mod = sv_entry["modifiers"]
+    assert sv_mod["sparsity"] == pytest.approx(1.0)
+    assert sv_mod["time_modifier"] >= sv_mod["memory_modifier"] >= 0.2
 
 
 def test_planner_explain_surfaces_selection_diagnostics() -> None:

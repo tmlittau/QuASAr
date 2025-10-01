@@ -174,7 +174,10 @@ class CostEstimator:
             # Two-qubit gates scale with 16 chi^3 operations (Schollwöck,
             # 2011); normalised to one for baseline estimation.
             "mps_gate_2q": 1.0,
-            # Optional SVD truncation ~32 chi^3 log chi, normalised.
+            # Optional SVD truncation ~32 chi^3 log chi, normalised.  The
+            # runtime modifier derived from sparsity, rotation diversity and
+            # entanglement density applies equally to the gate and truncation
+            # terms to reflect observed tensor growth trends.
             "mps_trunc": 1.0,
             # Each complex128 tensor element occupies 16 bytes but is
             # represented with a unit coefficient by default.
@@ -431,6 +434,7 @@ class CostEstimator:
         rotation_diversity: float | None = None,
         long_range_fraction: float | None = None,
         long_range_extent: float | None = None,
+        details: dict[str, float] | None = None,
     ) -> Cost:
         """Estimate cost for dense statevector simulation.
 
@@ -483,6 +487,18 @@ class CostEstimator:
             base_mem
             + self.coeff["sv_bytes_per_amp"] * amp * bytes_per_amp * mem_modifier
         )
+        if details is not None:
+            details.update(
+                {
+                    "time_modifier": float(modifier),
+                    "memory_modifier": float(mem_modifier),
+                    "two_qubit_ratio": float(mix),
+                    "sparsity": float(sparse),
+                    "rotation_diversity": float(rotation),
+                    "entanglement_entropy": float(entropy),
+                    "entanglement_density": float(entropy_norm),
+                }
+            )
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
 
@@ -608,6 +624,7 @@ class CostEstimator:
         rotation_diversity: float | None = None,
         long_range_fraction: float | None = None,
         long_range_extent: float | None = None,
+        details: dict[str, float] | None = None,
     ) -> Cost:
         r"""Estimate cost for matrix product state simulation.
 
@@ -729,6 +746,20 @@ class CostEstimator:
         memory = base_mem + self.coeff["mps_mem"] * sum(site_costs) * modifier
         if svd and num_2q_gates > 0 and bond_costs:
             memory += self.coeff.get("mps_temp_mem", 0.0) * max(bond_costs)
+
+        if details is not None:
+            details.update(
+                {
+                    "time_modifier": float(modifier),
+                    "memory_modifier": float(modifier),
+                    "sparsity": float(sparse),
+                    "rotation_diversity": float(rot),
+                    "entanglement_entropy": float(ent),
+                    "entanglement_density": float(ent_norm),
+                    "long_range_fraction": float(lr_fraction),
+                    "long_range_extent": float(lr_extent),
+                }
+            )
 
         depth = math.log2(num_qubits) if num_qubits > 0 else 0.0
         return Cost(time=time, memory=memory, log_depth=depth)
