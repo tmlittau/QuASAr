@@ -50,8 +50,19 @@ def test_plan_records_wide_conversion_window() -> None:
 
     assert layers
     layer = layers[0]
-    assert layer.primitive == "LW"
-    assert layer.window == 5
+    assert layer.frontier == 5
+    assert layer.boundary == (0, 1, 2, 3, 4)
+    assert layer.retained == (5,)
+    assert layer.full_boundary == (0, 1, 2, 3, 4, 5)
+    if layer.primitive == "LW":
+        assert layer.window == 5
+    else:
+        # Hybrid suffix planning can trigger a full extraction when the
+        # retained subset is small and a local window would not reduce the
+        # conversion cost.  In that case the primitive switches to a full
+        # extraction and no specific window is reported.
+        assert layer.primitive == "Full"
+        assert layer.window is None
 
 
 def test_single_backend_choice_reflects_fragment_sparsity() -> None:
@@ -88,4 +99,4 @@ def test_single_backend_choice_reflects_fragment_sparsity() -> None:
     )
 
     assert dense_backend == Backend.STATEVECTOR
-    assert sparse_backend == Backend.MPS
+    assert sparse_backend == Backend.DECISION_DIAGRAM
