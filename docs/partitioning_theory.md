@@ -55,9 +55,9 @@ sync with runtime decisions::
     from quasar.cost import CostEstimator
 
     estimator = CostEstimator()
-    coeff = load_coefficients("calibration/coeff_dev.json")
-    coeff["sv_gate_2q"] *= 0.8   # pretend improved two-qubit fidelity
-    apply_calibration(estimator, coeff)
+    record = load_coefficients("calibration/coeff_dev.json")
+    record["coeff"]["sv_gate_2q"] *= 0.8   # pretend improved two-qubit fidelity
+    apply_calibration(estimator, record)
 
 The modified ``estimator`` exposes the adjusted parameters via
 ``estimator.coeff`` so notebook cells can reuse them when evaluating analytic

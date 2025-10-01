@@ -49,8 +49,8 @@ def load_calibrated_estimator(
     else:
         path = _latest_calibration_path()
     if path is not None and path.exists():
-        coeff = load_coefficients(path)
-        apply_calibration(estimator, coeff)
+        record = load_coefficients(path)
+        apply_calibration(estimator, record)
     else:
         path = None
     return estimator, path

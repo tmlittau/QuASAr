@@ -15,9 +15,9 @@ from enum import Enum
 import json
 import math
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence, TYPE_CHECKING
+from typing import Dict, Iterable, Mapping, Optional, Sequence, TYPE_CHECKING
 
-from .calibration import latest_coefficients
+from .calibration import CalibrationRecord, latest_coefficients
 
 if TYPE_CHECKING:  # pragma: no cover - for type checking only
     from .circuit import Gate
@@ -102,7 +102,7 @@ class CostEstimator:
 
     def __init__(
         self,
-        coeff: Optional[Dict[str, float]] = None,
+        coeff: Optional[Mapping[str, float] | CalibrationRecord] = None,
         *,
         s_max: Optional[int] = None,
         r_max: Optional[int] = None,
@@ -261,10 +261,19 @@ class CostEstimator:
             "parallel_time_overhead": 0.0,
             "parallel_memory_overhead": 0.0,
         }
-        if coeff is None:
-            coeff = latest_coefficients()
-        if coeff:
-            self.coeff.update(coeff)
+        calibration: Mapping[str, float] | CalibrationRecord | None = coeff
+        if calibration is None:
+            calibration = latest_coefficients()
+        if calibration:
+            if (
+                isinstance(calibration, dict)
+                and "coeff" in calibration
+                and isinstance(calibration["coeff"], dict)
+            ):
+                updates = calibration["coeff"]
+            else:
+                updates = calibration
+            self.coeff.update(dict(updates))
         # Policy caps for planner heuristics
         self.s_max = s_max
         self.r_max = r_max

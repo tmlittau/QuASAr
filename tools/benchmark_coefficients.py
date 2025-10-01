@@ -10,8 +10,6 @@ measured coefficients are written to the next versioned JSON file under
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
-
 from quasar.calibration import run_calibration, save_coefficients
 
 
@@ -34,8 +32,8 @@ def main() -> None:
     """Run benchmarks and persist the resulting coefficients."""
 
     path = _next_version_path()
-    coeff: Dict[str, float] = run_calibration()
-    save_coefficients(path, coeff)
+    record = run_calibration()
+    save_coefficients(path, record)
     print(f"Saved calibration data to {path}")
 
 
