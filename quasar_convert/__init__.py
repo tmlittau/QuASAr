@@ -20,6 +20,7 @@ try:  # pragma: no cover - exercised when the extension is available
         StnTensor,
         MPS,
         StimTableau,
+        ExecutionMode,
         ConversionEngine as _CEngine,
     )
 
@@ -34,6 +35,8 @@ try:  # pragma: no cover - exercised when the extension is available
             truncation_tolerance: float = 0.0,
             truncation_max_terms: int | None = None,
             truncation_normalise: bool = True,
+            execution_mode: ExecutionMode | None = None,
+            cpu_threads: int | None = None,
         ) -> None:
             self._cache_limit = cache_limit
             self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
@@ -43,6 +46,8 @@ try:  # pragma: no cover - exercised when the extension is available
             self.truncation_tolerance = truncation_tolerance
             self.truncation_max_terms = truncation_max_terms
             self.truncation_normalise = truncation_normalise
+            self.execution_mode = execution_mode or ExecutionMode.Auto
+            self.cpu_thread_count = cpu_threads or 0
 
         @property
         def st_chi_cap(self) -> int:
@@ -63,6 +68,10 @@ try:  # pragma: no cover - exercised when the extension is available
                 max_terms = self.truncation_max_terms
                 self._impl.truncation_max_terms = int(max_terms) if max_terms else 0
                 self._impl.truncation_normalise = bool(self.truncation_normalise)
+                if hasattr(self._impl, "execution_mode"):
+                    self._impl.execution_mode = self.execution_mode
+                if hasattr(self._impl, "cpu_thread_count"):
+                    self._impl.cpu_thread_count = int(self.cpu_thread_count)
 
         @property
         def truncation_tolerance(self) -> float:
@@ -93,6 +102,27 @@ try:  # pragma: no cover - exercised when the extension is available
             self.__dict__["_truncation_normalise"] = bool(value)
             if "_impl" in self.__dict__:
                 self._impl.truncation_normalise = bool(value)
+
+        @property
+        def execution_mode(self) -> ExecutionMode:
+            return self.__dict__.get("_execution_mode", ExecutionMode.Auto)
+
+        @execution_mode.setter
+        def execution_mode(self, mode: ExecutionMode) -> None:
+            self.__dict__["_execution_mode"] = mode
+            if "_impl" in self.__dict__ and hasattr(self._impl, "execution_mode"):
+                self._impl.execution_mode = mode
+
+        @property
+        def cpu_thread_count(self) -> int:
+            return int(self.__dict__.get("_cpu_thread_count", 0))
+
+        @cpu_thread_count.setter
+        def cpu_thread_count(self, value: int | None) -> None:
+            count = max(0, int(value or 0))
+            self.__dict__["_cpu_thread_count"] = count
+            if "_impl" in self.__dict__ and hasattr(self._impl, "cpu_thread_count"):
+                self._impl.cpu_thread_count = count
 
         # Cache helpers -------------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -252,6 +282,7 @@ try:  # pragma: no cover - exercised when the extension is available
         "StnTensor",
         "MPS",
         "StimTableau",
+        "ExecutionMode",
         "ConversionEngine",
     ]
 except Exception:  # pragma: no cover - exercised when extension missing
@@ -275,6 +306,12 @@ except Exception:  # pragma: no cover - exercised when extension missing
         LW = 1
         ST = 2
         Full = 3
+
+    class ExecutionMode(Enum):
+        Auto = 0
+        Serial = 1
+        CPUThreads = 2
+        GPU = 3
 
     @dataclass
     class ConversionResult:
@@ -308,6 +345,8 @@ except Exception:  # pragma: no cover - exercised when extension missing
             truncation_tolerance: float = 0.0,
             truncation_max_terms: int | None = None,
             truncation_normalise: bool = True,
+            execution_mode: ExecutionMode | None = None,
+            cpu_threads: int | None = None,
         ) -> None:
             self._cache_limit = cache_limit
             self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
@@ -318,6 +357,8 @@ except Exception:  # pragma: no cover - exercised when extension missing
             self.truncation_max_terms = truncation_max_terms
             self.truncation_normalise = truncation_normalise
             self._compression_stats = CompressionStats()
+            self.execution_mode = execution_mode or ExecutionMode.Auto
+            self.cpu_thread_count = cpu_threads or 0
 
         @property
         def st_chi_cap(self) -> int:
@@ -373,6 +414,22 @@ except Exception:  # pragma: no cover - exercised when extension missing
         def compressed_cardinality(self) -> int:
             stats = self._compression_stats
             return stats.retained_terms or stats.original_terms
+
+        @property
+        def execution_mode(self) -> ExecutionMode:
+            return getattr(self, "_execution_mode", ExecutionMode.Auto)
+
+        @execution_mode.setter
+        def execution_mode(self, mode: ExecutionMode) -> None:
+            self._execution_mode = mode
+
+        @property
+        def cpu_thread_count(self) -> int:
+            return int(getattr(self, "_cpu_thread_count", 0))
+
+        @cpu_thread_count.setter
+        def cpu_thread_count(self, value: int | None) -> None:
+            self._cpu_thread_count = max(0, int(value or 0))
 
         # Cache utilities -----------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -493,7 +550,13 @@ except Exception:  # pragma: no cover - exercised when extension missing
             return self._apply_truncation(state)
 
         # Optional helpers ---------------------------------------------
-        def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
+        def extract_local_window(
+            self,
+            state: List[complex],
+            window_qubits: List[int],
+            mode: ExecutionMode | None = None,
+        ) -> List[complex]:
+            _ = mode
             k = len(window_qubits)
             dim = 1 << k
             window = [0j] * dim
@@ -558,7 +621,10 @@ except Exception:  # pragma: no cover - exercised when extension missing
                 window=result_window,
             )
 
-        def convert_boundary_to_statevector(self, ssd: SSD) -> List[complex]:
+        def convert_boundary_to_statevector(
+            self, ssd: SSD, mode: ExecutionMode | None = None
+        ) -> List[complex]:
+            _ = mode
             dim = 1 << len(ssd.boundary_qubits or [])
             state = [0j] * dim
             if dim:
@@ -649,5 +715,6 @@ except Exception:  # pragma: no cover - exercised when extension missing
         "StnTensor",
         "MPS",
         "ConversionEngine",
+        "ExecutionMode",
     ]
 

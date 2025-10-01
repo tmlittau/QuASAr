@@ -88,5 +88,24 @@ class ConversionPrimitiveTests(unittest.TestCase):
         self.assertAlmostEqual(window[0], state[0] * scale)
         self.assertAlmostEqual(window[2], state[2] * scale)
 
+    def test_parallel_local_window_matches_serial(self):
+        dim = 1 << 10
+        state = [complex(i % 5, -i % 7) for i in range(dim)]
+        qubits = list(range(10))
+        serial = self.eng.extract_local_window(state, qubits, qc.ExecutionMode.Serial)
+        self.eng.cpu_thread_count = 4
+        parallel = self.eng.extract_local_window(state, qubits, qc.ExecutionMode.CPUThreads)
+        parallel_repeat = self.eng.extract_local_window(state, qubits, qc.ExecutionMode.CPUThreads)
+        self.assertEqual(serial, parallel)
+        self.assertEqual(parallel, parallel_repeat)
+
+    def test_parallel_boundary_statevector_matches_serial(self):
+        boundary = list(range(10))
+        ssd = qc.SSD(boundary_qubits=boundary, top_s=1, vectors=[[1.0 if i % 2 == 0 else -1.0 for i in boundary]])
+        serial = self.eng.convert_boundary_to_statevector(ssd, qc.ExecutionMode.Serial)
+        self.eng.cpu_thread_count = 8
+        parallel = self.eng.convert_boundary_to_statevector(ssd, qc.ExecutionMode.CPUThreads)
+        self.assertEqual(serial, parallel)
+
 if __name__ == '__main__':
     unittest.main()

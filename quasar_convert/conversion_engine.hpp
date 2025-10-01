@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <functional>
 
 #ifdef QUASAR_USE_STIM
 #include <stim.h>
@@ -56,6 +57,13 @@ enum class Backend {
     DecisionDiagram
 };
 
+enum class ExecutionMode {
+    Auto,
+    Serial,
+    CPUThreads,
+    GPU
+};
+
 // Conversion primitive selected by the engine. These correspond to the
 // strategies described in Table 2 of the QuASAr draft: boundary-to-boundary
 // (B2B), local-window (LW), staged (ST) and full extraction (Full).
@@ -86,6 +94,8 @@ class ConversionEngine {
     double truncation_tolerance = 0.0;
     std::size_t truncation_max_terms = 0;
     bool truncation_normalise = true;
+    ExecutionMode execution_mode = ExecutionMode::Auto;
+    std::size_t cpu_thread_count = 0;
 
     std::pair<double, double> estimate_cost(std::size_t fragment_size, Backend backend) const;
 
@@ -107,7 +117,8 @@ class ConversionEngine {
     // significant bit.
     std::vector<std::complex<double>> extract_local_window(
         const std::vector<std::complex<double>>& state,
-        const std::vector<uint32_t>& window_qubits) const;
+        const std::vector<uint32_t>& window_qubits,
+        ExecutionMode mode = ExecutionMode::Auto) const;
 
     // Construct a simple bridge tensor that links two fragments described by
     // their SSD descriptors.  The tensor corresponds to an identity operation
@@ -129,7 +140,9 @@ class ConversionEngine {
     // A phase-factorable stabilizer state is synthesised from the leading
     // boundary directions so that downstream components can reinterpret the
     // vector as an STN tensor.  The dense representation is always returned.
-    std::vector<std::complex<double>> convert_boundary_to_statevector(const SSD& ssd) const;
+    std::vector<std::complex<double>> convert_boundary_to_statevector(
+        const SSD& ssd,
+        ExecutionMode mode = ExecutionMode::Auto) const;
 
     // Build a stabilizer tensor network component from the given boundary.
     // The amplitude vector is always populated while the optional tableau is
@@ -216,6 +229,13 @@ class ConversionEngine {
 
     mutable std::size_t dense_statevector_calls = 0;
     mutable CompressionStats compression_stats_{};
+
+    ExecutionMode resolve_execution_mode(ExecutionMode mode) const;
+    std::size_t resolve_thread_count(ExecutionMode mode, std::size_t work_items) const;
+    std::size_t parallel_for_chunks(
+        std::size_t work_items,
+        std::size_t threads,
+        const std::function<void(std::size_t, std::size_t, std::size_t)>& fn) const;
 
     std::vector<std::vector<std::complex<double>>>
     statevector_to_mps(const std::vector<std::complex<double>>& state,

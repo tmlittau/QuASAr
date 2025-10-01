@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Sequence
 from concurrent.futures import ThreadPoolExecutor
 import time
 import tracemalloc
+import warnings
 import numpy as np
 import stim
 
@@ -39,7 +40,7 @@ from .backends import (
 )
 from .backends.mps import tensor_product as mps_tensor_product
 from .backends.stim_backend import direct_sum
-from quasar_convert import ConversionEngine, SSD as CESD
+from quasar_convert import ConversionEngine, SSD as CESD, ExecutionMode
 
 # Type alias for cost monitoring hook
 CostHook = Callable[[PlanStep, Cost, Cost], bool]
@@ -222,6 +223,8 @@ class Scheduler:
     parallel_backends: List[Backend] = field(
         default_factory=lambda: list(config.DEFAULT.parallel_backends)
     )
+    ingestion_execution_mode: ExecutionMode = config.DEFAULT.ingestion_execution_mode
+    ingestion_threads: int | None = config.DEFAULT.ingestion_threads
     backend_selection_log: str | None = config.DEFAULT.backend_selection_log
     verbose_selection: bool = config.DEFAULT.verbose_selection
     coeff_ema_decay: float = config.DEFAULT.coeff_ema_decay
@@ -261,6 +264,28 @@ class Scheduler:
                     return None
         return None
 
+    def _configure_conversion_engine(self) -> None:
+        if self.conversion_engine is None:
+            return
+        effective_mode = self.ingestion_execution_mode
+        if effective_mode == ExecutionMode.GPU:
+            effective_mode = ExecutionMode.CPUThreads
+            if not self._gpu_mode_warned:
+                warnings.warn(
+                    "GPU ingestion mode requested but GPU kernels are unavailable; "
+                    "falling back to CPU threads.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self._gpu_mode_warned = True
+        if hasattr(self.conversion_engine, "execution_mode"):
+            self.conversion_engine.execution_mode = effective_mode
+        if hasattr(self.conversion_engine, "cpu_thread_count"):
+            threads = self.ingestion_threads
+            count = 0 if threads is None or threads <= 0 else int(threads)
+            self.conversion_engine.cpu_thread_count = count
+        self._resolved_ingestion_mode = effective_mode
+
     def __post_init__(self) -> None:
         if self.backends is None:
             # Instantiate default simulation backends.  The dense
@@ -275,6 +300,8 @@ class Scheduler:
                 Backend.TABLEAU: StimBackend(),
                 Backend.DECISION_DIAGRAM: DecisionDiagramBackend(),
             }
+        self._resolved_ingestion_mode: ExecutionMode = self.ingestion_execution_mode
+        self._gpu_mode_warned = False
 
     def _load_backend(
         self,
@@ -628,6 +655,7 @@ class Scheduler:
             if cap is not None:
                 kwargs["st_chi_cap"] = max(1, int(cap))
             self.conversion_engine = ConversionEngine(**kwargs)
+        self._configure_conversion_engine()
         if self.planner is None:
             self.planner = Planner(
                 quick_max_qubits=self.quick_max_qubits,
@@ -1033,7 +1061,7 @@ class Scheduler:
                                 target_ssd,
                                 "sv",
                                 lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                    target_ssd
+                                    target_ssd, self._resolved_ingestion_mode
                                 ),
                             )
                     except Exception:
@@ -1211,7 +1239,7 @@ class Scheduler:
                                     prepared,
                                     "sv",
                                     lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                        prepared
+                                        prepared, self._resolved_ingestion_mode
                                     ),
                                 )
                             sim_obj.ingest(rep, num_qubits=circuit.num_qubits)
@@ -1380,7 +1408,7 @@ class Scheduler:
                             if rep is None:
                                 state = current_sim.statevector()
                                 rep = self.conversion_engine.extract_local_window(
-                                    state, boundary
+                                    state, boundary, self._resolved_ingestion_mode
                                 )
                             sim_obj.ingest(
                                 rep,
@@ -1424,7 +1452,7 @@ class Scheduler:
                                     conv_ssd,
                                     "sv",
                                     lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                        conv_ssd
+                                        conv_ssd, self._resolved_ingestion_mode
                                     ),
                                 )
                             sim_obj.ingest(
@@ -1582,7 +1610,7 @@ class Scheduler:
                                 ssd_res,
                                 "sv",
                                 lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                    ssd_res
+                                    ssd_res, self._resolved_ingestion_mode
                                 ),
                             )
                     except Exception:
@@ -1637,7 +1665,7 @@ class Scheduler:
                             ssd_res,
                             "sv",
                             lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                ssd_res
+                                ssd_res, self._resolved_ingestion_mode
                             ),
                         )
                 except Exception:
