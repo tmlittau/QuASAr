@@ -1361,6 +1361,30 @@ def clustered_w_qft_circuit(
     )
 
 
+def clustered_w_random_xburst_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    depth: int | Sequence[int] | None = None,
+    seed: int | None = 1337,
+) -> Circuit:
+    """Prepare W clusters with random, cross-block burst and random stages."""
+
+    stage_depths: int | Sequence[int]
+    if depth is None:
+        stage_depths = (360, 240)
+    else:
+        stage_depths = depth
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="w",
+        entangler="random+xblock_random+random",
+        depth=stage_depths,
+        seed=seed,
+    )
+
+
 def clustered_ghz_random_qft_circuit(
     num_qubits: int,
     *,
@@ -1377,6 +1401,54 @@ def clustered_ghz_random_qft_circuit(
         state="ghz",
         entangler="random+qft",
         depth=random_depth,
+        seed=seed,
+    )
+
+
+def clustered_ghz_random_globalqft_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    depth: int | Sequence[int] | None = None,
+    seed: int | None = 1337,
+) -> Circuit:
+    """Prepare GHZ clusters with random, global-QFT and random stages."""
+
+    stage_depths: int | Sequence[int]
+    if depth is None:
+        stage_depths = (400, 200)
+    else:
+        stage_depths = depth
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="ghz",
+        entangler="random+global_qft+random",
+        depth=stage_depths,
+        seed=seed,
+    )
+
+
+def clustered_ghz_diag_globalqft_diag_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 5,
+    depth: int | Sequence[int] | None = None,
+    seed: int | None = 1337,
+) -> Circuit:
+    """Prepare GHZ clusters with diagonal slabs around a global QFT."""
+
+    stage_depths: int | Sequence[int]
+    if depth is None:
+        stage_depths = (320, 320)
+    else:
+        stage_depths = depth
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="ghz",
+        entangler="diag+global_qft+diag",
+        depth=stage_depths,
         seed=seed,
     )
 
@@ -1690,6 +1762,33 @@ def classical_controlled_circuit(
     setattr(circuit, "classical_qubits", tuple(classical))
     setattr(circuit, "quantum_qubits", tuple(quantum))
     return circuit
+
+
+def classical_controlled_dd_sandwich_circuit(
+    num_qubits: int,
+    *,
+    depth: int = 1800,
+    classical_qubits: int | Iterable[int] = 10,
+    toggle_period: int = 48,
+    fanout: int = 3,
+    seed: int | None = 424242,
+    diag_fixed_phi: float = math.pi / 2,
+    diag_period: int = 96,
+    cz_window_period: int = 64,
+) -> Circuit:
+    """Classical-control variant sandwiching a DD-friendly diagonal slab."""
+
+    return classical_controlled_circuit(
+        num_qubits,
+        depth=depth,
+        classical_qubits=classical_qubits,
+        toggle_period=toggle_period,
+        fanout=fanout,
+        seed=seed,
+        diag_fixed_phi=diag_fixed_phi,
+        diag_period=diag_period,
+        cz_window_period=cz_window_period,
+    )
 
 
 def dynamic_classical_control_circuit(num_qubits: int) -> Circuit:

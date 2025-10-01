@@ -250,6 +250,33 @@ SHOWCASE_CIRCUITS: Mapping[str, ShowcaseCircuit] = {
         default_qubits=(24, 32, 36),
         description="GHZ clusters, random evolution and a final QFT.",
     ),
+    "clustered_ghz_random_globalqft_random": ShowcaseCircuit(
+        name="clustered_ghz_random_globalqft_random",
+        display_name="Clustered GHZ random-QFT-random",
+        constructor=circuit_lib.clustered_ghz_random_globalqft_random_circuit,
+        default_qubits=(24, 32, 36),
+        description=(
+            "GHZ clusters with a random prefix, global QFT interlude and random tail."
+        ),
+    ),
+    "clustered_ghz_diag_globalqft_diag": ShowcaseCircuit(
+        name="clustered_ghz_diag_globalqft_diag",
+        display_name="Clustered GHZ diag-QFT-diag",
+        constructor=circuit_lib.clustered_ghz_diag_globalqft_diag_circuit,
+        default_qubits=(24, 32, 36),
+        description=(
+            "GHZ clusters with diagonal CRZ/CCZ slabs bracketing a global QFT."
+        ),
+    ),
+    "clustered_w_random_xburst_random": ShowcaseCircuit(
+        name="clustered_w_random_xburst_random",
+        display_name="Clustered W random-X-burst-random",
+        constructor=circuit_lib.clustered_w_random_xburst_random_circuit,
+        default_qubits=(24, 32, 36),
+        description=(
+            "W-state clusters with a random prelude, cross-block burst and random tail."
+        ),
+    ),
     "layered_clifford_delayed_magic": ShowcaseCircuit(
         name="layered_clifford_delayed_magic",
         display_name="Layered Clifford (delayed magic)",
@@ -292,6 +319,15 @@ SHOWCASE_CIRCUITS: Mapping[str, ShowcaseCircuit] = {
         default_qubits=(16, 22, 24),
         description="Classical controls with wide fan-out.",
     ),
+    "classical_controlled_dd_sandwich": ShowcaseCircuit(
+        name="classical_controlled_dd_sandwich",
+        display_name="Classical control DD sandwich",
+        constructor=circuit_lib.classical_controlled_dd_sandwich_circuit,
+        default_qubits=(16, 22, 24),
+        description=(
+            "Diagonal CRZ/CCZ slab sandwiched between classical-control toggles."
+        ),
+    ),
 }
 
 
@@ -302,6 +338,9 @@ SHOWCASE_GROUPS: Mapping[str, tuple[str, ...]] = {
         "clustered_ghz_qft",
         "clustered_w_qft",
         "clustered_ghz_random_qft",
+        "clustered_ghz_random_globalqft_random",
+        "clustered_ghz_diag_globalqft_diag",
+        "clustered_w_random_xburst_random",
     ),
     "layered": (
         "layered_clifford_delayed_magic",
@@ -312,6 +351,7 @@ SHOWCASE_GROUPS: Mapping[str, tuple[str, ...]] = {
         "classical_controlled",
         "dynamic_classical_control",
         "classical_controlled_fanout",
+        "classical_controlled_dd_sandwich",
     ),
 }
 
