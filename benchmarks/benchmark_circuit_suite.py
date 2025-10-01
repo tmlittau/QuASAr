@@ -185,6 +185,28 @@ def build_qec_clifford_magic_patch(
     return Circuit(gates)
 
 
+def build_tfim_trotter(
+    qubits: int, steps: int, j: float, h: float, delta_t: float
+) -> Circuit:
+    """Construct a first-order Trotterised TFIM evolution on a 1D chain."""
+
+    if qubits <= 0 or steps <= 0:
+        return Circuit([])
+
+    gates: list[Gate] = []
+    zz_angle = float(2.0 * j * delta_t)
+    rx_angle = float(2.0 * h * delta_t)
+    neighbours = [(q, q + 1) for q in range(max(0, qubits - 1))]
+
+    for _ in range(max(0, steps)):
+        for left, right in neighbours:
+            gates.append(Gate("RZZ", [left, right], {"theta": zz_angle}))
+        for q in range(qubits):
+            gates.append(Gate("RX", [q], {"theta": rx_angle}))
+
+    return Circuit(gates, use_classical_simplification=False)
+
+
 def _partition_gate_fractions(partitions: Iterable[Any]) -> Mapping[str, float]:
     """Return backend-labelled gate fractions derived from ``partitions``."""
 
@@ -301,6 +323,81 @@ def collect_graph_state_metrics(result: BenchmarkResult) -> dict[str, float]:
     return metrics
 
 
+def collect_tfim_trotter_metrics(result: BenchmarkResult) -> dict[str, float]:
+    """Augment standard metrics with TFIM-specific diagnostics."""
+
+    metrics = dict(collect_graph_state_metrics(result))
+    record = result.record
+    ssd = record.get("result")
+
+    conversions = list(getattr(ssd, "conversions", ())) if ssd is not None else []
+    for idx, conv in enumerate(conversions):
+        rank = getattr(conv, "rank", None)
+        if rank is not None:
+            metrics[f"estimated_chi_cut_{idx}"] = float(rank)
+        frontier = getattr(conv, "frontier", None)
+        if frontier is not None:
+            metrics[f"estimated_frontier_cut_{idx}"] = float(frontier)
+
+    backend_to_value = {
+        Backend.STATEVECTOR: 0.0,
+        Backend.MPS: 1.0,
+        Backend.TABLEAU: 2.0,
+        Backend.EXTENDED_STABILIZER: 3.0,
+        Backend.DECISION_DIAGRAM: 4.0,
+    }
+    trace_entries = list(getattr(ssd, "trace", ())) if ssd is not None else []
+    timeline_index = 0
+    for entry in trace_entries:
+        if not getattr(entry, "applied", False):
+            continue
+        backend = getattr(entry, "to_backend", None)
+        gate_index = getattr(entry, "gate_index", None)
+        if gate_index is None:
+            continue
+        metrics[f"backend_timeline_{timeline_index}_gate"] = float(gate_index)
+        boundary_size = getattr(entry, "boundary_size", None)
+        if boundary_size is not None:
+            metrics[f"backend_timeline_{timeline_index}_boundary"] = float(boundary_size)
+        rank = getattr(entry, "rank", None)
+        if rank is not None:
+            metrics[f"backend_timeline_{timeline_index}_rank"] = float(rank)
+        if backend is not None:
+            backend_value = backend_to_value.get(backend)
+            if backend_value is not None:
+                metrics[f"backend_timeline_{timeline_index}_backend"] = backend_value
+        timeline_index += 1
+
+    run_time = metrics.get("run_time_seconds")
+    baseline_time = metrics.get("statevector_run_time_seconds")
+    if (
+        run_time is not None
+        and baseline_time is not None
+        and float(baseline_time) > 0.0
+    ):
+        metrics["runtime_ratio_vs_statevector"] = float(run_time) / float(baseline_time)
+
+    run_memory = metrics.get("run_peak_memory_bytes")
+    baseline_memory = metrics.get("statevector_peak_memory_bytes")
+    if (
+        run_memory is not None
+        and baseline_memory is not None
+        and float(baseline_memory) > 0.0
+    ):
+        metrics["memory_ratio_vs_statevector"] = float(run_memory) / float(baseline_memory)
+
+    fidelity_value = record.get("fidelity")
+    if fidelity_value is None:
+        fidelity_value = record.get("fidelity_mean")
+    if fidelity_value is not None:
+        try:
+            metrics["truncation_fidelity"] = float(fidelity_value)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            pass
+
+    return metrics
+
+
 register_family(
     BenchmarkCircuitFamily(
         name="graph_state_magic_injection",
@@ -359,6 +456,38 @@ register_family(
 )
 
 
+register_family(
+    BenchmarkCircuitFamily(
+        name="tfim_trotter_chain",
+        display_name="TFIM Trotter chain",
+        description=(
+            "First-order Trotterisation of the transverse-field Ising model "
+            "on a linear chain with uniform couplings."
+        ),
+        builder=build_tfim_trotter,
+        parameter_grid={
+            "qubits": (48, 96),
+            "steps": (50, 100, 200),
+            "j": (1.0,),
+            "h": (1.0,),
+            "delta_t": (0.02, 0.04, 0.08),
+        },
+        metadata={
+            "expected_conversions": (
+                "Early Trotter slices execute on the statevector backend before "
+                "the growing bond dimension triggers a hand-off to the MPS "
+                "simulator, illustrating the anticipated SV→MPS transition."
+            ),
+            "notes": (
+                "Nearest-neighbour entanglers drive χ upwards so the backend "
+                "timeline highlights when dense simulation becomes untenable."
+            ),
+        },
+        metric_hooks=(collect_tfim_trotter_metrics,),
+    )
+)
+
+
 __all__ = [
     "BenchmarkCircuitFamily",
     "BenchmarkResult",
@@ -366,6 +495,8 @@ __all__ = [
     "register_family",
     "build_graph_state_magic_injection",
     "build_qec_clifford_magic_patch",
+    "build_tfim_trotter",
     "collect_graph_state_metrics",
+    "collect_tfim_trotter_metrics",
 ]
 

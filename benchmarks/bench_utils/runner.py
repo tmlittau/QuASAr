@@ -226,6 +226,7 @@ class BenchmarkRunner:
             "total_time",
             "prepare_peak_memory",
             "run_peak_memory",
+            "fidelity",
         ]
         records: List[Dict[str, Any]] = []
         failures: List[str] = []
@@ -446,6 +447,7 @@ class BenchmarkRunner:
         run_time = 0.0
         result: Any | None = None
         backend_choice_name: str | None = None
+        fidelity: float | None = None
 
         try:
             backend_choice = None
@@ -497,6 +499,7 @@ class BenchmarkRunner:
                                 "backend": backend_choice_name,
                                 "unsupported": True,
                                 "comment": msg,
+                                "fidelity": None,
                             }
                             self.results.append(record)
                             return record
@@ -553,6 +556,11 @@ class BenchmarkRunner:
                     memory_attr = getattr(run_cost.cost, "memory", 0.0)
                 run_time = time_attr if time_attr is not None else 0.0
                 run_peak_memory = int(memory_attr) if memory_attr is not None else 0
+                if hasattr(run_cost, "fidelity") and run_cost.fidelity is not None:
+                    try:
+                        fidelity = float(run_cost.fidelity)
+                    except (TypeError, ValueError):  # pragma: no cover - defensive
+                        fidelity = None
                 if hasattr(result, "partitions") and getattr(result, "partitions"):
                     backend_obj = result.partitions[0].backend
                     backend_choice_name = getattr(backend_obj, "name", str(backend_obj))
@@ -571,6 +579,7 @@ class BenchmarkRunner:
                 "failed": True,
                 "error": str(exc),
                 "backend": backend_choice_name,
+                "fidelity": fidelity,
             }
             self.results.append(record)
             return record
@@ -585,6 +594,7 @@ class BenchmarkRunner:
             "result": result,
             "failed": False,
             "backend": backend_choice_name,
+            "fidelity": fidelity,
         }
         self.results.append(record)
         return record
@@ -854,6 +864,7 @@ class BenchmarkRunner:
                     "result": result,
                     "failed": False,
                     "backend": backend_choice_name,
+                    "fidelity": None,
                 }
             assert plan is not None
             if circuit is not None and original_ssd is not None:
@@ -878,6 +889,7 @@ class BenchmarkRunner:
                 "result": result,
                 "failed": False,
                 "backend": backend_choice_name,
+                "fidelity": None,
             }
 
         start = time.perf_counter()
@@ -968,13 +980,22 @@ class BenchmarkRunner:
                     f"{len(failures)} run(s) failed and were excluded from statistics"
                 )
         for m in metrics:
-            values = [r[m] for r in records]
+            values = [r[m] for r in records if m in r and r[m] is not None]
+            if not values:
+                continue
             summary[f"{m}_mean"] = statistics.fmean(values)
             summary[f"{m}_std"] = (
                 statistics.pstdev(values) if len(values) > 1 else 0.0
             )
 
         summary["result"] = records[-1].get("result") if records else None
+        if records:
+            last_fidelity = next(
+                (r["fidelity"] for r in reversed(records) if r.get("fidelity") is not None),
+                None,
+            )
+            if last_fidelity is not None:
+                summary["fidelity"] = last_fidelity
         summary.update(_conversion_summary(conversion_layers))
 
         self.results.append(summary)
