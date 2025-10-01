@@ -1592,8 +1592,15 @@ def classical_controlled_circuit(
     toggle_period: int = 64,
     fanout: int = 2,
     seed: int | None = 424242,
+    diag_fixed_phi: float | None = None,
+    diag_period: int | None = None,
+    cz_window_period: int | None = None,
 ) -> Circuit:
-    """Large circuit with classical controls triggering simplifications."""
+    """Large circuit with classical controls triggering simplifications.
+
+    Optional parameters allow stitching diagonal slabs (``diag_fixed_phi`` and
+    ``diag_period``) and CZ windows (``cz_window_period``) into the layout.
+    """
 
     if num_qubits <= 1 or depth <= 0:
         return Circuit([])
@@ -1607,6 +1614,10 @@ def classical_controlled_circuit(
 
     rng = Random(seed)
     gates: List[Gate] = []
+    diag_period = None if diag_period is None else max(1, int(diag_period))
+    cz_window_period = (
+        None if cz_window_period is None else max(1, int(cz_window_period))
+    )
     for idx, qubit in enumerate(classical):
         if idx % 2 == 0:
             gates.append(Gate("X", [qubit]))
@@ -1620,9 +1631,26 @@ def classical_controlled_circuit(
         if layer > 0 and layer % toggle_period == 0:
             flip_qubit = classical[(layer // toggle_period) % len(classical)]
             gates.append(Gate("X", [flip_qubit]))
+        in_diag_slab = bool(
+            diag_fixed_phi is not None
+            and (
+                diag_period is None
+                or (layer % (2 * diag_period)) < diag_period
+            )
+        )
+        in_cz_window = bool(
+            cz_window_period is not None
+            and (layer % (2 * cz_window_period)) < cz_window_period
+        )
+        force_cz = in_cz_window or in_diag_slab
+        layer_phi = diag_fixed_phi if in_diag_slab else None
         for target in quantum:
             theta = ((layer + 1) * (target + 1)) % 31 / 31 * math.pi
-            phi = ((layer + 1) * (target + 2)) % 37 / 37 * math.pi
+            phi = (
+                layer_phi
+                if layer_phi is not None
+                else ((layer + 1) * (target + 2)) % 37 / 37 * math.pi
+            )
             gates.append(Gate("RY", [target], {"theta": theta}))
             gates.append(Gate("RZ", [target], {"phi": phi}))
         for idx, ctrl in enumerate(classical):
@@ -1630,10 +1658,14 @@ def classical_controlled_circuit(
             pattern = (layer + idx) % 3
             if pattern == 0:
                 gates.append(Gate("CX", [ctrl, target]))
-            elif pattern == 1:
+            elif pattern == 1 or force_cz:
                 gates.append(Gate("CZ", [ctrl, target]))
             else:
-                angle = ((layer + 1) * (idx + 1)) % 23 / 23 * math.pi
+                angle = (
+                    layer_phi
+                    if layer_phi is not None
+                    else ((layer + 1) * (idx + 1)) % 23 / 23 * math.pi
+                )
                 gates.append(Gate("CRZ", [ctrl, target], {"phi": angle}))
 
     circuit = Circuit(gates, use_classical_simplification=False)
@@ -1648,6 +1680,12 @@ def classical_controlled_circuit(
         "fanout": fanout,
         "seed": seed,
     }
+    if diag_fixed_phi is not None:
+        metadata["diag_fixed_phi"] = diag_fixed_phi
+    if diag_period is not None:
+        metadata["diag_period"] = diag_period
+    if cz_window_period is not None:
+        metadata["cz_window_period"] = cz_window_period
     setattr(circuit, "metadata", metadata)
     setattr(circuit, "classical_qubits", tuple(classical))
     setattr(circuit, "quantum_qubits", tuple(quantum))
