@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, List, Tuple
 
 from quasar.circuit import Circuit, Gate
@@ -31,6 +31,7 @@ class FakeEstimator:
 
     conversion_time: float = 3.0
     conversion_memory: float = 7.0
+    coeff: dict[str, float] = field(default_factory=dict)
 
     def conversion(  # type: ignore[no-untyped-def]
         self,
@@ -79,6 +80,7 @@ class LinearEstimator:
     prefix_rate: float
     suffix_rate: float
     conversion_cost: float
+    coeff: dict[str, float] = field(default_factory=dict)
 
     def conversion(  # type: ignore[no-untyped-def]
         self,
