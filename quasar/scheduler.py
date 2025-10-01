@@ -3,8 +3,11 @@ from __future__ import annotations
 """Execution scheduler for QuASAr."""
 
 from dataclasses import dataclass, field, fields
-from typing import Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 from concurrent.futures import ThreadPoolExecutor
+import json
+import math
+import os
 import time
 import tracemalloc
 import warnings
@@ -181,6 +184,53 @@ def merge_subsystems(
     )
     return merged, merged_qubits
 
+@dataclass
+class ConversionSpan:
+    """Fine-grained timing and memory observation for a conversion component."""
+
+    component: str
+    time: float
+    memory: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        entry: Dict[str, Any] = {
+            "component": self.component,
+            "time": self.time,
+            "memory": self.memory,
+        }
+        if self.metadata:
+            entry["metadata"] = dict(self.metadata)
+        return entry
+
+
+@dataclass
+class ConversionProfile:
+    """Aggregated telemetry for an individual conversion primitive."""
+
+    source: Backend | None
+    target: Backend
+    primitive: str
+    boundary: tuple[int, ...]
+    rank: int
+    frontier: int
+    ingest_terms: int | None = None
+    window: int | None = None
+    spans: List[ConversionSpan] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source.name if self.source is not None else None,
+            "target": self.target.name,
+            "primitive": self.primitive,
+            "boundary": self.boundary,
+            "rank": self.rank,
+            "frontier": self.frontier,
+            "ingest_terms": self.ingest_terms,
+            "window": self.window,
+            "spans": [span.to_dict() for span in self.spans],
+        }
+
 
 @dataclass
 class RunMetrics:
@@ -194,6 +244,8 @@ class RunMetrics:
         Number of times execution changed between backends.
     conversion_durations:
         List of wall-clock durations for each conversion.
+    conversion_profiles:
+        Detailed component telemetry recorded for each conversion.
     plan_cache_hits:
         Number of reused plans retrieved from the planner cache.
     fidelity:
@@ -203,6 +255,7 @@ class RunMetrics:
     cost: Cost = field(default_factory=lambda: Cost(time=0.0, memory=0.0))
     backend_switches: int = 0
     conversion_durations: List[float] = field(default_factory=list)
+    conversion_profiles: List[ConversionProfile] = field(default_factory=list)
     plan_cache_hits: int = 0
     fidelity: float | None = None
 
@@ -228,6 +281,7 @@ class Scheduler:
     backend_selection_log: str | None = config.DEFAULT.backend_selection_log
     verbose_selection: bool = config.DEFAULT.verbose_selection
     coeff_ema_decay: float = config.DEFAULT.coeff_ema_decay
+    conversion_telemetry_path: str | None = config.DEFAULT.conversion_telemetry_path
     # Fractional tolerance before triggering a replan due to cost mismatch
     replan_tolerance: float = 0.05
     ssd_cache: SSDCache = field(default_factory=SSDCache)
@@ -285,6 +339,60 @@ class Scheduler:
             count = 0 if threads is None or threads <= 0 else int(threads)
             self.conversion_engine.cpu_thread_count = count
         self._resolved_ingestion_mode = effective_mode
+
+    def _emit_conversion_telemetry(
+        self, profiles: Sequence[ConversionProfile]
+    ) -> None:
+        path = self.conversion_telemetry_path
+        if not path or not profiles:
+            return
+        try:
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+        except OSError as exc:
+            warnings.warn(
+                f"Failed to prepare conversion telemetry path {path}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return
+        try:
+            with open(path, "a", encoding="utf8") as handle:
+                for profile in profiles:
+                    json.dump(profile.to_dict(), handle, sort_keys=True)
+                    handle.write("\n")
+        except OSError as exc:
+            warnings.warn(
+                f"Failed to write conversion telemetry to {path}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+    @staticmethod
+    def _st_stage_work(rank: int, cap_hint: int | None) -> int:
+        if rank <= 0:
+            return 0
+        cap = 1
+        if cap_hint is not None:
+            try:
+                cap = int(cap_hint)
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                cap = 1
+        if cap <= 0:
+            cap = 1
+        dims: List[int] = []
+        if rank > cap:
+            stages = max(0, math.ceil(rank / cap) - 1)
+            if stages > 0:
+                dims.extend([cap] * stages)
+            remainder = rank - cap * stages
+            if remainder <= 0:
+                remainder = cap
+            dims.append(remainder)
+        else:
+            dims.append(min(rank, cap))
+        return sum(dim ** 3 for dim in dims)
 
     def __post_init__(self) -> None:
         if self.backends is None:
@@ -981,6 +1089,17 @@ class Scheduler:
             if total_est.time > max_time:
                 raise ValueError("Estimated runtime exceeds max_time")
 
+        if (
+            self.conversion_engine is not None
+            and hasattr(self.conversion_engine, "enable_telemetry")
+        ):
+            try:
+                self.conversion_engine.enable_telemetry(instrument)  # type: ignore[attr-defined]
+                if instrument and hasattr(self.conversion_engine, "reset_telemetry"):
+                    self.conversion_engine.reset_telemetry()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
         if len(steps) == 1 and not conv_layers and not getattr(
             plan, "explicit_conversions", None
         ):
@@ -1090,6 +1209,7 @@ class Scheduler:
                     cost=run_cost,
                     backend_switches=backend_switches,
                     conversion_durations=conversion_durations,
+                    conversion_profiles=[],
                     plan_cache_hits=(
                         (self.planner.cache_hits - cache_hits_before)
                         if self.planner is not None
@@ -1106,8 +1226,101 @@ class Scheduler:
         replay_time = 0.0
         current_backend = None
         current_sim = None
+        conversion_profiles: List[ConversionProfile] = []
         if instrument:
             tracemalloc.start()
+
+        def _measure_conversion(
+            component: str,
+            func: Callable[[], Any],
+            *,
+            profile: ConversionProfile | None = None,
+            metadata: Dict[str, Any] | None = None,
+        ) -> tuple[Any, ConversionSpan | None]:
+            nonlocal conversion_time
+            if not instrument:
+                return func(), None
+            tracemalloc.reset_peak()
+            start = time.perf_counter()
+            try:
+                result = func()
+            except Exception:
+                elapsed = time.perf_counter() - start
+                _, peak = tracemalloc.get_traced_memory()
+                conversion_time += elapsed
+                conversion_durations.append(elapsed)
+                total_gate_time.memory = max(total_gate_time.memory, float(peak))
+                span = ConversionSpan(
+                    component=component,
+                    time=elapsed,
+                    memory=float(peak),
+                    metadata=dict(metadata or {}),
+                )
+                if profile is not None:
+                    profile.spans.append(span)
+                raise
+            elapsed = time.perf_counter() - start
+            _, peak = tracemalloc.get_traced_memory()
+            conversion_time += elapsed
+            conversion_durations.append(elapsed)
+            total_gate_time.memory = max(total_gate_time.memory, float(peak))
+            span = ConversionSpan(
+                component=component,
+                time=elapsed,
+                memory=float(peak),
+                metadata=dict(metadata or {}),
+            )
+            if profile is not None:
+                profile.spans.append(span)
+            return result, span
+
+        def _update_conversion_coefficients(
+            profile: ConversionProfile, *, window_hint: int | None
+        ) -> None:
+            est = self.planner.estimator if self.planner is not None else None
+            if est is None:
+                return
+            updates: Dict[str, float] = {}
+            spans_by_component: Dict[str, ConversionSpan] = {}
+            for span in profile.spans:
+                spans_by_component.setdefault(span.component, span)
+            ingest_terms = profile.ingest_terms
+            if ingest_terms is None:
+                ingest_terms = 1 << len(profile.boundary)
+            ingest_terms = max(1, int(ingest_terms))
+            ingest_span = spans_by_component.get("ingest")
+            if ingest_span is not None and ingest_span.time > 0:
+                updates[f"ingest_{profile.target.value}"] = ingest_span.time / ingest_terms
+            primitive = profile.primitive.upper()
+            if primitive == "B2B":
+                svd_span = spans_by_component.get("svd")
+                if svd_span is not None and svd_span.time > 0 and profile.rank > 0:
+                    num_qubits = len(profile.boundary)
+                    svd_cost = min(
+                        num_qubits * (profile.rank**2),
+                        profile.rank * (num_qubits**2),
+                    )
+                    if svd_cost > 0:
+                        updates["b2b_svd"] = svd_span.time / svd_cost
+            elif primitive == "LW":
+                extract_span = spans_by_component.get("extract")
+                if extract_span is not None and extract_span.time > 0:
+                    window_size = window_hint if window_hint is not None else len(profile.boundary)
+                    window_size = max(0, int(window_size))
+                    dense = 1 << window_size
+                    if dense > 0:
+                        updates["lw_extract"] = extract_span.time / dense
+            elif primitive == "ST":
+                stage_span = spans_by_component.get("svd")
+                if stage_span is not None and stage_span.time > 0 and profile.rank > 0:
+                    cap_hint = getattr(self.conversion_engine, "st_chi_cap", None)
+                    if cap_hint is None:
+                        cap_hint = est.coeff.get("st_chi_cap", 16)
+                    work = self._st_stage_work(profile.rank, cap_hint)
+                    if work > 0:
+                        updates["st_stage"] = stage_span.time / work
+            if updates:
+                est.update_coefficients(updates, decay=self.coeff_ema_decay)
         i = 0
         while i < len(steps):
             step = steps[i]
@@ -1408,19 +1621,19 @@ class Scheduler:
                 ):
                     self._load_backend(sim_obj, circuit.num_qubits, target=target)
                 if current_sim is not None:
+                    if instrument and hasattr(self.conversion_engine, "reset_telemetry"):
+                        try:
+                            self.conversion_engine.reset_telemetry()  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
                     if instrument:
-                        tracemalloc.reset_peak()
-                        start_time = time.perf_counter()
-                        current_ssd = current_sim.extract_ssd()
-                        elapsed = time.perf_counter() - start_time
-                        _, peak = tracemalloc.get_traced_memory()
-                        conversion_time += elapsed
-                        conversion_durations.append(elapsed)
-                        total_gate_time.memory = max(
-                            total_gate_time.memory, float(peak)
+                        current_ssd, extract_span = _measure_conversion(
+                            "extract",
+                            current_sim.extract_ssd,
                         )
                     else:
                         current_ssd = current_sim.extract_ssd()
+                        extract_span = None
                     layer = None
                     if conv_idx < len(conv_layers):
                         cand = conv_layers[conv_idx]
@@ -1431,7 +1644,10 @@ class Scheduler:
                         boundary = list(layer.boundary)
                         rank = layer.rank
                         primitive = layer.primitive
-                    else:  # Fallback path; should not trigger in normal operation
+                        frontier = layer.frontier
+                        window_hint = layer.window
+                        ingest_terms_hint = layer.converted_terms
+                    else:
                         if current_ssd is not None and getattr(
                             current_ssd, "partitions", None
                         ):
@@ -1440,53 +1656,116 @@ class Scheduler:
                             )
                         else:
                             boundary = list(qubits)
-                        rank = 2 ** len(boundary)
+                        frontier = len(boundary)
+                        rank = 2 ** len(boundary) if boundary else 1
                         primitive = "Full"
+                        window_hint = None
+                        ingest_terms_hint = None
                     conv_ssd = CESD(boundary_qubits=list(boundary), top_s=rank)
                     conv_ssd.fingerprint = (
                         tuple(conv_ssd.boundary_qubits or []),
                         conv_ssd.top_s,
                     )
+                    ingest_terms = ingest_terms_hint
+                    if ingest_terms is None:
+                        try:
+                            ingest_terms = 1 << len(boundary)
+                        except ValueError:
+                            ingest_terms = 1
+                    profile_metadata = {
+                        "boundary": len(boundary),
+                        "rank": rank,
+                        "frontier": frontier,
+                    }
+                    current_profile: ConversionProfile | None = None
                     if instrument:
-                        tracemalloc.reset_peak()
-                        start_time = time.perf_counter()
+                        current_profile = ConversionProfile(
+                            source=current_backend,
+                            target=target,
+                            primitive=primitive,
+                            boundary=tuple(boundary),
+                            rank=rank,
+                            frontier=frontier,
+                            ingest_terms=int(ingest_terms)
+                            if ingest_terms is not None
+                            else None,
+                            window=window_hint,
+                        )
+                        if extract_span is not None:
+                            extract_span.component = "svd" if primitive == "B2B" else "extract"
+                            extract_span.metadata.update(profile_metadata)
+                            current_profile.spans.append(extract_span)
+                    ingest_metadata = dict(profile_metadata)
+                    if ingest_terms is not None:
+                        try:
+                            ingest_metadata["terms"] = int(ingest_terms)
+                        except (TypeError, ValueError):
+                            pass
                     try:
                         if primitive == "B2B":
                             try:
-                                sim_obj.ingest(
-                                    current_ssd, num_qubits=circuit.num_qubits
+                                _measure_conversion(
+                                    "ingest",
+                                    lambda: sim_obj.ingest(
+                                        current_ssd, num_qubits=circuit.num_qubits
+                                    ),
+                                    profile=current_profile,
+                                    metadata=ingest_metadata,
                                 )
                             except Exception:
                                 if target == Backend.TABLEAU:
-                                    rep = self.ssd_cache.convert(
-                                        conv_ssd,
-                                        "tab",
-                                        lambda: self.conversion_engine.convert_boundary_to_tableau(
-                                            conv_ssd
-                                        ),
-                                    )
+
+                                    def _convert_tableau() -> object:
+                                        result, _ = _measure_conversion(
+                                            "svd",
+                                            lambda: self.conversion_engine.convert_boundary_to_tableau(
+                                                conv_ssd
+                                            ),
+                                            profile=current_profile,
+                                            metadata=profile_metadata,
+                                        )
+                                        return result
+
+                                    rep = self.ssd_cache.convert(conv_ssd, "tab", _convert_tableau)
                                 elif target == Backend.DECISION_DIAGRAM:
                                     rep = self._clone_decision_diagram_state(current_ssd, sim_obj)
                                     if rep is None:
-                                        rep = self.ssd_cache.convert(
-                                            conv_ssd,
-                                            "dd",
-                                            lambda: self.conversion_engine.convert_boundary_to_dd(
-                                                conv_ssd
-                                            ),
-                                        )
+
+                                        def _convert_dd() -> object:
+                                            result, _ = _measure_conversion(
+                                                "svd",
+                                                lambda: self.conversion_engine.convert_boundary_to_dd(
+                                                    conv_ssd
+                                                ),
+                                                profile=current_profile,
+                                                metadata=profile_metadata,
+                                            )
+                                            return result
+
+                                        rep = self.ssd_cache.convert(conv_ssd, "dd", _convert_dd)
                                 else:
-                                    rep = self.ssd_cache.convert(
-                                        conv_ssd,
-                                        "sv",
-                                        lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                            conv_ssd
-                                        ),
-                                    )
-                                sim_obj.ingest(
-                                    rep,
-                                    num_qubits=circuit.num_qubits,
-                                    mapping=boundary,
+
+                                    def _convert_sv() -> object:
+                                        result, _ = _measure_conversion(
+                                            "svd",
+                                            lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                                conv_ssd, self._resolved_ingestion_mode
+                                            ),
+                                            profile=current_profile,
+                                            metadata=profile_metadata,
+                                        )
+                                        return result
+
+                                    rep = self.ssd_cache.convert(conv_ssd, "sv", _convert_sv)
+                                _measure_conversion(
+                                    "ingest",
+                                    lambda: sim_obj.ingest(
+                                        rep,
+                                        num_qubits=circuit.num_qubits,
+                                        mapping=boundary,
+                                    ),
+                                    profile=current_profile,
+                                    metadata=ingest_metadata,
                                 )
                         elif primitive == "LW":
                             rep = None
@@ -1507,66 +1786,126 @@ class Scheduler:
                                         and isinstance(state_obj[1], mqt_dd.VectorDD)
                                     ):
                                         try:
-                                            rep = self.conversion_engine.extract_local_window_dd(
-                                                state_obj[1], boundary
+                                            rep, _ = _measure_conversion(
+                                                "extract",
+                                                lambda: self.conversion_engine.extract_local_window_dd(
+                                                    state_obj[1], boundary
+                                                ),
+                                                profile=current_profile,
+                                                metadata={
+                                                    **profile_metadata,
+                                                    "window": len(boundary),
+                                                },
                                             )
                                         except Exception:
                                             rep = None
-                                        break
+                                        if rep is not None:
+                                            break
                             if rep is None:
                                 state = current_sim.statevector()
-                                rep = self.conversion_engine.extract_local_window(
-                                    state, boundary, self._resolved_ingestion_mode
+                                rep, _ = _measure_conversion(
+                                    "extract",
+                                    lambda: self.conversion_engine.extract_local_window(
+                                        state, boundary, self._resolved_ingestion_mode
+                                    ),
+                                    profile=current_profile,
+                                    metadata={
+                                        **profile_metadata,
+                                        "window": len(boundary),
+                                    },
                                 )
-                            sim_obj.ingest(
-                                rep,
-                                num_qubits=circuit.num_qubits,
-                                mapping=boundary,
+                            _measure_conversion(
+                                "ingest",
+                                lambda: sim_obj.ingest(
+                                    rep,
+                                    num_qubits=circuit.num_qubits,
+                                    mapping=boundary,
+                                ),
+                                profile=current_profile,
+                                metadata=ingest_metadata,
                             )
                         elif primitive == "ST":
-                            rep = self.ssd_cache.bridge_tensor(
-                                conv_ssd,
-                                conv_ssd,
-                                lambda: self.conversion_engine.build_bridge_tensor(
-                                    conv_ssd, conv_ssd
+
+                            def _build_tensor() -> object:
+                                result, _ = _measure_conversion(
+                                    "svd",
+                                    lambda: self.conversion_engine.build_bridge_tensor(
+                                        conv_ssd, conv_ssd
+                                    ),
+                                    profile=current_profile,
+                                    metadata=profile_metadata,
+                                )
+                                return result
+
+                            rep = self.ssd_cache.bridge_tensor(conv_ssd, conv_ssd, _build_tensor)
+                            _measure_conversion(
+                                "ingest",
+                                lambda: sim_obj.ingest(
+                                    rep,
+                                    num_qubits=circuit.num_qubits,
+                                    mapping=boundary,
                                 ),
-                            )
-                            sim_obj.ingest(
-                                rep,
-                                num_qubits=circuit.num_qubits,
-                                mapping=boundary,
+                                profile=current_profile,
+                                metadata=ingest_metadata,
                             )
                         else:
                             if target == Backend.TABLEAU:
+
+                                def _convert_tableau_full() -> object:
+                                    result, _ = _measure_conversion(
+                                        "svd",
+                                        lambda: self.conversion_engine.convert_boundary_to_tableau(
+                                            conv_ssd
+                                        ),
+                                        profile=current_profile,
+                                        metadata=profile_metadata,
+                                    )
+                                    return result
+
                                 rep = self.ssd_cache.convert(
-                                    conv_ssd,
-                                    "tab",
-                                    lambda: self.conversion_engine.convert_boundary_to_tableau(
-                                        conv_ssd
-                                    ),
+                                    conv_ssd, "tab", _convert_tableau_full
                                 )
                             elif target == Backend.DECISION_DIAGRAM:
                                 rep = self._clone_decision_diagram_state(current_ssd, sim_obj)
                                 if rep is None:
+
+                                    def _convert_dd_full() -> object:
+                                        result, _ = _measure_conversion(
+                                            "svd",
+                                            lambda: self.conversion_engine.convert_boundary_to_dd(
+                                                conv_ssd
+                                            ),
+                                            profile=current_profile,
+                                            metadata=profile_metadata,
+                                        )
+                                        return result
+
                                     rep = self.ssd_cache.convert(
-                                        conv_ssd,
-                                        "dd",
-                                        lambda: self.conversion_engine.convert_boundary_to_dd(
-                                            conv_ssd
-                                        ),
+                                        conv_ssd, "dd", _convert_dd_full
                                     )
                             else:
-                                rep = self.ssd_cache.convert(
-                                    conv_ssd,
-                                    "sv",
-                                    lambda: self.conversion_engine.convert_boundary_to_statevector(
-                                        conv_ssd, self._resolved_ingestion_mode
-                                    ),
-                                )
-                            sim_obj.ingest(
-                                rep,
-                                num_qubits=circuit.num_qubits,
-                                mapping=boundary,
+
+                                def _convert_sv_full() -> object:
+                                    result, _ = _measure_conversion(
+                                        "svd",
+                                        lambda: self.conversion_engine.convert_boundary_to_statevector(
+                                            conv_ssd, self._resolved_ingestion_mode
+                                        ),
+                                        profile=current_profile,
+                                        metadata=profile_metadata,
+                                    )
+                                    return result
+
+                                rep = self.ssd_cache.convert(conv_ssd, "sv", _convert_sv_full)
+                            _measure_conversion(
+                                "ingest",
+                                lambda: sim_obj.ingest(
+                                    rep,
+                                    num_qubits=circuit.num_qubits,
+                                    mapping=boundary,
+                                ),
+                                profile=current_profile,
+                                metadata=ingest_metadata,
                             )
                     except Exception:
                         if (
@@ -1581,9 +1920,7 @@ class Scheduler:
                                     except Exception:
                                         state = None
                                 if state is not None:
-                                    rep = self.conversion_engine.try_build_tableau(
-                                        state
-                                    )
+                                    rep = self.conversion_engine.try_build_tableau(state)
                                     if rep is not None:
                                         sim_obj.ingest(
                                             rep,
@@ -1606,15 +1943,16 @@ class Scheduler:
                             self._load_backend(
                                 sim_obj, circuit.num_qubits, target=target
                             )
-                    finally:
-                        if instrument:
-                            elapsed = time.perf_counter() - start_time
-                            _, peak = tracemalloc.get_traced_memory()
-                            conversion_time += elapsed
-                            conversion_durations.append(elapsed)
-                            total_gate_time.memory = max(
-                                total_gate_time.memory, float(peak)
-                            )
+                    if instrument and current_profile is not None:
+                        conversion_profiles.append(current_profile)
+                        _update_conversion_coefficients(
+                            current_profile, window_hint=window_hint
+                        )
+                        if hasattr(self.conversion_engine, "reset_telemetry"):
+                            try:
+                                self.conversion_engine.reset_telemetry()  # type: ignore[attr-defined]
+                            except Exception:
+                                pass
                 current_sim = sim_obj
                 current_backend = target
                 for k in list(sims.keys()):
@@ -1745,10 +2083,12 @@ class Scheduler:
                     if self.planner is not None
                     else 0
                 )
+                self._emit_conversion_telemetry(conversion_profiles)
                 metrics = RunMetrics(
                     cost=run_cost,
                     backend_switches=backend_switches,
                     conversion_durations=conversion_durations,
+                    conversion_profiles=list(conversion_profiles),
                     plan_cache_hits=plan_cache_hits,
                     fidelity=fidelity,
                 )
@@ -1800,10 +2140,12 @@ class Scheduler:
                 if self.planner is not None
                 else 0
             )
+            self._emit_conversion_telemetry(conversion_profiles)
             metrics = RunMetrics(
                 cost=run_cost,
                 backend_switches=backend_switches,
                 conversion_durations=conversion_durations,
+                conversion_profiles=list(conversion_profiles),
                 plan_cache_hits=plan_cache_hits,
                 fidelity=fidelity,
             )

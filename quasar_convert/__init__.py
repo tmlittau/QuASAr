@@ -9,6 +9,9 @@ package continues to function.
 from __future__ import annotations
 
 from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Optional
+import time
+import tracemalloc
 
 try:  # pragma: no cover - exercised when the extension is available
     from ._conversion_engine import (  # type: ignore[attr-defined]
@@ -48,6 +51,8 @@ try:  # pragma: no cover - exercised when the extension is available
             self.truncation_normalise = truncation_normalise
             self.execution_mode = execution_mode or ExecutionMode.Auto
             self.cpu_thread_count = cpu_threads or 0
+            self._telemetry_enabled = False
+            self._telemetry_spans: List[Dict[str, Any]] = []
 
         @property
         def st_chi_cap(self) -> int:
@@ -124,6 +129,53 @@ try:  # pragma: no cover - exercised when the extension is available
             if "_impl" in self.__dict__ and hasattr(self._impl, "cpu_thread_count"):
                 self._impl.cpu_thread_count = count
 
+        def enable_telemetry(self, enabled: bool = True) -> None:
+            self._telemetry_enabled = bool(enabled)
+            if not self._telemetry_enabled:
+                self._telemetry_spans = []
+            else:
+                self._telemetry_spans.clear()
+
+        def reset_telemetry(self) -> None:
+            self._telemetry_spans.clear()
+
+        def telemetry_spans(self) -> List[Dict[str, Any]]:
+            return list(self._telemetry_spans)
+
+        def _record_span(
+            self,
+            component: str,
+            duration: float,
+            memory: float | None = None,
+            **metadata: Any,
+        ) -> None:
+            if not self._telemetry_enabled:
+                return
+            entry: Dict[str, Any] = {"component": component, "time": float(duration)}
+            if memory is not None:
+                entry["memory"] = float(memory)
+            if metadata:
+                entry["metadata"] = dict(metadata)
+            self._telemetry_spans.append(entry)
+
+        def _profile_call(
+            self,
+            component: str,
+            call: Callable[[], Any],
+            **metadata: Any,
+        ) -> Any:
+            if not self._telemetry_enabled:
+                return call()
+            start = time.perf_counter()
+            result = call()
+            elapsed = time.perf_counter() - start
+            peak: Optional[float] = None
+            if tracemalloc.is_tracing():
+                _, traced_peak = tracemalloc.get_traced_memory()
+                peak = float(traced_peak)
+            self._record_span(component, elapsed, peak, **metadata)
+            return result
+
         # Cache helpers -------------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
             if self._cache_limit is not None:
@@ -165,13 +217,34 @@ try:  # pragma: no cover - exercised when the extension is available
 
         def extract_local_window(self, *args, **kwargs):
             self._ensure_impl()
-            return self._impl.extract_local_window(*args, **kwargs)
+            window_qubits: Optional[List[int]] = None
+            if len(args) > 1:
+                window_qubits = args[1]
+            elif "window_qubits" in kwargs:
+                window_qubits = kwargs["window_qubits"]
+            metadata: Dict[str, Any] = {}
+            if window_qubits is not None:
+                metadata["window"] = len(window_qubits)
+            return self._profile_call(
+                "extract_local_window",
+                lambda: self._impl.extract_local_window(*args, **kwargs),
+                **metadata,
+            )
 
         if hasattr(_CEngine, "extract_local_window_dd"):
 
             def extract_local_window_dd(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
-                return self._impl.extract_local_window_dd(*args, **kwargs)
+                metadata: Dict[str, Any] = {}
+                if len(args) > 1:
+                    metadata["window"] = len(args[1])
+                elif "boundary" in kwargs:
+                    metadata["window"] = len(kwargs["boundary"])
+                return self._profile_call(
+                    "extract_local_window_dd",
+                    lambda: self._impl.extract_local_window_dd(*args, **kwargs),
+                    **metadata,
+                )
 
         def convert(self, *args, **kwargs):
             self._ensure_impl()
@@ -181,13 +254,33 @@ try:  # pragma: no cover - exercised when the extension is available
             key = (tuple(left.boundary_qubits or []), tuple(right.boundary_qubits or []))
             if key not in self._bridge_cache:
                 self._ensure_impl()
-                self._bridge_cache[key] = self._impl.build_bridge_tensor(left, right)
+                metadata = {
+                    "left_boundary": len(left.boundary_qubits or []),
+                    "right_boundary": len(right.boundary_qubits or []),
+                }
+                self._bridge_cache[key] = self._profile_call(
+                    "build_bridge_tensor",
+                    lambda: self._impl.build_bridge_tensor(left, right),
+                    **metadata,
+                )
                 self._trim_cache(self._bridge_cache)
             return self._bridge_cache[key]
 
         def convert_boundary_to_statevector(self, *args, **kwargs):  # type: ignore[override]
             self._ensure_impl()
-            return self._impl.convert_boundary_to_statevector(*args, **kwargs)
+            metadata: Dict[str, Any] = {}
+            if args:
+                ssd_arg = args[0]
+            else:
+                ssd_arg = kwargs.get("ssd")
+            boundary_qubits = getattr(ssd_arg, "boundary_qubits", None)
+            if boundary_qubits is not None:
+                metadata["boundary"] = len(boundary_qubits)
+            return self._profile_call(
+                "convert_boundary_to_statevector",
+                lambda: self._impl.convert_boundary_to_statevector(*args, **kwargs),
+                **metadata,
+            )
 
         if hasattr(_CEngine, "last_compression_stats"):
 
@@ -223,7 +316,16 @@ try:  # pragma: no cover - exercised when the extension is available
 
             def convert_boundary_to_tableau(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
-                return self._impl.convert_boundary_to_tableau(*args, **kwargs)
+                metadata: Dict[str, Any] = {}
+                ssd_arg = args[0] if args else kwargs.get("ssd")
+                boundary_qubits = getattr(ssd_arg, "boundary_qubits", None)
+                if boundary_qubits is not None:
+                    metadata["boundary"] = len(boundary_qubits)
+                return self._profile_call(
+                    "convert_boundary_to_tableau",
+                    lambda: self._impl.convert_boundary_to_tableau(*args, **kwargs),
+                    **metadata,
+                )
 
         if hasattr(_CEngine, "dd_to_tableau"):
 
@@ -253,7 +355,16 @@ try:  # pragma: no cover - exercised when the extension is available
 
             def convert_boundary_to_dd(self, *args, **kwargs):  # type: ignore[override]
                 self._ensure_impl()
-                return self._impl.convert_boundary_to_dd(*args, **kwargs)
+                metadata: Dict[str, Any] = {}
+                ssd_arg = args[0] if args else kwargs.get("ssd")
+                boundary_qubits = getattr(ssd_arg, "boundary_qubits", None)
+                if boundary_qubits is not None:
+                    metadata["boundary"] = len(boundary_qubits)
+                return self._profile_call(
+                    "convert_boundary_to_dd",
+                    lambda: self._impl.convert_boundary_to_dd(*args, **kwargs),
+                    **metadata,
+                )
 
         if hasattr(_CEngine, "dd_to_statevector"):
 
@@ -359,6 +470,8 @@ except Exception:  # pragma: no cover - exercised when extension missing
             self._compression_stats = CompressionStats()
             self.execution_mode = execution_mode or ExecutionMode.Auto
             self.cpu_thread_count = cpu_threads or 0
+            self._telemetry_enabled = False
+            self._telemetry_spans: List[Dict[str, Any]] = []
 
         @property
         def st_chi_cap(self) -> int:
@@ -430,6 +543,53 @@ except Exception:  # pragma: no cover - exercised when extension missing
         @cpu_thread_count.setter
         def cpu_thread_count(self, value: int | None) -> None:
             self._cpu_thread_count = max(0, int(value or 0))
+
+        def enable_telemetry(self, enabled: bool = True) -> None:
+            self._telemetry_enabled = bool(enabled)
+            if not self._telemetry_enabled:
+                self._telemetry_spans = []
+            else:
+                self._telemetry_spans.clear()
+
+        def reset_telemetry(self) -> None:
+            self._telemetry_spans.clear()
+
+        def telemetry_spans(self) -> List[Dict[str, Any]]:
+            return list(self._telemetry_spans)
+
+        def _record_span(
+            self,
+            component: str,
+            duration: float,
+            memory: float | None = None,
+            **metadata: Any,
+        ) -> None:
+            if not self._telemetry_enabled:
+                return
+            entry: Dict[str, Any] = {"component": component, "time": float(duration)}
+            if memory is not None:
+                entry["memory"] = float(memory)
+            if metadata:
+                entry["metadata"] = dict(metadata)
+            self._telemetry_spans.append(entry)
+
+        def _profile_call(
+            self,
+            component: str,
+            call: Callable[[], Any],
+            **metadata: Any,
+        ) -> Any:
+            if not self._telemetry_enabled:
+                return call()
+            start = time.perf_counter()
+            result = call()
+            elapsed = time.perf_counter() - start
+            peak: Optional[float] = None
+            if tracemalloc.is_tracing():
+                _, traced_peak = tracemalloc.get_traced_memory()
+                peak = float(traced_peak)
+            self._record_span(component, elapsed, peak, **metadata)
+            return result
 
         # Cache utilities -----------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -507,7 +667,12 @@ except Exception:  # pragma: no cover - exercised when extension missing
         def build_bridge_tensor(self, left: SSD, right: SSD) -> list[complex]:
             key = (tuple(left.boundary_qubits or []), tuple(right.boundary_qubits or []))
             if key not in self._bridge_cache:
-                self._bridge_cache[key] = self._build_bridge_tensor_impl(left, right)
+                self._bridge_cache[key] = self._profile_call(
+                    "build_bridge_tensor",
+                    lambda: self._build_bridge_tensor_impl(left, right),
+                    left_boundary=len(left.boundary_qubits or []),
+                    right_boundary=len(right.boundary_qubits or []),
+                )
                 self._trim_cache(self._bridge_cache)
             return self._bridge_cache[key]
 
@@ -557,16 +722,24 @@ except Exception:  # pragma: no cover - exercised when extension missing
             mode: ExecutionMode | None = None,
         ) -> List[complex]:
             _ = mode
-            k = len(window_qubits)
-            dim = 1 << k
-            window = [0j] * dim
-            for local in range(dim):
-                global_index = 0
-                for i, q in enumerate(window_qubits):
-                    if (local >> i) & 1:
-                        global_index |= 1 << q
-                window[local] = state[global_index]
-            return self._apply_truncation(window)
+
+            def _compute() -> List[complex]:
+                k = len(window_qubits)
+                dim = 1 << k
+                window = [0j] * dim
+                for local in range(dim):
+                    global_index = 0
+                    for i, q in enumerate(window_qubits):
+                        if (local >> i) & 1:
+                            global_index |= 1 << q
+                    window[local] = state[global_index]
+                return self._apply_truncation(window)
+
+            return self._profile_call(
+                "extract_local_window",
+                _compute,
+                window=len(window_qubits),
+            )
 
         def convert(
             self,
@@ -625,22 +798,30 @@ except Exception:  # pragma: no cover - exercised when extension missing
             self, ssd: SSD, mode: ExecutionMode | None = None
         ) -> List[complex]:
             _ = mode
-            dim = 1 << len(ssd.boundary_qubits or [])
-            state = [0j] * dim
-            if dim:
-                norm = 1.0 / math.sqrt(dim)
-                phases = [1.0 + 0j] * len(ssd.boundary_qubits or [])
-                vecs = ssd.vectors or []
-                if vecs:
-                    for i, val in enumerate(vecs[0][: len(phases)]):
-                        phases[i] = (-1.0 + 0j) if val < 0 else (1.0 + 0j)
-                for idx in range(dim):
-                    amp = 1.0 + 0j
-                    for bit in range(len(phases)):
-                        if idx >> bit & 1:
-                            amp *= phases[bit]
-                    state[idx] = amp * norm
-            return self._apply_truncation(state)
+
+            def _compute() -> List[complex]:
+                dim = 1 << len(ssd.boundary_qubits or [])
+                state = [0j] * dim
+                if dim:
+                    norm = 1.0 / math.sqrt(dim)
+                    phases = [1.0 + 0j] * len(ssd.boundary_qubits or [])
+                    vecs = ssd.vectors or []
+                    if vecs:
+                        for i, val in enumerate(vecs[0][: len(phases)]):
+                            phases[i] = (-1.0 + 0j) if val < 0 else (1.0 + 0j)
+                    for idx in range(dim):
+                        amp = 1.0 + 0j
+                        for bit in range(len(phases)):
+                            if idx >> bit & 1:
+                                amp *= phases[bit]
+                        state[idx] = amp * norm
+                return self._apply_truncation(state)
+
+            return self._profile_call(
+                "convert_boundary_to_statevector",
+                _compute,
+                boundary=len(ssd.boundary_qubits or []),
+            )
 
         def convert_boundary_to_stn(self, ssd: SSD) -> StnTensor:
             state = self.convert_boundary_to_statevector(ssd)
@@ -648,17 +829,28 @@ except Exception:  # pragma: no cover - exercised when extension missing
             return StnTensor(amplitudes=state, tableau=tab)
 
         def convert_boundary_to_tableau(self, ssd: SSD):
-            class Tableau:
-                def __init__(self, n: int):
-                    self.num_qubits = n
+            def _compute():
+                class Tableau:
+                    def __init__(self, n: int):
+                        self.num_qubits = n
 
-            return Tableau(len(ssd.boundary_qubits or []))
+                return Tableau(len(ssd.boundary_qubits or []))
+
+            return self._profile_call(
+                "convert_boundary_to_tableau",
+                _compute,
+                boundary=len(ssd.boundary_qubits or []),
+            )
 
         def dd_to_tableau(self, *args, **kwargs):
             return None
 
         def convert_boundary_to_dd(self, ssd: SSD):
-            return (len(ssd.boundary_qubits or []), 0)
+            return self._profile_call(
+                "convert_boundary_to_dd",
+                lambda: (len(ssd.boundary_qubits or []), 0),
+                boundary=len(ssd.boundary_qubits or []),
+            )
 
         def clone_dd_edge(self, num_qubits: int, edge: object, package: object):
             """Fallback clone helper using dense vectors when the extension is missing."""
