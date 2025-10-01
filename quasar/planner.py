@@ -16,6 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, It
 from .cost import Backend, Cost, CostEstimator
 from quasar_convert import ConversionEngine
 from .partitioner import CLIFFORD_GATES, CLIFFORD_PLUS_T_GATES, Partitioner
+from .sparsity import BRANCHING_GATES, is_controlled
 from .ssd import ConversionLayer, SSD
 from . import config
 from .analyzer import AnalysisResult
@@ -1268,9 +1269,33 @@ class Planner:
         running.clear()
         for idx in range(n - 1, -1, -1):
             running |= set(gates[idx].qubits)
-            future_qubits[idx] = running.copy()
+        future_qubits[idx] = running.copy()
 
         boundaries = [prefix_qubits[i] & future_qubits[i] for i in range(n + 1)]
+
+        prefix_nnz: List[int] = [1] * (n + 1)
+        running_nnz = 1
+        for idx, gate in enumerate(gates, start=1):
+            base_gate = gate.gate.upper().lstrip("C")
+            if base_gate in BRANCHING_GATES:
+                if is_controlled(gate):
+                    running_nnz += 1
+                else:
+                    running_nnz *= 2
+            dim = 1 << len(prefix_qubits[idx])
+            if running_nnz > dim:
+                running_nnz = dim
+            prefix_nnz[idx] = max(1, running_nnz)
+
+        def _compressed_terms(index: int, boundary_size: int) -> int:
+            if boundary_size == 0:
+                return 1
+            dense_terms = 1 << boundary_size
+            approx = min(dense_terms, prefix_nnz[index])
+            if approx >= dense_terms and boundary_size <= 12:
+                slack = max(1, dense_terms // (4 * max(1, boundary_size)))
+                approx = max(dense_terms - slack, 1)
+            return max(1, approx)
 
         # Prefix aggregates used when evaluating candidate segments.  These
         # values allow the DP loops to avoid repeatedly slicing ``gates`` just
@@ -1486,7 +1511,8 @@ class Planner:
                         if prev_backend is not None and prev_backend != backend:
                             boundary = boundaries[j]
                             if boundary:
-                                rank = 2 ** len(boundary)
+                                compressed = _compressed_terms(j, len(boundary))
+                                rank = compressed
                                 frontier = len(boundary)
                                 conv_est = self.estimator.conversion(
                                     prev_backend,
@@ -1494,6 +1520,7 @@ class Planner:
                                     num_qubits=len(boundary),
                                     rank=rank,
                                     frontier=frontier,
+                                    compressed_terms=compressed,
                                 )
                                 est_time = conv_est.cost.time
                                 est_mem = conv_est.cost.memory
@@ -1634,6 +1661,30 @@ class Planner:
             running |= set(gates[idx].qubits)
             future_qubits[idx] = running.copy()
 
+        prefix_nnz: List[int] = [1] * (n + 1)
+        running_nnz = 1
+        for idx, gate in enumerate(gates, start=1):
+            base_gate = gate.gate.upper().lstrip("C")
+            if base_gate in BRANCHING_GATES:
+                if is_controlled(gate):
+                    running_nnz += 1
+                else:
+                    running_nnz *= 2
+            dim = 1 << len(prefix_qubits[idx])
+            if running_nnz > dim:
+                running_nnz = dim
+            prefix_nnz[idx] = max(1, running_nnz)
+
+        def compressed_for_cut(index: int, boundary_size: int) -> int:
+            if boundary_size == 0:
+                return 1
+            dense_terms = 1 << boundary_size
+            approx = min(dense_terms, prefix_nnz[index])
+            if approx >= dense_terms and boundary_size <= 12:
+                slack = max(1, dense_terms // (4 * max(1, boundary_size)))
+                approx = max(dense_terms - slack, 1)
+            return max(1, approx)
+
         layers: List[ConversionLayer] = []
         for prev, step in zip(steps, steps[1:]):
             if prev.backend == step.backend:
@@ -1642,7 +1693,8 @@ class Planner:
             boundary = sorted(prefix_qubits[cut] & future_qubits[cut])
             if not boundary:
                 continue
-            rank = 2 ** len(boundary)
+            compressed = compressed_for_cut(cut, len(boundary))
+            rank = compressed
             frontier = len(boundary)
             conv_est = self.estimator.conversion(
                 prev.backend,
@@ -1650,6 +1702,7 @@ class Planner:
                 num_qubits=len(boundary),
                 rank=rank,
                 frontier=frontier,
+                compressed_terms=compressed,
             )
             layers.append(
                 ConversionLayer(

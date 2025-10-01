@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <tuple>
 
 #ifdef QUASAR_USE_STIM
 #include <stim.h>
@@ -71,10 +72,19 @@ struct ConversionResult {
     double fidelity;       // crude fidelity estimate
 };
 
+struct CompressionStats {
+    std::size_t original_terms = 0;
+    std::size_t retained_terms = 0;
+    double fidelity = 1.0;
+};
+
 class ConversionEngine {
   public:
     ConversionEngine();
     std::size_t st_chi_cap = 16;
+    double truncation_tolerance = 0.0;
+    std::size_t truncation_max_terms = 0;
+    bool truncation_normalise = true;
 
     std::pair<double, double> estimate_cost(std::size_t fragment_size, Backend backend) const;
 
@@ -194,6 +204,8 @@ class ConversionEngine {
 #endif
 
     std::size_t dense_statevector_queries() const { return dense_statevector_calls; }
+    CompressionStats last_compression_stats() const { return compression_stats_; }
+    std::size_t compressed_cardinality() const;
 
   private:
 #ifdef QUASAR_USE_MQT
@@ -201,10 +213,13 @@ class ConversionEngine {
 #endif
 
     mutable std::size_t dense_statevector_calls = 0;
+    mutable CompressionStats compression_stats_{};
 
     std::vector<std::vector<std::complex<double>>>
     statevector_to_mps(const std::vector<std::complex<double>>& state,
                        std::size_t chi) const;
+
+    CompressionStats apply_truncation(std::vector<std::complex<double>>& state) const;
 };
 
 } // namespace quasar

@@ -16,6 +16,7 @@ try:  # pragma: no cover - exercised when the extension is available
         Backend,
         Primitive,
         ConversionResult,
+        CompressionStats,
         StnTensor,
         MPS,
         StimTableau,
@@ -25,17 +26,62 @@ try:  # pragma: no cover - exercised when the extension is available
     class ConversionEngine:
         """Thin Python wrapper around the C++ implementation with caching."""
 
-        def __init__(self, cache_limit: int | None = None, st_chi_cap: int = 16) -> None:
+        def __init__(
+            self,
+            cache_limit: int | None = None,
+            st_chi_cap: int = 16,
+            *,
+            truncation_tolerance: float = 0.0,
+            truncation_max_terms: int | None = None,
+            truncation_normalise: bool = True,
+        ) -> None:
             self._cache_limit = cache_limit
             self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._boundary_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._bridge_cache: OrderedDict[tuple, list] = OrderedDict()
             self.st_chi_cap = st_chi_cap
+            self.truncation_tolerance = truncation_tolerance
+            self.truncation_max_terms = truncation_max_terms
+            self.truncation_normalise = truncation_normalise
 
         def _ensure_impl(self) -> None:
             if "_impl" not in self.__dict__:
                 self.__dict__["_impl"] = _CEngine()
                 self._impl.st_chi_cap = self.st_chi_cap
+                self._impl.truncation_tolerance = float(self.truncation_tolerance)
+                max_terms = self.truncation_max_terms
+                self._impl.truncation_max_terms = int(max_terms) if max_terms else 0
+                self._impl.truncation_normalise = bool(self.truncation_normalise)
+
+        @property
+        def truncation_tolerance(self) -> float:
+            return self.__dict__.get("_truncation_tolerance", 0.0)
+
+        @truncation_tolerance.setter
+        def truncation_tolerance(self, value: float) -> None:
+            self.__dict__["_truncation_tolerance"] = value
+            if "_impl" in self.__dict__:
+                self._impl.truncation_tolerance = float(value)
+
+        @property
+        def truncation_max_terms(self) -> int | None:
+            return self.__dict__.get("_truncation_max_terms")
+
+        @truncation_max_terms.setter
+        def truncation_max_terms(self, value: int | None) -> None:
+            self.__dict__["_truncation_max_terms"] = value
+            if "_impl" in self.__dict__:
+                self._impl.truncation_max_terms = int(value) if value else 0
+
+        @property
+        def truncation_normalise(self) -> bool:
+            return bool(self.__dict__.get("_truncation_normalise", True))
+
+        @truncation_normalise.setter
+        def truncation_normalise(self, value: bool) -> None:
+            self.__dict__["_truncation_normalise"] = bool(value)
+            if "_impl" in self.__dict__:
+                self._impl.truncation_normalise = bool(value)
 
         # Cache helpers -------------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -101,6 +147,18 @@ try:  # pragma: no cover - exercised when the extension is available
         def convert_boundary_to_statevector(self, *args, **kwargs):  # type: ignore[override]
             self._ensure_impl()
             return self._impl.convert_boundary_to_statevector(*args, **kwargs)
+
+        if hasattr(_CEngine, "last_compression_stats"):
+
+            def last_compression_stats(self) -> CompressionStats:  # type: ignore[override]
+                self._ensure_impl()
+                return self._impl.last_compression_stats()
+
+        if hasattr(_CEngine, "compressed_cardinality"):
+
+            def compressed_cardinality(self) -> int:  # type: ignore[override]
+                self._ensure_impl()
+                return int(self._impl.compressed_cardinality())
 
         if hasattr(_CEngine, "convert_boundary_to_stn"):
 
@@ -179,6 +237,7 @@ try:  # pragma: no cover - exercised when the extension is available
         "Backend",
         "Primitive",
         "ConversionResult",
+        "CompressionStats",
         "StnTensor",
         "MPS",
         "StimTableau",
@@ -213,6 +272,12 @@ except Exception:  # pragma: no cover - exercised when extension missing
         fidelity: float
 
     @dataclass
+    class CompressionStats:
+        original_terms: int = 0
+        retained_terms: int = 0
+        fidelity: float = 1.0
+
+    @dataclass
     class StnTensor:
         amplitudes: List[complex]
         tableau: object | None = None
@@ -223,12 +288,70 @@ except Exception:  # pragma: no cover - exercised when extension missing
         bond_dims: List[int] | None = None
 
     class ConversionEngine:
-        def __init__(self, cache_limit: int | None = None, st_chi_cap: int = 16) -> None:
+        def __init__(
+            self,
+            cache_limit: int | None = None,
+            st_chi_cap: int = 16,
+            *,
+            truncation_tolerance: float = 0.0,
+            truncation_max_terms: int | None = None,
+            truncation_normalise: bool = True,
+        ) -> None:
             self._cache_limit = cache_limit
             self._ssd_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._boundary_cache: OrderedDict[tuple, SSD] = OrderedDict()
             self._bridge_cache: OrderedDict[tuple, list] = OrderedDict()
             self.st_chi_cap = st_chi_cap
+            self.truncation_tolerance = truncation_tolerance
+            self.truncation_max_terms = truncation_max_terms
+            self.truncation_normalise = truncation_normalise
+            self._compression_stats = CompressionStats()
+
+        def _apply_truncation(self, state: List[complex]) -> List[complex]:
+            stats = CompressionStats(original_terms=len(state), retained_terms=len(state), fidelity=1.0)
+            if not state:
+                self._compression_stats = stats
+                return state
+            tol = float(self.truncation_tolerance or 0.0)
+            max_terms = int(self.truncation_max_terms) if self.truncation_max_terms else 0
+            if tol <= 0.0 and max_terms == 0:
+                self._compression_stats = stats
+                return state
+            magnitudes = [abs(val) ** 2 for val in state]
+            total_norm = sum(magnitudes)
+            if total_norm <= 0.0:
+                stats.retained_terms = 0
+                stats.fidelity = 1.0
+                self._compression_stats = stats
+                return [0j] * len(state)
+            threshold_sq = tol * tol if tol > 0.0 else 0.0
+            keep = [idx for idx, mag in enumerate(magnitudes) if threshold_sq == 0.0 or mag >= threshold_sq]
+            if not keep:
+                keep = [max(range(len(magnitudes)), key=magnitudes.__getitem__)]
+            if max_terms and len(keep) > max_terms:
+                keep = sorted(keep, key=lambda idx: magnitudes[idx], reverse=True)[:max_terms]
+                keep.sort()
+            retained_norm = sum(magnitudes[idx] for idx in keep)
+            if retained_norm <= 0.0:
+                stats.retained_terms = 0
+                stats.fidelity = 1.0
+                self._compression_stats = stats
+                return [0j] * len(state)
+            result = [0j] * len(state)
+            scale = (total_norm / retained_norm) ** 0.5 if self.truncation_normalise and retained_norm > 0.0 else 1.0
+            for idx in keep:
+                result[idx] = state[idx] * scale
+            stats.retained_terms = len(keep)
+            stats.fidelity = min(1.0, retained_norm / total_norm if total_norm else 1.0)
+            self._compression_stats = stats
+            return result
+
+        def last_compression_stats(self) -> CompressionStats:
+            return self._compression_stats
+
+        def compressed_cardinality(self) -> int:
+            stats = self._compression_stats
+            return stats.retained_terms or stats.original_terms
 
         # Cache utilities -----------------------------------------------
         def _trim_cache(self, cache: OrderedDict) -> None:
@@ -345,7 +468,8 @@ except Exception:  # pragma: no cover - exercised when extension missing
                 current = next_state
                 left_dim *= 2
             final = bonds[n]
-            return [current[i * final] for i in range(left_dim)]
+            state = [current[i * final] for i in range(left_dim)]
+            return self._apply_truncation(state)
 
         # Optional helpers ---------------------------------------------
         def extract_local_window(self, state: List[complex], window_qubits: List[int]) -> List[complex]:
@@ -358,7 +482,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
                     if (local >> i) & 1:
                         global_index |= 1 << q
                 window[local] = state[global_index]
-            return window
+            return self._apply_truncation(window)
 
         def convert(
             self,
@@ -419,7 +543,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
                         if idx >> bit & 1:
                             amp *= phases[bit]
                     state[idx] = amp * norm
-            return state
+            return self._apply_truncation(state)
 
         def convert_boundary_to_stn(self, ssd: SSD) -> StnTensor:
             state = self.convert_boundary_to_statevector(ssd)
@@ -490,6 +614,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
         "Backend",
         "Primitive",
         "ConversionResult",
+        "CompressionStats",
         "StnTensor",
         "MPS",
         "ConversionEngine",
