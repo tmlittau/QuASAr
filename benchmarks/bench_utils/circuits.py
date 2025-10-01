@@ -979,6 +979,52 @@ def _random_layer(
     return layer
 
 
+def _build_diag_layers(
+    num_qubits: int,
+    blocks: Sequence[Sequence[int]] | None,
+    layers: int,
+    rng: Random,
+) -> Tuple[List[Gate], List[int], List[bool]]:
+    """Return diagonal layers composed of repeated-angle ``CRZ``/``CCZ`` gates."""
+
+    if layers <= 0 or num_qubits <= 0:
+        return [], [], []
+
+    if blocks is None:
+        block_layout: List[Tuple[int, ...]] = [tuple(range(num_qubits))]
+    else:
+        block_layout = [tuple(block) for block in blocks if block]
+        if not block_layout:
+            block_layout = [tuple(range(num_qubits))]
+
+    gates: List[Gate] = []
+    offsets: List[int] = []
+    non_clifford_layers: List[bool] = []
+
+    for _ in range(layers):
+        offsets.append(len(gates))
+        phi = rng.uniform(0.05, 1.4)
+        for block in block_layout:
+            if len(block) >= 2:
+                for control, target in zip(block[:-1], block[1:]):
+                    gates.append(Gate("CRZ", [control, target], {"phi": phi}))
+            if len(block) >= 3:
+                for a, b, c in zip(block[:-2], block[1:-1], block[2:]):
+                    gates.append(Gate("CCZ", [a, b, c]))
+        if len(block_layout) > 1:
+            for left, right in zip(block_layout[:-1], block_layout[1:]):
+                if not left or not right:
+                    continue
+                gates.append(Gate("CRZ", [left[-1], right[0]], {"phi": phi}))
+                if len(left) >= 2:
+                    gates.append(Gate("CCZ", [left[-2], left[-1], right[0]]))
+                if len(right) >= 2:
+                    gates.append(Gate("CCZ", [left[-1], right[0], right[1]]))
+        non_clifford_layers.append(True)
+
+    return gates, offsets, non_clifford_layers
+
+
 def _build_layers_from_flags(
     num_qubits: int,
     include_non_clifford: Sequence[bool],
@@ -1130,6 +1176,57 @@ def clustered_entanglement_circuit(
                     "depth": stage_depth,
                     "layers": stage_depth,
                     "non_clifford_layers": sum(non_flags),
+                }
+            )
+        elif stage == "diag":
+            if random_index >= len(random_depths):
+                stage_depth = random_depths[-1]
+            else:
+                stage_depth = random_depths[random_index]
+            random_index += 1
+            stage_gates, offsets, non_flags = _build_diag_layers(
+                num_qubits, blocks, stage_depth, rng
+            )
+            adjusted_offsets = [stage_start + offset for offset in offsets]
+            layer_offsets.extend(adjusted_offsets)
+            summary.update(
+                {
+                    "depth": stage_depth,
+                    "layers": stage_depth,
+                    "non_clifford_layers": sum(non_flags),
+                    "offsets": adjusted_offsets,
+                }
+            )
+        elif stage == "xblock_random":
+            if random_index >= len(random_depths):
+                stage_depth = random_depths[-1]
+            else:
+                stage_depth = random_depths[random_index]
+            random_index += 1
+            include_flags = [True] * stage_depth
+            stage_gates, offsets, non_flags = _build_layers_from_flags(
+                num_qubits,
+                include_flags,
+                rng,
+                blocks=None,
+            )
+            adjusted_offsets = [stage_start + offset for offset in offsets]
+            layer_offsets.extend(adjusted_offsets)
+            summary.update(
+                {
+                    "depth": stage_depth,
+                    "layers": stage_depth,
+                    "non_clifford_layers": sum(non_flags),
+                    "offsets": adjusted_offsets,
+                }
+            )
+        elif stage == "global_qft":
+            stage_gates = _qft_spec(num_qubits)
+            summary.update(
+                {
+                    "layers": max(0, num_qubits),
+                    "non_clifford_layers": max(0, num_qubits - 2),
+                    "offsets": [],
                 }
             )
         elif stage == "qft":
