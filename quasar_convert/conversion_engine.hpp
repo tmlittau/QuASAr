@@ -70,6 +70,7 @@ struct ConversionResult {
     Primitive primitive;   // primitive that was chosen
     double cost;           // estimated time cost
     double fidelity;       // crude fidelity estimate
+    std::optional<std::size_t> window;  // requested dense window for LW
 };
 
 struct CompressionStats {

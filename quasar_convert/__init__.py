@@ -270,6 +270,7 @@ except Exception:  # pragma: no cover - exercised when extension missing
         primitive: Primitive
         cost: float
         fidelity: float
+        window: int | None = None
 
     @dataclass
     class CompressionStats:
@@ -529,7 +530,13 @@ except Exception:  # pragma: no cover - exercised when extension missing
             if fidelity > 1.0:
                 fidelity = 1.0
 
-            return ConversionResult(primitive=primitive, cost=cost, fidelity=float(fidelity))
+            result_window = window_size if primitive == Primitive.LW else None
+            return ConversionResult(
+                primitive=primitive,
+                cost=cost,
+                fidelity=float(fidelity),
+                window=result_window,
+            )
 
         def convert_boundary_to_statevector(self, ssd: SSD) -> List[complex]:
             dim = 1 << len(ssd.boundary_qubits or [])

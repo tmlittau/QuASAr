@@ -59,7 +59,8 @@ PYBIND11_MODULE(_conversion_engine, m) {
     py::class_<quasar::ConversionResult>(m, "ConversionResult")
         .def_readonly("primitive", &quasar::ConversionResult::primitive)
         .def_readonly("cost", &quasar::ConversionResult::cost)
-        .def_readonly("fidelity", &quasar::ConversionResult::fidelity);
+        .def_readonly("fidelity", &quasar::ConversionResult::fidelity)
+        .def_readonly("window", &quasar::ConversionResult::window);
 
     py::class_<quasar::CompressionStats>(m, "CompressionStats")
         .def_readonly("original_terms", &quasar::CompressionStats::original_terms)

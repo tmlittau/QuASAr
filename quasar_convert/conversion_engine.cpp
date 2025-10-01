@@ -317,6 +317,7 @@ ConversionResult ConversionEngine::convert(const SSD& ssd,
     Primitive chosen;
     double cost;
     double fidelity;
+    std::optional<std::size_t> result_window;
     if (rank <= 4 && boundary <= 6) {
         chosen = Primitive::B2B;
         cost = cost_b2b;
@@ -327,6 +328,7 @@ ConversionResult ConversionEngine::convert(const SSD& ssd,
         chosen = Primitive::LW;
         cost = cost_lw;
         fidelity = 1.0;  // dense extraction is exact
+        result_window = window;
     } else if (rank <= 16) {
         chosen = Primitive::ST;
         cost = cost_st;
@@ -342,7 +344,12 @@ ConversionResult ConversionEngine::convert(const SSD& ssd,
         fidelity = 1.0;
     }
 
-    return {chosen, cost, fidelity};
+    ConversionResult result;
+    result.primitive = chosen;
+    result.cost = cost;
+    result.fidelity = fidelity;
+    result.window = result_window;
+    return result;
 }
 
 std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevector(const SSD& ssd) const {
