@@ -1,14 +1,19 @@
 from __future__ import annotations
 import math
 
+import pytest
+
 from docs.utils.partitioning_analysis import (
     BoundarySpec,
     FragmentStats,
     aggregate_partitioned_plan,
     aggregate_single_backend_plan,
     evaluate_fragment_backends,
+    replay_backend_selection,
 )
 from quasar.cost import Backend, CostEstimator
+from quasar.circuit import Circuit, Gate
+from quasar.planner import Planner
 
 
 def test_evaluate_fragment_backends_tableau_preferred():
@@ -91,3 +96,34 @@ def test_aggregate_partitioned_plan_includes_conversions():
     assert plan["total_cost"].time >= sum(cost.time for _, cost in fragments)
     assert plan["total_cost"].conversion >= conversion_cost.time
     assert plan["total_cost"].memory >= max(cost.memory for _, cost in fragments)
+
+
+def test_replay_backend_selection_matches_planner():
+    estimator = CostEstimator()
+    planner = Planner(
+        estimator=estimator,
+        quick_max_qubits=32,
+        quick_max_gates=128,
+        quick_max_depth=128,
+    )
+    circuit = Circuit(
+        [
+            Gate("H", [0]),
+            Gate("CX", [0, 1]),
+            Gate("T", [1]),
+            Gate("CX", [1, 2]),
+            Gate("S", [2]),
+        ],
+        use_classical_simplification=False,
+    )
+    plan = planner.plan(circuit, explain=True)
+    metrics = dict(plan.diagnostics.backend_selection["single"]["metrics"])
+    metrics["fragments"] = [dict(entry) for entry in metrics["fragments"]]
+
+    backend, diag = replay_backend_selection(metrics, estimator=estimator)
+
+    assert backend == plan.final_backend
+    assert diag["selected_backend"] == backend
+    assert pytest.approx(diag["metrics"]["decision_diagram_metric"]) == pytest.approx(
+        metrics["decision_diagram_metric"]
+    )

@@ -21,6 +21,8 @@ from matplotlib.figure import Figure
 from quasar import config
 from quasar.calibration import apply_calibration, load_coefficients
 from quasar.cost import Backend, Cost, CostEstimator, ConversionEstimate
+from quasar.method_selector import NoFeasibleBackendError, _soft_penalty
+from quasar.sparsity import adaptive_dd_sparsity_threshold
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -120,6 +122,22 @@ class FragmentStats:
         """Return the total number of operations in the fragment."""
 
         return self.num_1q_gates + self.num_2q_gates + self.num_measurements
+
+    @classmethod
+    def from_export(cls, metrics: Mapping[str, object]) -> "FragmentStats":
+        """Construct :class:`FragmentStats` from exported selector metrics."""
+
+        frontier = metrics.get("frontier")
+        return cls(
+            num_qubits=int(metrics.get("num_qubits", 0)),
+            num_1q_gates=int(metrics.get("num_1q", metrics.get("num_1q_gates", 0))),
+            num_2q_gates=int(metrics.get("num_2q", metrics.get("num_2q_gates", 0))),
+            num_measurements=int(metrics.get("num_meas", metrics.get("num_measurements", 0))),
+            is_clifford=bool(metrics.get("is_clifford", metrics.get("clifford", False))),
+            is_local=bool(metrics.get("local", False)),
+            frontier=int(frontier) if frontier is not None else None,
+            chi=metrics.get("chi"),
+        )
 
 
 @dataclass(slots=True)
@@ -730,6 +748,158 @@ def _update_peak_memory(current: float, candidates: Iterable[float]) -> float:
     return current
 
 
+def _prepare_selector_metrics(
+    stats: FragmentStats,
+    *,
+    sparsity: float | None,
+    phase_rotation_diversity: int | None,
+    amplitude_rotation_diversity: int | None,
+    selector_metrics: Mapping[str, object] | None,
+) -> tuple[dict[str, object], int]:
+    """Combine heuristic inputs with exported selector metrics."""
+
+    total_gates = stats.total_gates
+    base_metrics: dict[str, object] = {}
+    if selector_metrics:
+        for key, value in selector_metrics.items():
+            if key == "fragments":
+                continue
+            base_metrics[key] = value
+    fragments: list[dict[str, object]]
+    if selector_metrics and selector_metrics.get("fragments"):
+        fragments = [dict(entry) for entry in selector_metrics["fragments"]]  # type: ignore[index]
+    else:
+        rotation_total = (phase_rotation_diversity or 0) + (amplitude_rotation_diversity or 0)
+        rotation_density = rotation_total / max(total_gates, 1) if total_gates else 0.0
+        max_distance = 1 if stats.is_local or stats.num_2q_gates == 0 else max(stats.num_qubits - 1, 1)
+        fragments = [
+            {
+                "qubits": list(range(stats.num_qubits)),
+                "num_qubits": stats.num_qubits,
+                "num_gates": total_gates,
+                "num_meas": stats.num_measurements,
+                "num_1q": stats.num_1q_gates,
+                "num_2q": stats.num_2q_gates,
+                "num_t": 0,
+                "sparsity": sparsity if sparsity is not None else 0.0,
+                "phase_rotation_diversity": phase_rotation_diversity or 0,
+                "amplitude_rotation_diversity": amplitude_rotation_diversity or 0,
+                "rotation_density": rotation_density,
+                "entanglement_entropy": 0.0,
+                "long_range_fraction": 0.0 if stats.is_local else 1.0,
+                "long_range_extent": 0.0 if stats.is_local else 1.0,
+                "max_interaction_distance": max_distance,
+                "local": stats.is_local,
+                "scope": "fragment",
+            }
+        ]
+    base_metrics["fragments"] = fragments
+
+    def _get_float(name: str, fallback: float) -> float:
+        value = base_metrics.get(name, fallback)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _get_int(name: str, fallback: int) -> int:
+        value = base_metrics.get(name, fallback)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    num_qubits = _get_int("num_qubits", stats.num_qubits)
+    num_gates = _get_int("num_gates", total_gates)
+    base_metrics["num_qubits"] = num_qubits
+    base_metrics["num_gates"] = num_gates
+    base_metrics.setdefault("num_meas", stats.num_measurements)
+    base_metrics.setdefault("num_1q", stats.num_1q_gates)
+    base_metrics.setdefault("num_2q", stats.num_2q_gates)
+    base_metrics.setdefault("local", stats.is_local)
+
+    frag = fragments[0] if fragments else {}
+    sparse = sparsity if sparsity is not None else frag.get("sparsity")
+    base_metrics["sparsity"] = _get_float("sparsity", float(sparse) if sparse is not None else 0.0)
+    phase = phase_rotation_diversity if phase_rotation_diversity is not None else frag.get("phase_rotation_diversity")
+    base_metrics["phase_rotation_diversity"] = _get_float(
+        "phase_rotation_diversity",
+        float(phase) if phase is not None else 0.0,
+    )
+    amp = (
+        amplitude_rotation_diversity
+        if amplitude_rotation_diversity is not None
+        else frag.get("amplitude_rotation_diversity")
+    )
+    base_metrics["amplitude_rotation_diversity"] = _get_float(
+        "amplitude_rotation_diversity",
+        float(amp) if amp is not None else 0.0,
+    )
+
+    rotation_total = (
+        base_metrics["phase_rotation_diversity"] + base_metrics["amplitude_rotation_diversity"]
+    )
+    rotation_density = rotation_total / max(num_gates, 1) if num_gates else frag.get("rotation_density", 0.0)
+    base_metrics["rotation_density"] = _get_float("rotation_density", float(rotation_density))
+
+    ent = base_metrics.get("entanglement_entropy")
+    if ent is None:
+        depth_est = max(1, math.ceil(num_gates / max(num_qubits, 1))) if num_qubits else 0
+        ent = min(
+            num_qubits,
+            (base_metrics["num_2q"] / max(num_qubits, 1)) * math.log2(num_qubits + 1) * math.log2(depth_est + 1),
+        )
+    base_metrics["entanglement_entropy"] = float(ent)
+
+    sparse_value = float(base_metrics["sparsity"])
+    nnz = base_metrics.get("nnz")
+    if nnz is None:
+        nnz = max(1, int(round((1 - sparse_value) * (2**num_qubits))))
+    base_metrics["nnz"] = int(nnz)
+
+    base_metrics.setdefault("mps_long_range_fraction", frag.get("long_range_fraction", 0.0 if stats.is_local else 1.0))
+    base_metrics.setdefault("mps_long_range_extent", frag.get("long_range_extent", 0.0 if stats.is_local else 1.0))
+    base_metrics.setdefault(
+        "mps_max_interaction_distance",
+        frag.get(
+            "max_interaction_distance",
+            1 if stats.is_local or stats.num_2q_gates == 0 else max(stats.num_qubits - 1, 1),
+        ),
+    )
+
+    hybrid_frontier = base_metrics.get("dd_hybrid_frontier")
+    if hybrid_frontier is None:
+        nnz_val = max(1, int(base_metrics["nnz"]))
+        if num_qubits > 0 and nnz_val > 0:
+            hybrid_frontier = min(num_qubits, int(math.ceil(math.log2(nnz_val))))
+        else:
+            hybrid_frontier = 0
+        if num_gates and hybrid_frontier == 0:
+            hybrid_frontier = 1
+    base_metrics["dd_hybrid_frontier"] = int(hybrid_frontier)
+
+    hybrid_penalty = base_metrics.get("dd_hybrid_penalty")
+    if hybrid_penalty is None:
+        hybrid_penalty = max(0, num_qubits - int(hybrid_frontier))
+    base_metrics["dd_hybrid_penalty"] = int(hybrid_penalty)
+
+    if "dd_hybrid_replay" in base_metrics:
+        base_metrics["dd_hybrid_replay"] = int(base_metrics["dd_hybrid_replay"])
+    else:
+        replay = 0
+        if num_qubits > 0 and num_gates > 0 and hybrid_penalty > 0:
+            replay = int(round(num_gates * hybrid_penalty / max(num_qubits, 1)))
+        base_metrics["dd_hybrid_replay"] = replay
+
+    if "dd_size_override" not in base_metrics:
+        base_metrics["dd_size_override"] = False
+    if "effective_dd_sparsity" not in base_metrics:
+        base_metrics["effective_dd_sparsity"] = sparse_value
+
+    largest_subsystem = max((int(entry.get("num_qubits", 0)) for entry in fragments), default=0)
+    return base_metrics, largest_subsystem
+
+
 def evaluate_fragment_backends(
     stats: FragmentStats,
     *,
@@ -743,23 +913,24 @@ def evaluate_fragment_backends(
     estimator: CostEstimator | None = None,
     selection_metric: str | Callable[[Backend, Cost], float] = "weighted",
     metric_weights: tuple[float, float] = (0.5, 0.5),
+    selector_metrics: Mapping[str, object] | None = None,
 ) -> tuple[Backend | None, MutableMapping[str, object]]:
-    """Evaluate backend feasibility for a synthetic fragment.
+    """Evaluate backend feasibility for a synthetic fragment or replay diagnostics.
 
     Parameters
     ----------
     stats:
         Summary describing the fragment under consideration.
     sparsity, phase_rotation_diversity, amplitude_rotation_diversity:
-        Circuit-level metrics used by the decision diagram heuristic.
+        Circuit-level metrics used by the decision diagram heuristic. When
+        ``selector_metrics`` is supplied these values serve as fallbacks for
+        missing entries in the exported metrics.
     allow_tableau:
         Permit stabiliser simulation when the fragment is Clifford only.
     max_memory, max_time:
         Optional resource limits applied to each backend estimate.
     target_accuracy:
-        Desired lower bound on simulation fidelity.  When supplied together
-        with ``stats.chi`` the value is surfaced in the diagnostics to mirror
-        :class:`~quasar.method_selector.MethodSelector`.
+        Desired lower bound on simulation fidelity.
     estimator:
         Optional estimator instance.  A new :class:`CostEstimator` is created
         when omitted.
@@ -770,6 +941,10 @@ def evaluate_fragment_backends(
         may be supplied for custom scoring.
     metric_weights:
         Pair of ``(time_weight, memory_weight)`` used by the weighted metric.
+    selector_metrics:
+        Optional mapping mirroring ``MethodSelector``'s diagnostics.  When
+        provided the function replays the planner's decision using the recorded
+        metrics instead of recomputing approximations.
 
     Returns
     -------
@@ -781,43 +956,40 @@ def evaluate_fragment_backends(
 
     estimator = estimator or CostEstimator()
 
-    total_gates = stats.total_gates
-    num_qubits = stats.num_qubits
-    two_qubit_ratio = stats.num_2q_gates / total_gates if total_gates else 0.0
-    rotation_density = (
-        (phase_rotation_diversity or 0) + (amplitude_rotation_diversity or 0)
-    ) / max(total_gates, 1)
-    depth_est = max(1, math.ceil(total_gates / num_qubits)) if num_qubits else 0
-    entanglement = min(
-        num_qubits,
-        (stats.num_2q_gates / max(num_qubits, 1))
-        * math.log2(num_qubits + 1)
-        * math.log2(depth_est + 1),
+    metrics, largest_subsystem = _prepare_selector_metrics(
+        stats,
+        sparsity=sparsity,
+        phase_rotation_diversity=phase_rotation_diversity,
+        amplitude_rotation_diversity=amplitude_rotation_diversity,
+        selector_metrics=selector_metrics,
     )
+    diag: MutableMapping[str, object] = {"metrics": metrics, "backends": {}}
 
-    diag: MutableMapping[str, object] = {
-        "metrics": {
-            "num_qubits": num_qubits,
-            "num_gates": total_gates,
-            "sparsity": sparsity if sparsity is not None else 0.0,
-            "phase_rotation_diversity": phase_rotation_diversity or 0,
-            "amplitude_rotation_diversity": amplitude_rotation_diversity or 0,
-            "local": stats.is_local,
-            "two_qubit_ratio": two_qubit_ratio,
-            "rotation_density": rotation_density,
-            "depth_estimate": depth_est,
-            "entanglement_entropy": entanglement,
-        },
-        "backends": {},
-    }
+    fragments = metrics.get("fragments", [])
+    total_gates = int(metrics.get("num_gates", stats.total_gates))
+    num_qubits = int(metrics.get("num_qubits", stats.num_qubits))
+    num_2q = int(metrics.get("num_2q", stats.num_2q_gates))
+    two_qubit_ratio = num_2q / total_gates if total_gates else 0.0
+    rotation_density = float(metrics.get("rotation_density", 0.0))
+    entanglement = float(metrics.get("entanglement_entropy", 0.0))
+    sparse = min(max(float(metrics.get("sparsity", 0.0)), 0.0), 1.0)
+    phase_rot = float(metrics.get("phase_rotation_diversity", 0.0))
+    amp_rot = float(metrics.get("amplitude_rotation_diversity", 0.0))
+    nnz = max(1, int(metrics.get("nnz", 1)))
+    long_range_fraction = float(metrics.get("mps_long_range_fraction", 0.0))
+    long_range_extent = float(metrics.get("mps_long_range_extent", 0.0))
+    max_interaction_distance = int(metrics.get("mps_max_interaction_distance", 0))
+    local = bool(metrics.get("local", stats.is_local))
+    frontier = stats.frontier or num_qubits
+    total_multi = int(fragments[0].get("multi_qubit_gates", num_2q)) if fragments else num_2q
+
+    metrics["two_qubit_ratio"] = two_qubit_ratio
 
     candidates: dict[Backend, Cost] = {}
-    frontier = stats.frontier or stats.num_qubits
 
-    # ------------------------------------------------------------------
-    # Tableau backend
-    # ------------------------------------------------------------------
+    # Tableau backend ---------------------------------------------------
     if allow_tableau and stats.is_clifford and total_gates:
+        depth_est = max(1, math.ceil(total_gates / max(num_qubits, 1))) if num_qubits else 0
         table_cost = estimator.tableau(
             num_qubits,
             total_gates,
@@ -853,61 +1025,87 @@ def evaluate_fragment_backends(
             "reasons": [reason],
         }
 
-    # ------------------------------------------------------------------
-    # Decision diagram backend
-    # ------------------------------------------------------------------
-    sparse = sparsity if sparsity is not None else 0.0
-    phase_rot = phase_rotation_diversity or 0
-    amp_rot = amplitude_rotation_diversity or 0
-    nnz = int((1 - sparse) * (2**num_qubits))
-    s_thresh = config.DEFAULT.dd_sparsity_threshold
-    amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparsity)
+    # Decision diagram backend -----------------------------------------
+    s_thresh = adaptive_dd_sparsity_threshold(num_qubits)
+    amp_thresh = config.adaptive_dd_amplitude_rotation_threshold(num_qubits, sparse)
+    softness = max(1.0, config.DEFAULT.dd_rotation_softness)
 
-    passes = (
-        sparse >= s_thresh
-        and nnz <= config.DEFAULT.dd_nnz_threshold
-        and phase_rot <= config.DEFAULT.dd_phase_rotation_diversity_threshold
-        and amp_rot <= amp_thresh
-    )
+    structure_override = bool(metrics.get("dd_size_override", False))
+    if not selector_metrics and not structure_override:
+        size_override = num_qubits <= 10 and nnz <= config.DEFAULT.dd_nnz_threshold
+        if (
+            size_override
+            and sparse < s_thresh
+            and amp_rot == 0
+            and phase_rot <= 2
+            and local
+        ):
+            structure_override = True
+            metrics["dd_size_override"] = True
+
+    effective_sparse = float(metrics.get("effective_dd_sparsity", sparse))
+    if structure_override and effective_sparse == sparse:
+        bonus = 1.0 + max(0, 10 - num_qubits) / 5.0
+        effective_sparse = min(1.0, max(sparse, s_thresh * bonus))
+        metrics["effective_dd_sparsity"] = effective_sparse
+
+    passes = effective_sparse >= s_thresh and nnz <= config.DEFAULT.dd_nnz_threshold
 
     dd_metric = False
     metric_value: float | None = None
     if passes:
-        s_score = sparse / s_thresh if s_thresh else 0.0
+        s_score = effective_sparse / s_thresh if s_thresh > 0 else 0.0
+        s_score = min(max(s_score, 0.0), 1.2)
         nnz_score = 1 - nnz / config.DEFAULT.dd_nnz_threshold
-        phase_score = 1 - (
-            phase_rot / config.DEFAULT.dd_phase_rotation_diversity_threshold
-            if config.DEFAULT.dd_phase_rotation_diversity_threshold
-            else 0.0
+        nnz_score = min(max(nnz_score, -1.0), 1.0)
+        phase_score = _soft_penalty(
+            phase_rot,
+            config.DEFAULT.dd_phase_rotation_diversity_threshold,
+            softness,
         )
-        amp_score = 1 - (amp_rot / amp_thresh if amp_thresh else 0.0)
+        amp_score = _soft_penalty(amp_rot, amp_thresh, softness)
         weight_sum = (
             config.DEFAULT.dd_sparsity_weight
             + config.DEFAULT.dd_nnz_weight
             + config.DEFAULT.dd_phase_rotation_weight
             + config.DEFAULT.dd_amplitude_rotation_weight
         )
-        metric_value = (
+        weighted = (
             config.DEFAULT.dd_sparsity_weight * s_score
             + config.DEFAULT.dd_nnz_weight * nnz_score
             + config.DEFAULT.dd_phase_rotation_weight * phase_score
             + config.DEFAULT.dd_amplitude_rotation_weight * amp_score
         )
-        metric_value = metric_value / weight_sum if weight_sum else 0.0
+        metric_value = weighted / weight_sum if weight_sum else 0.0
+        metrics["decision_diagram_metric"] = metric_value
+        metrics["dd_metric_threshold"] = config.DEFAULT.dd_metric_threshold
+        metrics["dd_phase_score"] = phase_score
+        metrics["dd_amplitude_score"] = amp_score
+        metrics["dd_hybrid_replay"] = int(metrics.get("dd_hybrid_replay", 0))
         dd_metric = metric_value >= config.DEFAULT.dd_metric_threshold
+        if not dd_metric:
+            diag["backends"][Backend.DECISION_DIAGRAM] = {
+                "feasible": False,
+                "reasons": ["metric below threshold"],
+                "metric": metric_value,
+                "hybrid_frontier": int(metrics["dd_hybrid_frontier"]),
+            }
     else:
-        reasons = []
-        if sparse < s_thresh:
+        reasons: list[str] = []
+        if effective_sparse < s_thresh:
             reasons.append("sparsity below threshold")
         if nnz > config.DEFAULT.dd_nnz_threshold:
             reasons.append("nnz above threshold")
-        if phase_rot > config.DEFAULT.dd_phase_rotation_diversity_threshold:
-            reasons.append("phase diversity above threshold")
-        if amp_rot > amp_thresh:
-            reasons.append("amplitude diversity above threshold")
+        phase_ratio = phase_rot / max(config.DEFAULT.dd_phase_rotation_diversity_threshold, 1)
+        amp_ratio = amp_rot / max(amp_thresh, 1)
+        if phase_ratio > 1:
+            reasons.append("phase diversity incurs penalty")
+        if amp_ratio > 1:
+            reasons.append("amplitude diversity incurs penalty")
         diag["backends"][Backend.DECISION_DIAGRAM] = {
             "feasible": False,
             "reasons": reasons,
+            "hybrid_frontier": int(metrics["dd_hybrid_frontier"]),
         }
 
     if dd_metric:
@@ -915,13 +1113,15 @@ def evaluate_fragment_backends(
             num_gates=total_gates,
             frontier=frontier,
             sparsity=sparse,
-            phase_rotation_diversity=phase_rotation_diversity,
-            amplitude_rotation_diversity=amplitude_rotation_diversity,
+            phase_rotation_diversity=phase_rot,
+            amplitude_rotation_diversity=amp_rot,
             entanglement_entropy=entanglement,
             two_qubit_ratio=two_qubit_ratio,
+            converted_frontier=int(metrics["dd_hybrid_frontier"]),
+            hybrid_replay_gates=int(metrics.get("dd_hybrid_replay", 0)),
         )
         feasible = True
-        reasons: list[str] = []
+        reasons = []
         if max_memory is not None and dd_cost.memory > max_memory:
             feasible = False
             reasons.append("memory > threshold")
@@ -934,15 +1134,15 @@ def evaluate_fragment_backends(
             "cost": dd_cost,
             "metric": metric_value,
             "dd_metric_threshold": config.DEFAULT.dd_metric_threshold,
+            "hybrid_frontier": int(metrics["dd_hybrid_frontier"]),
+            "hybrid_penalty": int(metrics["dd_hybrid_penalty"]),
         }
         diag["backends"][Backend.DECISION_DIAGRAM] = entry
         if feasible:
             candidates[Backend.DECISION_DIAGRAM] = dd_cost
 
-    # ------------------------------------------------------------------
-    # Matrix product state backend
-    # ------------------------------------------------------------------
-    if stats.is_local and num_qubits:
+    # Matrix product state backend -------------------------------------
+    if local and num_qubits and total_multi:
         chosen_chi = stats.chi
         if chosen_chi is None:
             chosen_chi = estimator.chi_max or 4
@@ -969,11 +1169,32 @@ def evaluate_fragment_backends(
             entanglement_entropy=entanglement,
             sparsity=sparse,
             rotation_diversity=rotation_density,
+            long_range_fraction=long_range_fraction,
+            long_range_extent=long_range_extent,
         )
         feasible = not infeasible_chi
         reasons: list[str] = []
+        over_fraction = long_range_fraction > config.DEFAULT.mps_long_range_fraction_threshold
+        over_extent = long_range_extent > config.DEFAULT.mps_long_range_extent_threshold
+        enforce_locality = (
+            over_fraction
+            and over_extent
+            and (
+                largest_subsystem >= config.DEFAULT.mps_locality_strict_qubits
+                or max_interaction_distance >= config.DEFAULT.mps_locality_strict_distance
+            )
+        )
+        locality_reasons: list[str] = []
+        if over_fraction:
+            locality_reasons.append("non-local interactions exceed fraction threshold")
+        if over_extent:
+            locality_reasons.append("interaction span exceeds extent threshold")
+        if enforce_locality:
+            feasible = False
+            reasons.extend(locality_reasons)
         if infeasible_chi:
             reasons.append("bond dimension exceeds memory limit")
+            feasible = False
         if max_memory is not None and mps_cost.memory > max_memory:
             feasible = False
             reasons.append("memory > threshold")
@@ -985,24 +1206,30 @@ def evaluate_fragment_backends(
             "reasons": reasons,
             "cost": mps_cost,
             "chi": chosen_chi,
+            "long_range_fraction": long_range_fraction,
+            "long_range_extent": long_range_extent,
+            "max_interaction_distance": max_interaction_distance,
         }
         if chi_limit is not None:
             entry["chi_limit"] = chi_limit
         if target_accuracy is not None:
             entry["target_accuracy"] = target_accuracy
+        if locality_reasons:
+            entry["locality_warnings"] = locality_reasons
         diag["backends"][Backend.MPS] = entry
         if feasible:
             candidates[Backend.MPS] = mps_cost
     else:
-        reason = "non-local gates" if stats.num_2q_gates else "no multi-qubit gates"
+        reason = "non-local gates" if total_multi else "no multi-qubit gates"
         diag["backends"][Backend.MPS] = {
             "feasible": False,
             "reasons": [reason],
+            "long_range_fraction": long_range_fraction,
+            "long_range_extent": long_range_extent,
+            "max_interaction_distance": max_interaction_distance,
         }
 
-    # ------------------------------------------------------------------
-    # Statevector backend
-    # ------------------------------------------------------------------
+    # Statevector backend ----------------------------------------------
     sv_cost = estimator.statevector(
         num_qubits,
         stats.num_1q_gates,
@@ -1032,57 +1259,59 @@ def evaluate_fragment_backends(
     if not candidates:
         diag["selected_backend"] = None
         diag["selected_cost"] = None
-        return None, diag
-
-    scores: dict[Backend, float] = {}
-
-    def _weighted_score(cost: Cost) -> float:
-        time_weight, mem_weight = metric_weights
-        return time_weight * cost.time + mem_weight * cost.memory
+        raise NoFeasibleBackendError(
+            "No simulation backend satisfies the given constraints"
+        )
 
     if callable(selection_metric):
-        for backend, cost in candidates.items():
-            scores[backend] = selection_metric(backend, cost)
-        selected = min(scores, key=scores.__getitem__)
+        def score_fn(backend: Backend) -> float:
+            return selection_metric(backend, candidates[backend])
+
+        selected = min(candidates, key=score_fn)
     else:
         metric_name = str(selection_metric).lower()
         if metric_name == "weighted":
-            for backend, cost in candidates.items():
-                scores[backend] = _weighted_score(cost)
-            selected = min(scores, key=scores.__getitem__)
+            time_weight, mem_weight = metric_weights
+
+            def score_fn(backend: Backend) -> float:
+                cost = candidates[backend]
+                return time_weight * cost.time + mem_weight * cost.memory
+
+            selected = min(candidates, key=score_fn)
         elif metric_name == "pareto":
             pareto_front: list[Backend] = []
             for backend, cost in candidates.items():
                 dominated = False
-                for other_backend, other_cost in candidates.items():
-                    if backend is other_backend:
+                for other, other_cost in candidates.items():
+                    if other == backend:
                         continue
-                    better_or_equal = (
+                    if (
                         other_cost.memory <= cost.memory
                         and other_cost.time <= cost.time
-                    )
-                    strictly_better = (
-                        other_cost.memory < cost.memory
-                        or other_cost.time < cost.time
-                    )
-                    if better_or_equal and strictly_better:
+                        and (other_cost.memory < cost.memory or other_cost.time < cost.time)
+                    ):
                         dominated = True
                         break
                 if not dominated:
                     pareto_front.append(backend)
             if not pareto_front:
                 pareto_front = list(candidates)
-            for backend in pareto_front:
-                scores[backend] = _weighted_score(candidates[backend])
-            selected = min(pareto_front, key=lambda b: scores[b])
+
+            time_weight, mem_weight = metric_weights
+
+            def score_fn(backend: Backend) -> float:
+                cost = candidates[backend]
+                return time_weight * cost.time + mem_weight * cost.memory
+
+            selected = min(pareto_front, key=score_fn)
             for backend, entry in diag["backends"].items():
                 if isinstance(entry, MutableMapping):
                     entry["pareto_optimal"] = backend in pareto_front
         else:
             raise ValueError(f"unknown selection metric: {selection_metric}")
-
     diag["selected_backend"] = selected
     diag["selected_cost"] = candidates[selected]
+    scores = {backend: score_fn(backend) for backend in candidates}
     for backend, entry in diag["backends"].items():
         if isinstance(entry, Mapping):
             entry["selected"] = backend == selected
@@ -1091,6 +1320,46 @@ def evaluate_fragment_backends(
     return selected, diag
 
 
+def replay_backend_selection(
+    selector_metrics: Mapping[str, object],
+    *,
+    fragment_index: int = 0,
+    allow_tableau: bool = True,
+    max_memory: float | None = None,
+    max_time: float | None = None,
+    target_accuracy: float | None = None,
+    estimator: CostEstimator | None = None,
+    selection_metric: str | Callable[[Backend, Cost], float] = "weighted",
+    metric_weights: tuple[float, float] = (0.5, 0.5),
+) -> tuple[Backend | None, MutableMapping[str, object]]:
+    """Replay a planner decision from exported :class:`MethodSelector` metrics."""
+
+    fragments = selector_metrics.get("fragments")
+    if not fragments:
+        raise ValueError("selector metrics must include fragment entries")
+    fragment_list = [dict(entry) for entry in fragments]  # type: ignore[assignment]
+    if fragment_index < 0 or fragment_index >= len(fragment_list):
+        raise IndexError("fragment index out of range")
+
+    metrics_copy: dict[str, object] = {
+        key: value
+        for key, value in selector_metrics.items()
+        if key != "fragments"
+    }
+    metrics_copy["fragments"] = fragment_list
+
+    stats = FragmentStats.from_export(fragment_list[fragment_index])
+    return evaluate_fragment_backends(
+        stats,
+        allow_tableau=allow_tableau,
+        max_memory=max_memory,
+        max_time=max_time,
+        target_accuracy=target_accuracy,
+        estimator=estimator,
+        selection_metric=selection_metric,
+        metric_weights=metric_weights,
+        selector_metrics=metrics_copy,
+    )
 def estimate_conversion(
     source: Backend,
     target: Backend,
@@ -1212,6 +1481,7 @@ __all__ = [
     "build_statevector_vs_decision_diagram",
     "documentation_plan_scenarios",
     "evaluate_fragment_backends",
+    "replay_backend_selection",
     "estimate_conversion",
     "export_figure",
     "load_calibrated_estimator",
