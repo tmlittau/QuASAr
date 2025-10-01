@@ -802,6 +802,7 @@ class CostEstimator:
         s_max: Optional[int] = None,
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
+        compressed_terms: Optional[int] = None,
     ) -> Dict[str, ConversionPrimitiveDetails]:
         """Return time and memory for each conversion primitive.
 
@@ -819,6 +820,10 @@ class CostEstimator:
             Optional dense extraction window ``w`` for the LW primitive.
         window_1q_gates, window_2q_gates:
             Gate counts within the dense window used by the LW primitive.
+        compressed_terms:
+            Estimated number of amplitudes retained after compression. When
+            provided, ingestion costs scale with this value instead of the
+            dense register size ``2**num_qubits``.
         """
 
         s_cap = s_max if s_max is not None else self.s_max
@@ -838,9 +843,10 @@ class CostEstimator:
                 for primitive in ("B2B", "LW", "ST", "Full")
             }
 
-        full = 2**num_qubits
-        ingest_time = self.coeff[f"ingest_{target.value}"] * full
-        ingest_mem = self.coeff.get(f"ingest_{target.value}_mem", 0.0) * full
+        dense_total = 2**num_qubits
+        ingest_terms = compressed_terms if compressed_terms is not None else dense_total
+        ingest_time = self.coeff[f"ingest_{target.value}"] * ingest_terms
+        ingest_mem = self.coeff.get(f"ingest_{target.value}_mem", 0.0) * ingest_terms
         base_time = self.coeff.get("conversion_base", 0.0)
         overhead = ingest_time + base_time
         overhead_components = {"ingest": ingest_time, "base": base_time}
@@ -853,13 +859,13 @@ class CostEstimator:
         copy_time = self.coeff["b2b_copy"] * num_qubits * (rank**2)
         b2b_time = svd_time + copy_time + overhead
         svd_mem = self.coeff.get("b2b_svd_mem", 0.0) * (rank**2)
-        b2b_mem = max(num_qubits * rank**2 + svd_mem, full) + ingest_mem
+        b2b_mem = max(num_qubits * rank**2 + svd_mem, dense_total) + ingest_mem
         details["B2B"] = ConversionPrimitiveDetails(
             cost=Cost(time=b2b_time, memory=b2b_mem, log_depth=log_depth),
             components={**overhead_components, "svd": svd_time, "copy": copy_time},
             memory_components={
                 "workspace": num_qubits * (rank**2) + svd_mem,
-                "full_register": full,
+                "full_register": dense_total,
                 "ingest": ingest_mem,
             },
         )
@@ -875,7 +881,7 @@ class CostEstimator:
         window_gate_time = gate_time * dense
         lw_time = extract_time + window_gate_time + overhead
         temp_mem = self.coeff.get("lw_temp_mem", 0.0) * dense
-        lw_mem = max(dense + temp_mem, full) + ingest_mem
+        lw_mem = max(dense + temp_mem, dense_total) + ingest_mem
         details["LW"] = ConversionPrimitiveDetails(
             cost=Cost(time=lw_time, memory=lw_mem, log_depth=log_depth),
             window=w,
@@ -886,7 +892,7 @@ class CostEstimator:
             },
             memory_components={
                 "window_state": dense + temp_mem,
-                "full_register": full,
+                "full_register": dense_total,
                 "ingest": ingest_mem,
             },
         )
@@ -896,26 +902,26 @@ class CostEstimator:
         chi_tilde = min(rank, chi_cap)
         stage_time = self.coeff["st_stage"] * (chi_tilde**3)
         st_time = stage_time + overhead
-        st_mem = max(num_qubits * (chi_tilde**2), full) + ingest_mem
+        st_mem = max(num_qubits * (chi_tilde**2), dense_total) + ingest_mem
         details["ST"] = ConversionPrimitiveDetails(
             cost=Cost(time=st_time, memory=st_mem, log_depth=log_depth),
             components={**overhead_components, "stage": stage_time},
             memory_components={
                 "staged_state": num_qubits * (chi_tilde**2),
-                "full_register": full,
+                "full_register": dense_total,
                 "ingest": ingest_mem,
             },
         )
 
         # --- Full extraction primitive ---
-        extract_full_time = self.coeff["full_extract"] * full
+        extract_full_time = self.coeff["full_extract"] * dense_total
         full_time = extract_full_time + overhead
-        full_mem = full + ingest_mem
+        full_mem = dense_total + ingest_mem
         details["Full"] = ConversionPrimitiveDetails(
             cost=Cost(time=full_time, memory=full_mem, log_depth=log_depth),
             components={**overhead_components, "extract": extract_full_time},
             memory_components={
-                "full_register": full,
+                "full_register": dense_total,
                 "ingest": ingest_mem,
             },
         )
@@ -936,6 +942,7 @@ class CostEstimator:
         s_max: Optional[int] = None,
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
+        compressed_terms: Optional[int] = None,
     ) -> ConversionEstimate:
         """Estimate cost to convert between representations."""
 
@@ -951,6 +958,7 @@ class CostEstimator:
             s_max=s_max,
             r_max=r_max,
             q_max=q_max,
+            compressed_terms=compressed_terms,
         )
 
         primitive, detail = min(details.items(), key=lambda kv: kv[1].cost.time)

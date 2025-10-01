@@ -28,6 +28,7 @@ class SimpleEstimator:
         num_qubits,
         rank,
         frontier,
+        compressed_terms=None,
         **_kwargs,
     ) -> ConversionEstimate:
         return ConversionEstimate("FAKE", Cost(time=0.0, memory=0.0, log_depth=float(frontier)))

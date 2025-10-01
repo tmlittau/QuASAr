@@ -39,6 +39,7 @@ class FakeEstimator:
         num_qubits,
         rank,
         frontier,
+        compressed_terms=None,
         **_kwargs,
     ) -> ConversionEstimate:
         return ConversionEstimate(
@@ -81,6 +82,7 @@ class LinearEstimator:
         num_qubits,
         rank,
         frontier,
+        compressed_terms=None,
         **_kwargs,
     ) -> ConversionEstimate:
         return ConversionEstimate(
@@ -131,7 +133,7 @@ def assert_trace_entry(
     assert entry.to_backend == target
     assert entry.boundary_size == boundary_size
     if boundary_size:
-        assert entry.rank == 2**boundary_size
+        assert 1 <= entry.rank <= 2**boundary_size
         assert entry.frontier == boundary_size
         assert entry.primitive == primitive
         assert entry.cost is not None

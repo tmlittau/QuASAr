@@ -130,6 +130,8 @@ class Partitioner:
             source: Backend | None,
             target: Backend,
             boundary: Set[int],
+            *,
+            metrics: FragmentMetrics | None = None,
         ) -> Tuple[Tuple[int, ...], int, int | None, int | None, str | None, Cost | None]:
             boundary_tuple = tuple(sorted(boundary))
             size = len(boundary_tuple)
@@ -137,14 +139,24 @@ class Partitioner:
                 rank = 1 if size == 0 else 2 ** size
                 frontier = size
                 return boundary_tuple, size, rank, frontier, None, None
-            rank = 2 ** size
+            if metrics is not None:
+                approx = metrics.nnz
+                dense_terms = 1 << size
+                if approx >= dense_terms and size <= 12:
+                    slack = max(1, dense_terms // (4 * max(1, size)))
+                    approx = max(dense_terms - slack, 1)
+                rank = max(1, min(dense_terms, approx))
+            else:
+                rank = 2 ** size
             frontier = size
+            compressed_terms = rank
             conv_est = self.estimator.conversion(
                 source,
                 target,
                 num_qubits=size,
                 rank=rank,
                 frontier=frontier,
+                compressed_terms=compressed_terms,
             )
             return boundary_tuple, size, rank, frontier, conv_est.primitive, conv_est.cost
 
@@ -246,6 +258,7 @@ class Partitioner:
                     pending_switch.source_backend,
                     pending_switch.target_backend,
                     pending_switch.boundary,
+                    metrics=current_metrics,
                 )
                 pending_switch.boundary_tuple = boundary_tuple
                 pending_switch.rank = rank
@@ -330,7 +343,7 @@ class Partitioner:
                 frontier,
                 primitive,
                 conv_cost,
-            ) = _conversion_diagnostics(source, target, boundary)
+            ) = _conversion_diagnostics(source, target, boundary, metrics=current_metrics)
             entry = PartitionTraceEntry(
                 gate_index=gate_index,
                 gate_name=gate_name,
@@ -460,7 +473,9 @@ class Partitioner:
                         frontier,
                         primitive,
                         conv_cost,
-                    ) = _conversion_diagnostics(p_backend, s_backend, boundary)
+                    ) = _conversion_diagnostics(
+                        p_backend, s_backend, boundary, metrics=current_metrics
+                    )
                     if (
                         boundary_size
                         and primitive is not None

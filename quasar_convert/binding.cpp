@@ -61,6 +61,11 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def_readonly("cost", &quasar::ConversionResult::cost)
         .def_readonly("fidelity", &quasar::ConversionResult::fidelity);
 
+    py::class_<quasar::CompressionStats>(m, "CompressionStats")
+        .def_readonly("original_terms", &quasar::CompressionStats::original_terms)
+        .def_readonly("retained_terms", &quasar::CompressionStats::retained_terms)
+        .def_readonly("fidelity", &quasar::CompressionStats::fidelity);
+
     py::class_<quasar::StnTensor>(m, "StnTensor")
         .def(py::init<>())
         .def_readwrite("amplitudes", &quasar::StnTensor::amplitudes)
@@ -85,6 +90,9 @@ PYBIND11_MODULE(_conversion_engine, m) {
     py::class_<quasar::ConversionEngine>(m, "ConversionEngine")
         .def(py::init<>())
         .def_readwrite("st_chi_cap", &quasar::ConversionEngine::st_chi_cap)
+        .def_readwrite("truncation_tolerance", &quasar::ConversionEngine::truncation_tolerance)
+        .def_readwrite("truncation_max_terms", &quasar::ConversionEngine::truncation_max_terms)
+        .def_readwrite("truncation_normalise", &quasar::ConversionEngine::truncation_normalise)
         .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
         .def("extract_ssd", &quasar::ConversionEngine::extract_ssd)
         .def("extract_boundary_ssd", &quasar::ConversionEngine::extract_boundary_ssd)
@@ -99,6 +107,8 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)
         .def("mps_to_statevector", &quasar::ConversionEngine::mps_to_statevector)
         .def("dense_statevector_queries", &quasar::ConversionEngine::dense_statevector_queries)
+        .def("last_compression_stats", &quasar::ConversionEngine::last_compression_stats)
+        .def("compressed_cardinality", &quasar::ConversionEngine::compressed_cardinality)
 #ifdef QUASAR_USE_STIM
         .def("convert_boundary_to_tableau", &quasar::ConversionEngine::convert_boundary_to_tableau)
         .def("tableau_to_statevector", &quasar::ConversionEngine::tableau_to_statevector)

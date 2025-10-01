@@ -9,6 +9,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <numeric>
+#include <limits>
 #ifdef QUASAR_USE_MQT
 #include <dd/Edge.hpp>
 #include <dd/Node.hpp>
@@ -22,6 +24,110 @@ ConversionEngine::ConversionEngine() {
 #ifdef QUASAR_USE_MQT
     dd_pkg = std::make_unique<dd::Package<>>();
 #endif
+}
+
+std::size_t ConversionEngine::compressed_cardinality() const {
+    if (compression_stats_.retained_terms != 0) {
+        return compression_stats_.retained_terms;
+    }
+    return compression_stats_.original_terms;
+}
+
+CompressionStats ConversionEngine::apply_truncation(std::vector<std::complex<double>>& state) const {
+    CompressionStats stats;
+    stats.original_terms = state.size();
+    stats.retained_terms = state.size();
+    stats.fidelity = 1.0;
+
+    if (state.empty()) {
+        compression_stats_ = stats;
+        return stats;
+    }
+
+    const double tolerance = truncation_tolerance;
+    const std::size_t max_terms = truncation_max_terms;
+    if (tolerance <= 0.0 && max_terms == 0) {
+        compression_stats_ = stats;
+        return stats;
+    }
+
+    std::vector<double> magnitudes(state.size(), 0.0);
+    std::vector<std::size_t> indices(state.size());
+    double total_norm = 0.0;
+    for (std::size_t i = 0; i < state.size(); ++i) {
+        double mag_sq = std::norm(state[i]);
+        magnitudes[i] = mag_sq;
+        total_norm += mag_sq;
+        indices[i] = i;
+    }
+
+    if (total_norm <= std::numeric_limits<double>::epsilon()) {
+        stats.retained_terms = 0;
+        stats.fidelity = 1.0;
+        compression_stats_ = stats;
+        return stats;
+    }
+
+    const double threshold_sq = (tolerance > 0.0) ? tolerance * tolerance : 0.0;
+    std::vector<std::size_t> keep;
+    keep.reserve(state.size());
+    for (std::size_t idx : indices) {
+        if (threshold_sq == 0.0 || magnitudes[idx] >= threshold_sq) {
+            keep.push_back(idx);
+        }
+    }
+
+    if (keep.empty()) {
+        auto it = std::max_element(magnitudes.begin(), magnitudes.end());
+        std::size_t idx = static_cast<std::size_t>(std::distance(magnitudes.begin(), it));
+        keep.push_back(idx);
+    }
+
+    if (max_terms > 0 && keep.size() > max_terms) {
+        auto cmp = [&](std::size_t a, std::size_t b) { return magnitudes[a] > magnitudes[b]; };
+        std::nth_element(keep.begin(), keep.begin() + max_terms, keep.end(), cmp);
+        keep.resize(max_terms);
+        std::sort(keep.begin(), keep.end());
+    } else {
+        std::sort(keep.begin(), keep.end());
+    }
+
+    std::vector<char> mask(state.size(), 0);
+    for (std::size_t idx : keep) {
+        mask[idx] = 1;
+    }
+
+    double retained_norm = 0.0;
+    for (std::size_t i = 0; i < state.size(); ++i) {
+        if (mask[i]) {
+            retained_norm += magnitudes[i];
+        } else {
+            state[i] = {0.0, 0.0};
+        }
+    }
+
+    if (retained_norm <= std::numeric_limits<double>::epsilon()) {
+        stats.retained_terms = 0;
+        stats.fidelity = 1.0;
+        compression_stats_ = stats;
+        return stats;
+    }
+
+    stats.retained_terms = keep.size();
+    stats.fidelity = retained_norm / total_norm;
+    if (stats.fidelity > 1.0) {
+        stats.fidelity = 1.0;
+    }
+
+    if (truncation_normalise && retained_norm > 0.0) {
+        double scale = std::sqrt(total_norm / retained_norm);
+        for (std::size_t idx : keep) {
+            state[idx] *= scale;
+        }
+    }
+
+    compression_stats_ = stats;
+    return stats;
 }
 
 std::pair<double, double> ConversionEngine::estimate_cost(std::size_t fragment_size,
@@ -154,6 +260,7 @@ std::vector<std::complex<double>> ConversionEngine::extract_local_window(
         }
         window[local] = state[idx];
     }
+    apply_truncation(window);
     return window;
 }
 
@@ -259,6 +366,7 @@ std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevec
         }
         state[idx] = amp * norm;
     }
+    apply_truncation(state);
     return state;
 }
 
@@ -333,6 +441,7 @@ ConversionEngine::mps_to_statevector(const MPS& mps) const {
     for (std::size_t i = 0; i < left_dim; ++i) {
         state[i] = current[i * final_bond];
     }
+    apply_truncation(state);
     return state;
 }
 
@@ -373,6 +482,7 @@ std::vector<std::complex<double>> ConversionEngine::extract_local_window_dd(
         window[local] = {static_cast<double>(amp.real()),
                          static_cast<double>(amp.imag())};
     }
+    apply_truncation(window);
     return window;
 }
 
@@ -420,6 +530,7 @@ ConversionEngine::dd_to_statevector(const dd::vEdge& edge) const {
             amp /= norm;
         }
     }
+    apply_truncation(vec);
     return vec;
 }
 
@@ -725,6 +836,7 @@ ConversionEngine::tableau_to_statevector(const StimTableau& tableau) const {
     for (size_t i = 0; i < vec_f.size(); ++i) {
         vec[i] = static_cast<std::complex<double>>(vec_f[i]);
     }
+    apply_truncation(vec);
     return vec;
 }
 
