@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Set
 
@@ -124,6 +125,7 @@ class Partitioner:
             source_cost: Cost
             boundary: Set[int]
             target_backend: Backend
+            source_metrics: FragmentMetrics | None = None
             boundary_tuple: Tuple[int, ...] = ()
             rank: int | None = None
             frontier: int | None = None
@@ -133,6 +135,80 @@ class Partitioner:
             window: int | None = None
 
         pending_switch: _PendingSwitch | None = None
+
+        gate_indices = {id(gate): idx for idx, gate in enumerate(gates)}
+        entanglement_cache: Dict[Tuple[Tuple[int, ...], Tuple[int, ...]], Tuple[int, int]] = {}
+
+        class _StubGate:
+            __slots__ = ("qubits",)
+
+            def __init__(self, qubits: Tuple[int, ...]):
+                self.qubits = qubits
+
+        def _fragment_key(metrics: FragmentMetrics) -> Tuple[int, ...]:
+            if not metrics.gates:
+                return ()
+            return tuple(
+                gate_indices[id(g)]
+                for g in metrics.gates
+                if id(g) in gate_indices
+            )
+
+        def _entanglement_bounds(
+            metrics: FragmentMetrics | None,
+            boundary_tuple: Tuple[int, ...],
+        ) -> Tuple[int, int]:
+            if metrics is None or not boundary_tuple:
+                return 1, 0
+            boundary_size = len(boundary_tuple)
+            if not metrics.gates:
+                return 1, 0
+            key = (boundary_tuple, _fragment_key(metrics))
+            cached = entanglement_cache.get(key)
+            if cached is not None:
+                return cached
+
+            boundary_set = set(boundary_tuple)
+            fragment_qubits: List[int] = []
+            for gate in metrics.gates:
+                for qubit in gate.qubits:
+                    if qubit not in fragment_qubits:
+                        fragment_qubits.append(qubit)
+
+            ordering: List[int] = list(boundary_tuple)
+            ordering.extend(q for q in fragment_qubits if q not in boundary_set)
+
+            if len(ordering) <= boundary_size:
+                entanglement_cache[key] = (1, 0)
+                return entanglement_cache[key]
+
+            remap = {qubit: idx for idx, qubit in enumerate(ordering)}
+            remapped_gates: List[_StubGate] = []
+            for gate in metrics.gates:
+                mapped = tuple(remap[q] for q in gate.qubits if q in remap)
+                if len(mapped) >= 2:
+                    remapped_gates.append(_StubGate(mapped))
+
+            if not remapped_gates:
+                entanglement_cache[key] = (1, 0)
+                return entanglement_cache[key]
+
+            bonds = self.estimator.bond_dimensions(len(ordering), remapped_gates)
+            idx = boundary_size - 1
+            if idx < 0 or idx >= len(bonds):
+                rank_est = 1
+            else:
+                rank_est = bonds[idx]
+            rank_est = max(1, min(rank_est, 2 ** boundary_size))
+            if rank_est <= 1:
+                frontier_est = 0
+            else:
+                frontier_est = min(
+                    boundary_size,
+                    max(1, int(math.ceil(math.log2(rank_est)))),
+                )
+            entanglement_cache[key] = (rank_est, frontier_est)
+            return entanglement_cache[key]
 
         def _conversion_diagnostics(
             source: Backend | None,
@@ -153,23 +229,27 @@ class Partitioner:
             size = len(boundary_tuple)
             if size == 0 or source is None or source == target:
                 rank = 1 if size == 0 else 2 ** size
-                frontier = size
+                frontier = 0 if rank == 1 else size
                 return boundary_tuple, size, rank, frontier, None, None, None
-            if metrics is not None:
-                approx = metrics.nnz
-                dense_terms = 1 << size
-                if approx >= dense_terms and size <= 12:
-                    slack = max(1, dense_terms // (4 * max(1, size)))
-                    approx = max(dense_terms - slack, 1)
-                rank = max(1, min(dense_terms, approx))
-            else:
-                rank = 2 ** size
+
+            dense_terms = 1 << size if size else 1
+            rank = dense_terms
             frontier = size
-            compressed_terms = rank
+
+            if metrics is not None and size > 0:
+                bound_rank, bound_frontier = _entanglement_bounds(metrics, boundary_tuple)
+                rank = max(1, min(rank, bound_rank))
+                frontier = min(frontier, bound_frontier if bound_frontier is not None else frontier)
+            elif rank == 1:
+                frontier = 0
+
+            compressed_terms = max(1, min(dense_terms, rank))
+            bond_dimension = rank if size > 0 else None
             window = self.estimator.derive_conversion_window(
                 size,
                 rank=rank,
                 compressed_terms=compressed_terms,
+                bond_dimension=bond_dimension,
             )
             conv_est = self.estimator.conversion(
                 source,
@@ -179,6 +259,7 @@ class Partitioner:
                 frontier=frontier,
                 window=window,
                 compressed_terms=compressed_terms,
+                bond_dimension=bond_dimension,
                 chi_cap=self.staging_chi_cap,
             )
             return (
@@ -277,6 +358,12 @@ class Partitioner:
                 pending_switch = None
                 return
             suffix_cost = _estimate_cost(pending_switch.target_backend, suffix)
+            source_metrics = pending_switch.source_metrics
+            if source_metrics is None and pending_switch.start_index:
+                source_metrics = FragmentMetrics.from_gates(
+                    current_gates[: pending_switch.start_index]
+                )
+                pending_switch.source_metrics = source_metrics
             if pending_switch.boundary_tuple == () and pending_switch.boundary:
                 (
                     boundary_tuple,
@@ -290,7 +377,7 @@ class Partitioner:
                     pending_switch.source_backend,
                     pending_switch.target_backend,
                     pending_switch.boundary,
-                    metrics=current_metrics,
+                    metrics=source_metrics,
                 )
                 pending_switch.boundary_tuple = boundary_tuple
                 pending_switch.rank = rank
@@ -348,6 +435,7 @@ class Partitioner:
                     boundary=pending_switch.boundary,
                     applied=True,
                     reason="deferred_backend_switch",
+                    metrics_override=source_metrics,
                 )
                 current_gates = suffix.copy()
                 current_metrics = FragmentMetrics.from_gates(current_gates)
@@ -367,6 +455,7 @@ class Partitioner:
             boundary: Set[int],
             applied: bool,
             reason: str,
+            metrics_override: FragmentMetrics | None = None,
         ) -> None:
             if trace_log is None and trace is None:
                 return
@@ -378,7 +467,12 @@ class Partitioner:
                 primitive,
                 conv_cost,
                 window,
-            ) = _conversion_diagnostics(source, target, boundary, metrics=current_metrics)
+            ) = _conversion_diagnostics(
+                source,
+                target,
+                boundary,
+                metrics=metrics_override if metrics_override is not None else current_metrics,
+            )
             entry = PartitionTraceEntry(
                 gate_index=gate_index,
                 gate_name=gate_name,
@@ -511,7 +605,7 @@ class Partitioner:
                         conv_cost,
                         window,
                     ) = _conversion_diagnostics(
-                        p_backend, s_backend, boundary, metrics=current_metrics
+                        p_backend, s_backend, boundary, metrics=p_metrics
                     )
                     if (
                         boundary_size
@@ -538,6 +632,7 @@ class Partitioner:
                         boundary=boundary,
                         applied=True,
                         reason="graph_cut",
+                        metrics_override=p_metrics,
                     )
 
                     current_gates = s_gates
@@ -579,6 +674,7 @@ class Partitioner:
                         source_cost=_estimate_cost(current_backend, current_gates),
                         boundary=set(boundary),
                         target_backend=backend_trial,
+                        source_metrics=current_metrics.copy() if current_metrics is not None else None,
                     )
                 else:
                     pending_switch.gate_index = idx
@@ -598,6 +694,7 @@ class Partitioner:
                     boundary=boundary,
                     applied=False,
                     reason="deferred_switch_candidate",
+                    metrics_override=pending_switch.source_metrics,
                 )
                 current_gates = trial_gates
                 current_qubits = trial_qubits
