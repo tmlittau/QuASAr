@@ -20,6 +20,7 @@ from benchmarks.circuits import (
     clustered_w_qft_circuit,
     clustered_w_random_circuit,
     layered_clifford_nonclifford_circuit,
+    layered_clifford_magic_islands_circuit,
     layered_clifford_ramp_circuit,
 )
 from quasar.circuit import Circuit, Gate
@@ -43,6 +44,25 @@ def _cluster_blocks(num_qubits: int, block_size: int) -> list[tuple[int, ...]]:
         for start in range(0, num_qubits, block_size)
         if start < num_qubits
     ]
+
+
+def _expected_island_flags(
+    post_layers: int, islands: int, island_len: int, island_gap: int
+) -> list[bool]:
+    flags: list[bool] = []
+    for idx in range(islands):
+        if len(flags) >= post_layers:
+            break
+        remaining = post_layers - len(flags)
+        flags.extend([True] * min(island_len, remaining))
+        if len(flags) >= post_layers:
+            break
+        if idx < islands - 1 and island_gap > 0:
+            remaining = post_layers - len(flags)
+            flags.extend([False] * min(island_gap, remaining))
+    if len(flags) < post_layers:
+        flags.extend([False] * (post_layers - len(flags)))
+    return flags
 
 
 def test_clustered_entanglement_prep_blocks():
@@ -147,6 +167,46 @@ def test_layered_clifford_transition_delays_magic():
     for layer in range(metadata["clifford_layers"], metadata["depth"]):
         gates = _layer_gates(circuit, offsets, layer)
         assert any(g.gate not in CLIFFORD_GATES for g in gates)
+
+
+def test_layered_clifford_nonclifford_islands_spacing():
+    circuit = layered_clifford_nonclifford_circuit(
+        6,
+        depth=20,
+        fraction_clifford=0.5,
+        seed=11,
+        islands=3,
+        island_len=2,
+        island_gap=1,
+    )
+    metadata = circuit.metadata
+    clifford_layers = metadata["clifford_layers"]
+    assert clifford_layers == 10
+    flags = metadata["non_clifford_layer_flags"]
+    assert len(flags) == metadata["depth"]
+    assert not any(flags[:clifford_layers])
+    expected_post = _expected_island_flags(10, 3, 2, 1)
+    assert flags[clifford_layers:] == expected_post
+    assert metadata["non_clifford_layers"] == sum(flags)
+
+
+def test_layered_clifford_magic_islands_helper_overrides_defaults():
+    circuit = layered_clifford_magic_islands_circuit(
+        5,
+        depth=24,
+        fraction_clifford=0.5,
+        islands=2,
+        island_len=3,
+        island_gap=4,
+        seed=7,
+    )
+    metadata = circuit.metadata
+    clifford_layers = metadata["clifford_layers"]
+    assert clifford_layers == 12
+    flags = metadata["non_clifford_layer_flags"]
+    expected_post = _expected_island_flags(12, 2, 3, 4)
+    assert flags[clifford_layers:] == expected_post
+    assert metadata["non_clifford_layers"] == sum(flags)
 
 
 def test_layered_clifford_ramp_metadata():

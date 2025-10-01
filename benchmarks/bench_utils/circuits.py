@@ -1387,8 +1387,18 @@ def layered_clifford_nonclifford_circuit(
     fraction_clifford: float = 0.8,
     *,
     seed: int | None = 2025,
+    islands: int | None = None,
+    island_len: int | None = None,
+    island_gap: int | None = None,
 ) -> Circuit:
-    """Build a layered circuit transitioning from Clifford to non-Clifford gates."""
+    """Build a layered circuit transitioning from Clifford to non-Clifford gates.
+
+    Providing ``islands``/``island_len``/``island_gap`` rebuilds the post-Clifford
+    tail into spaced "magic" windows.  Each window contains ``island_len``
+    consecutive non-Clifford layers separated by ``island_gap`` Clifford-only
+    layers.  Omitting the trio preserves the original behaviour where every
+    post-Clifford layer is non-Clifford.
+    """
 
     if num_qubits <= 0 or depth <= 0:
         return Circuit([])
@@ -1397,7 +1407,42 @@ def layered_clifford_nonclifford_circuit(
 
     rng = Random(seed)
     clifford_layers = min(depth, max(0, int(fraction_clifford * depth)))
-    include_flags = [False] * clifford_layers + [True] * (depth - clifford_layers)
+    post_clifford_layers = depth - clifford_layers
+    include_flags = [False] * clifford_layers
+
+    cadence = (islands, island_len, island_gap)
+    if any(param is not None for param in cadence):
+        if not all(param is not None for param in cadence):
+            raise ValueError(
+                "islands, island_len and island_gap must be provided together"
+            )
+        assert islands is not None and island_len is not None and island_gap is not None
+        if islands <= 0:
+            raise ValueError("islands must be a positive integer")
+        if island_len <= 0:
+            raise ValueError("island_len must be a positive integer")
+        if island_gap < 0:
+            raise ValueError("island_gap must be non-negative")
+
+        post_flags: List[bool] = []
+        for idx in range(islands):
+            if len(post_flags) >= post_clifford_layers:
+                break
+            remaining = post_clifford_layers - len(post_flags)
+            post_flags.extend([True] * min(island_len, remaining))
+            if len(post_flags) >= post_clifford_layers:
+                break
+            if idx < islands - 1 and island_gap > 0:
+                remaining = post_clifford_layers - len(post_flags)
+                post_flags.extend([False] * min(island_gap, remaining))
+        if len(post_flags) < post_clifford_layers:
+            post_flags.extend([False] * (post_clifford_layers - len(post_flags)))
+        if post_flags and not any(post_flags):
+            post_flags[-1] = True
+        include_flags.extend(post_flags)
+    else:
+        include_flags.extend([True] * post_clifford_layers)
+
     gates, offsets, non_flags = _build_layers_from_flags(num_qubits, include_flags, rng)
     circuit = Circuit(gates, use_classical_simplification=False)
     metadata = {
@@ -1405,7 +1450,7 @@ def layered_clifford_nonclifford_circuit(
         "depth": depth,
         "fraction_clifford": fraction_clifford,
         "clifford_layers": clifford_layers,
-        "non_clifford_layers": depth - clifford_layers,
+        "non_clifford_layers": sum(non_flags),
         "transition_layer": clifford_layers,
         "layer_offsets": offsets,
         "non_clifford_layer_flags": non_flags,
@@ -1442,6 +1487,29 @@ def layered_clifford_delayed_magic_circuit(
         depth=depth,
         fraction_clifford=fraction_clifford,
         seed=seed,
+    )
+
+
+def layered_clifford_magic_islands_circuit(
+    num_qubits: int,
+    *,
+    depth: int = 2000,
+    fraction_clifford: float = 0.8,
+    islands: int = 20,
+    island_len: int = 4,
+    island_gap: int = 16,
+    seed: int | None = 2025,
+) -> Circuit:
+    """Variant with spaced non-Clifford windows for magic-state "islands"."""
+
+    return layered_clifford_nonclifford_circuit(
+        num_qubits,
+        depth=depth,
+        fraction_clifford=fraction_clifford,
+        seed=seed,
+        islands=islands,
+        island_len=island_len,
+        island_gap=island_gap,
     )
 
 
