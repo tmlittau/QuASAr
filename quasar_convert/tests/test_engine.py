@@ -14,6 +14,7 @@ class ConversionPrimitiveTests(unittest.TestCase):
         res = self.eng.convert(ssd)
         self.assertEqual(res.primitive, qc.Primitive.B2B)
         self.assertGreater(res.cost, 0)
+        self.assertIsNone(res.window)
 
     def test_lw_selected(self):
         ssd = qc.SSD()
@@ -21,6 +22,7 @@ class ConversionPrimitiveTests(unittest.TestCase):
         ssd.top_s = 2
         res = self.eng.convert(ssd)
         self.assertEqual(res.primitive, qc.Primitive.LW)
+        self.assertEqual(res.window, 4)
 
     def test_lw_gate_counts_increase_cost(self):
         ssd = qc.SSD()
@@ -29,6 +31,8 @@ class ConversionPrimitiveTests(unittest.TestCase):
         base = self.eng.convert(ssd)
         with_gates = self.eng.convert(ssd, window_1q_gates=3, window_2q_gates=1)
         self.assertGreater(with_gates.cost, base.cost)
+        self.assertEqual(base.window, 4)
+        self.assertEqual(with_gates.window, 4)
 
     def test_window_override_expands_dense_region(self):
         ssd = qc.SSD()
@@ -37,6 +41,8 @@ class ConversionPrimitiveTests(unittest.TestCase):
         default = self.eng.convert(ssd)
         widened = self.eng.convert(ssd, window=6)
         self.assertGreater(widened.cost, default.cost)
+        self.assertEqual(default.window, 4)
+        self.assertEqual(widened.window, 6)
 
     def test_st_selected(self):
         ssd = qc.SSD()
@@ -44,6 +50,7 @@ class ConversionPrimitiveTests(unittest.TestCase):
         ssd.top_s = 8
         res = self.eng.convert(ssd)
         self.assertEqual(res.primitive, qc.Primitive.ST)
+        self.assertIsNone(res.window)
 
     def test_full_selected(self):
         ssd = qc.SSD()
@@ -51,6 +58,7 @@ class ConversionPrimitiveTests(unittest.TestCase):
         ssd.top_s = 32
         res = self.eng.convert(ssd)
         self.assertEqual(res.primitive, qc.Primitive.Full)
+        self.assertIsNone(res.window)
 
     def test_boundary_truncation_records_stats(self):
         eng = qc.ConversionEngine(truncation_tolerance=0.6)
