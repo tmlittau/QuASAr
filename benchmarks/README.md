@@ -43,6 +43,11 @@ timeout budget while preserving the characteristic gate patterns.*
 
 Useful flags include:
 
+* ``--suite <name>`` – execute a preconfigured stitched showcase suite such as
+  ``stitched-big``.  Suites expand to a fixed list of circuit factories and
+  qubit widths defined in ``benchmarks/bench_utils/stitched_suite.py``.  The
+  option is mutually exclusive with ``--circuit`` and ``--group`` so that the
+  stitched specification stays consistent.
 * ``--circuit <name>`` – run a single circuit (repeat the flag to add more).
 * ``--group <name>`` – run every circuit in the named group.
 * ``--list-circuits`` / ``--list-groups`` – inspect available names and exit.
@@ -61,6 +66,29 @@ functioning while the main CLI only advertises the curated showcase set.  Use
 
 When no circuits or groups are specified the full suite is executed.  Reuse the
 ``--reuse-existing`` flag to skip recomputation if the CSV files already exist.
+
+### Stitched showcase suites
+
+Use ``--suite`` to launch one of the stitched benchmark suites without needing
+to enumerate every circuit manually.  The suites combine representative circuits
+from the clustered, layered and classical-control families with wider qubit
+widths and longer random sections than the default workstation-friendly ranges.
+For example, the stitched-big suite covers nine circuits split across
+``stitched_clustered_hybrid`` (40/48/56 qubits),
+``stitched_layered_magic_islands`` (28/36/44 qubits) and
+``stitched_classical_diag_windows`` (32/40/48 qubits).  The CLI advertises the
+available suite names in ``--help`` and accepts the usual overrides:
+
+```bash
+python benchmarks/run_benchmark.py --suite stitched-big --workers 16 \
+  --reuse-existing
+```
+
+Combine ``--suite`` with ``--qubits`` to tailor the widths for individual
+entries or with ``--enable-classical-simplification`` to exercise the stitched
+classical-control variants.  Programmatic callers can pass ``suite="stitched-big"``
+to :func:`benchmarks.run_benchmark.run_showcase_suite` to obtain the same
+behaviour.
 
 ### Programmatic access
 
