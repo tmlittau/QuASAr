@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from functools import partial
 from types import SimpleNamespace
 from typing import List
@@ -241,6 +242,79 @@ def test_classical_controlled_circuit_enables_simplification():
     circuit.enable_classical_simplification()
     after = len(circuit.gates)
     assert after <= before
+
+
+def test_classical_controlled_circuit_supports_diag_and_cz_windows() -> None:
+    diag_phi = math.pi / 11
+    circuit = classical_controlled_circuit(
+        7,
+        depth=6,
+        classical_qubits=3,
+        toggle_period=3,
+        fanout=2,
+        seed=5,
+        diag_fixed_phi=diag_phi,
+        diag_period=2,
+        cz_window_period=3,
+    )
+    metadata = circuit.metadata
+    assert metadata["diag_fixed_phi"] == diag_phi
+    assert metadata["diag_period"] == 2
+    assert metadata["cz_window_period"] == 3
+
+    offsets = metadata["layer_offsets"]
+    diag_period = metadata["diag_period"]
+    cz_window_period = metadata["cz_window_period"]
+
+    def _diag_active(layer: int) -> bool:
+        return (layer % (2 * diag_period)) < diag_period
+
+    def _cz_active(layer: int) -> bool:
+        return (layer % (2 * cz_window_period)) < cz_window_period
+
+    forced_layers = set()
+    for layer in range(metadata["depth"]):
+        diag_active = _diag_active(layer)
+        if diag_active:
+            gates = _layer_gates(circuit, offsets, layer)
+            rz_gates = [g for g in gates if g.gate == "RZ"]
+            assert rz_gates
+            for gate in rz_gates:
+                assert math.isclose(gate.params["phi"], diag_phi)
+        if diag_active or _cz_active(layer):
+            forced_layers.add(layer)
+            gates = _layer_gates(circuit, offsets, layer)
+            assert all(g.gate != "CRZ" for g in gates)
+
+    sample_layer = None
+    sample_idx = None
+    for layer in range(metadata["depth"]):
+        if layer in forced_layers:
+            continue
+        for idx, _ in enumerate(metadata["classical_qubits"]):
+            if (layer + idx) % 3 == 2:
+                sample_layer = layer
+                sample_idx = idx
+                break
+        if sample_layer is not None:
+            break
+
+    assert sample_layer is not None and sample_idx is not None
+
+    gates = _layer_gates(circuit, offsets, sample_layer)
+    quantum_qubits = metadata["quantum_qubits"]
+    first_target = quantum_qubits[0]
+    rz_gate = next(
+        gate for gate in gates if gate.gate == "RZ" and gate.qubits == [first_target]
+    )
+    expected_phi = ((sample_layer + 1) * (first_target + 2)) % 37 / 37 * math.pi
+    assert math.isclose(rz_gate.params["phi"], expected_phi)
+
+    crz_gate = next(gate for gate in gates if gate.gate == "CRZ")
+    idx = metadata["classical_qubits"].index(crz_gate.qubits[0])
+    assert idx == sample_idx
+    expected_crz = ((sample_layer + 1) * (idx + 1)) % 23 / 23 * math.pi
+    assert math.isclose(crz_gate.params["phi"], expected_crz)
 
 
 def test_resolve_selected_defaults_to_all() -> None:
