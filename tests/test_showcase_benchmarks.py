@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import contextlib
 from functools import partial
 from types import SimpleNamespace
 from typing import List
@@ -11,6 +12,7 @@ import pandas as pd
 import pytest
 
 from benchmarks.bench_utils import showcase_benchmarks as sb
+from benchmarks.bench_utils import stitched_suite
 from benchmarks.circuits import (
     CLIFFORD_GATES,
     classical_controlled_circuit,
@@ -504,3 +506,90 @@ def test_merge_results_updates_existing(tmp_path) -> None:
 
     assert len(merged) == 2
     assert merged.loc[merged["circuit"] == "layered_clifford_ramp", "run_time_mean"].item() == 3.5
+
+
+def test_stitched_suite_factories_metadata() -> None:
+    specs = stitched_suite.resolve_suite("stitched-big")
+    expected_seeds = {
+        "stitched_clustered_hybrid": 1337,
+        "stitched_layered_magic_islands": 2025,
+        "stitched_classical_diag_windows": 424242,
+    }
+    for spec in specs:
+        circuit = spec.factory(12)
+        metadata = getattr(circuit, "metadata", {})
+        assert metadata.get("seed") == expected_seeds[spec.name]
+        assert "layer_offsets" in metadata
+        if spec.name == "stitched_clustered_hybrid":
+            assert "stage_summaries" in metadata
+
+
+def test_run_showcase_benchmarks_suite_invokes_factories(monkeypatch, tmp_path) -> None:
+    suite_specs = stitched_suite.resolve_suite("stitched-big")
+    expected_widths = {spec.name: spec.widths for spec in suite_specs}
+    calls: list[tuple[str, tuple[int, ...]]] = []
+
+    def fake_run_backend_suite(spec, widths, **kwargs):
+        calls.append((spec.name, tuple(widths)))
+        width = widths[0]
+        data = pd.DataFrame(
+            {
+                "framework": ["baseline", "quasar"],
+                "backend": ["baseline_backend", "quasar"],
+                "run_time_mean": [2.0, 1.0],
+                "total_time_mean": [2.4, 1.2],
+                "run_peak_memory_mean": [1.0, 1.0],
+                "prepare_peak_memory_mean": [0.5, 0.5],
+                "run_time_std": [0.1, 0.1],
+                "total_time_std": [0.1, 0.1],
+                "run_peak_memory_std": [0.1, 0.1],
+                "prepare_peak_memory_std": [0.1, 0.1],
+                "qubits": [width, width],
+                "result": [None, None],
+            }
+        )
+        return data
+
+    monkeypatch.setattr(sb, "_run_backend_suite", fake_run_backend_suite)
+    monkeypatch.setattr(
+        sb,
+        "compute_baseline_best",
+        lambda df, metrics: df[df["framework"] == "baseline"].copy(),
+    )
+    monkeypatch.setattr(sb, "_export_plot", lambda df, spec, figures_dir, metric: (None, None))
+
+    class DummyDatabase:
+        def __init__(self) -> None:
+            self.start_kwargs: dict | None = None
+
+        def start_run(self, **kwargs):
+            self.start_kwargs = kwargs
+            return SimpleNamespace(id=1)
+
+    dummy_db = DummyDatabase()
+    monkeypatch.setattr(
+        sb, "open_database", lambda path: contextlib.nullcontext(dummy_db)
+    )
+    monkeypatch.setattr(sb, "FIGURES_DIR", tmp_path)
+
+    args = SimpleNamespace(
+        suite="stitched-big",
+        circuit_names=None,
+        groups=None,
+        qubits=None,
+        repetitions=1,
+        run_timeout=0.0,
+        memory_bytes=None,
+        enable_classical_simplification=False,
+        workers=None,
+        metric="run_time_mean",
+        database=tmp_path / "suite.sqlite",
+    )
+
+    sb.run_showcase_benchmarks(args)
+
+    assert {name for name, _ in calls} == set(expected_widths)
+    for name, widths in calls:
+        assert widths == expected_widths[name]
+    assert dummy_db.start_kwargs is not None
+    assert dummy_db.start_kwargs["parameters"]["suite"] == "stitched-big"
