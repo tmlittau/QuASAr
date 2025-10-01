@@ -180,6 +180,10 @@ class Config:
     graph_cut_cost_weight: float = _float_from_env(
         "QUASAR_GRAPH_CUT_COST_WEIGHT", 0.25
     )
+    backlog_projection_window: int = max(
+        0,
+        _int_from_env("QUASAR_BACKLOG_WINDOW", 8) or 0,
+    )
 
 
 # Global configuration instance used when modules import ``quasar.config``.

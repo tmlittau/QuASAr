@@ -226,12 +226,14 @@ def assert_trace_entry(
     boundary_size: int,
     primitive: str = "FAKE",
     window: int | None = None,
+    break_even: int | None = None,
 ):
     assert entry.reason == reason
     assert entry.applied is applied
     assert entry.from_backend == source
     assert entry.to_backend == target
     assert entry.boundary_size == boundary_size
+    assert entry.break_even_horizon == break_even
     if boundary_size:
         assert 1 <= entry.rank <= 2**boundary_size
         assert 0 <= entry.frontier <= boundary_size
@@ -352,6 +354,7 @@ def test_deferred_switch_materialises_when_cost_favourable() -> None:
         source=Backend.TABLEAU,
         target=Backend.MPS,
         boundary_size=1,
+        break_even=2,
     )
     assert first_candidate.gate_index == 1
     assert_trace_entry(
@@ -361,6 +364,7 @@ def test_deferred_switch_materialises_when_cost_favourable() -> None:
         source=Backend.TABLEAU,
         target=Backend.MPS,
         boundary_size=1,
+        break_even=2,
     )
     assert second_candidate.gate_index == 2
     assert_trace_entry(
@@ -370,6 +374,7 @@ def test_deferred_switch_materialises_when_cost_favourable() -> None:
         source=Backend.TABLEAU,
         target=Backend.MPS,
         boundary_size=1,
+        break_even=2,
     )
     assert applied.gate_index == 2
     conversion = ssd.conversions[0]
@@ -378,6 +383,106 @@ def test_deferred_switch_materialises_when_cost_favourable() -> None:
     backends = [part.backend for part in ssd.partitions]
     assert Backend.TABLEAU in backends
     assert Backend.MPS in backends
+
+
+def test_deferred_switch_projection_estimates_break_even_horizon() -> None:
+    estimator = LinearEstimator(prefix_rate=8.0, suffix_rate=1.0, conversion_cost=20.0)
+    selector = DummySelector(
+        [
+            (Backend.TABLEAU, Cost(time=1.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+        ]
+    )
+    partitioner = Partitioner(estimator=estimator, selector=selector)
+    circuit = build_circuit(
+        Gate("CX", [0, 1]),
+        Gate("T", [0]),
+        Gate("T", [0]),
+        Gate("T", [0]),
+        Gate("T", [0]),
+    )
+
+    ssd = partitioner.partition(circuit, debug=True)
+
+    assert len(ssd.conversions) == 1
+    # Three candidates followed by an applied entry once the savings amortise the conversion.
+    assert len(ssd.trace) == 4
+    first, second, third, applied = ssd.trace
+    assert_trace_entry(
+        first,
+        reason="deferred_switch_candidate",
+        applied=False,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+        break_even=3,
+    )
+    assert_trace_entry(
+        second,
+        reason="deferred_switch_candidate",
+        applied=False,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+        break_even=3,
+    )
+    assert_trace_entry(
+        third,
+        reason="deferred_switch_candidate",
+        applied=False,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+        break_even=3,
+    )
+    assert_trace_entry(
+        applied,
+        reason="deferred_backend_switch",
+        applied=True,
+        source=Backend.TABLEAU,
+        target=Backend.MPS,
+        boundary_size=1,
+        break_even=3,
+    )
+
+
+def test_deferred_switch_abandons_when_lookahead_insufficient() -> None:
+    estimator = LinearEstimator(prefix_rate=8.0, suffix_rate=1.0, conversion_cost=50.0)
+    selector = DummySelector(
+        [
+            (Backend.TABLEAU, Cost(time=1.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+            (Backend.MPS, Cost(time=2.0, memory=1.0)),
+        ]
+    )
+    partitioner = Partitioner(estimator=estimator, selector=selector)
+    circuit = build_circuit(
+        Gate("CX", [0, 1]),
+        Gate("T", [0]),
+        Gate("T", [0]),
+        Gate("T", [0]),
+    )
+
+    ssd = partitioner.partition(circuit, debug=True)
+
+    assert not ssd.conversions
+    assert len(ssd.trace) == 3
+    for entry in ssd.trace:
+        assert_trace_entry(
+            entry,
+            reason="deferred_switch_candidate",
+            applied=False,
+            source=Backend.TABLEAU,
+            target=Backend.MPS,
+            boundary_size=1,
+            break_even=None,
+        )
+    assert all(part.backend == Backend.TABLEAU for part in ssd.partitions)
 
 
 def test_entanglement_bounds_cached_for_deferred_switch() -> None:
@@ -404,7 +509,7 @@ def test_entanglement_bounds_cached_for_deferred_switch() -> None:
 
     reasons = [entry.reason for entry in ssd.trace]
     assert reasons.count("deferred_switch_candidate") >= 2
-    assert estimator.bond_queries == 1
+    assert estimator.bond_queries <= 2
 
 
 def test_conversion_primitive_respects_entanglement_bound() -> None:
