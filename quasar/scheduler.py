@@ -968,6 +968,12 @@ class Scheduler:
         conv_layers = list(getattr(plan, "conversions", []))
         conv_idx = 0
         est_costs = plan.step_costs or [Cost(time=0.0, memory=0.0)] * len(steps)
+        step_qubits: List[frozenset[int]] = [
+            frozenset(
+                q for g in gates[step.start : step.end] for q in g.qubits
+            )
+            for step in steps
+        ]
         if max_time is not None:
             total_est = Cost(time=0.0, memory=0.0)
             for c in est_costs:
@@ -1111,6 +1117,108 @@ class Scheduler:
                     backend_switches += 1
                 prev_backend = target
             segment = gates[step.start : step.end]
+
+            if (
+                not conv_layers
+                and current_sim is None
+                and not step.parallel
+            ):
+                group_indices = self._collect_disjoint_steps(
+                    steps, step_qubits, i
+                )
+                if len(group_indices) > 1:
+                    group_prev = prev_backend
+                    if group_prev is None:
+                        group_prev = steps[group_indices[0]].backend
+                    for idx in group_indices[1:]:
+                        backend_candidate = steps[idx].backend
+                        if backend_candidate != group_prev:
+                            backend_switches += 1
+                            group_prev = backend_candidate
+                    prev_backend = group_prev
+
+                    jobs: List[tuple[object, List]] = []
+                    for idx in group_indices:
+                        sub_step = steps[idx]
+                        sub_segment = gates[sub_step.start : sub_step.end]
+                        key = (step_qubits[idx], sub_step.backend)
+                        sim_obj = sims.get(key)
+                        if sim_obj is None:
+                            sim_obj = type(self.backends[sub_step.backend])()
+                            self._load_backend(
+                                sim_obj, circuit.num_qubits, target=sub_step.backend
+                            )
+                            sims[key] = sim_obj
+                        jobs.append((sim_obj, sub_segment))
+
+                    combined_cost = est_costs[group_indices[0]]
+                    for idx in group_indices[1:]:
+                        combined_cost = _add_cost(
+                            combined_cost, est_costs[idx], parallel=True
+                        )
+                    estimator = (
+                        self.planner.estimator
+                        if self.planner is not None
+                        else None
+                    )
+                    if estimator is not None:
+                        combined_cost = Cost(
+                            time=
+                                combined_cost.time
+                                + estimator.parallel_time_overhead(
+                                    len(group_indices)
+                                ),
+                            memory=
+                                combined_cost.memory
+                                + estimator.parallel_memory_overhead(
+                                    len(group_indices)
+                                ),
+                            log_depth=combined_cost.log_depth,
+                            conversion=combined_cost.conversion,
+                            replay=combined_cost.replay,
+                        )
+
+                    if instrument:
+                        tracemalloc.reset_peak()
+                        start_time = time.perf_counter()
+
+                    def _run_segment(job: tuple[object, List]) -> None:
+                        sim_obj, glist = job
+                        for gate in glist:
+                            sim_obj.apply_gate(
+                                gate.gate, gate.qubits, gate.params
+                            )
+
+                    with ThreadPoolExecutor() as executor:
+                        executor.map(_run_segment, jobs)
+
+                    if instrument:
+                        elapsed = time.perf_counter() - start_time
+                        total_gate_time.time += elapsed
+                        _, peak = tracemalloc.get_traced_memory()
+                        total_gate_time.memory = max(
+                            total_gate_time.memory, float(peak)
+                        )
+                        observed = Cost(time=elapsed, memory=float(peak))
+                        if monitor:
+                            parallel_groups = tuple(
+                                tuple(sorted(step_qubits[idx]))
+                                for idx in group_indices
+                            )
+                            monitor(
+                                PlanStep(
+                                    start=steps[group_indices[0]].start,
+                                    end=steps[group_indices[-1]].end,
+                                    backend=steps[group_indices[0]].backend,
+                                    parallel=parallel_groups,
+                                ),
+                                observed,
+                                combined_cost,
+                            )
+                    current_sim = None
+                    current_backend = None
+                    i = group_indices[-1] + 1
+                    continue
 
             if (
                 step.parallel
@@ -1743,3 +1851,26 @@ class Scheduler:
 
     def _estimate_cost(self, backend: Backend, gates: List[Gate]) -> Cost:
         return self._cost_from_estimator(self.planner.estimator, backend, gates)
+
+    def _collect_disjoint_steps(
+        self,
+        steps: Sequence[PlanStep],
+        qubit_sets: Sequence[frozenset[int]],
+        start: int,
+    ) -> List[int]:
+        """Return indices of consecutive steps independent of ``steps[start]``."""
+
+        group = [start]
+        used = set(qubit_sets[start])
+        idx = start + 1
+        while idx < len(steps):
+            step = steps[idx]
+            if step.parallel:
+                break
+            qubits = qubit_sets[idx]
+            if used & qubits:
+                break
+            used.update(qubits)
+            group.append(idx)
+            idx += 1
+        return group
