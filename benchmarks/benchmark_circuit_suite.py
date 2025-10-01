@@ -207,6 +207,55 @@ def build_tfim_trotter(
     return Circuit(gates, use_classical_simplification=False)
 
 
+def build_xxz_trotter(
+    qubits: int,
+    steps: int,
+    j_xy: float,
+    j_z: float,
+    swap_period: int,
+) -> Circuit:
+    """Construct a nearest-neighbour XXZ trotterisation with swap scramblers."""
+
+    if qubits <= 0 or steps <= 0:
+        return Circuit([])
+
+    gates: list[Gate] = []
+    xx_angle = float(2.0 * j_xy)
+    yy_angle = float(2.0 * j_xy)
+    zz_angle = float(2.0 * j_z)
+    layer_index = 0
+    swap_offset = 0
+
+    def append_entangler_layer(gate_name: str, theta: float) -> None:
+        nonlocal layer_index
+        if qubits < 2 or theta == 0.0:
+            layer_index += 1
+            _maybe_append_swaps()
+            return
+        for start in (0, 1):
+            for left in range(start, qubits - 1, 2):
+                gates.append(Gate(gate_name, [left, left + 1], {"theta": theta}))
+        layer_index += 1
+        _maybe_append_swaps()
+
+    def _maybe_append_swaps() -> None:
+        nonlocal swap_offset
+        if swap_period <= 0 or qubits < 2:
+            return
+        if layer_index % swap_period != 0:
+            return
+        for left in range(swap_offset, qubits - 1, 2):
+            gates.append(Gate("SWAP", [left, left + 1]))
+        swap_offset = 1 - swap_offset
+
+    for _ in range(max(0, steps)):
+        append_entangler_layer("RXX", xx_angle)
+        append_entangler_layer("RYY", yy_angle)
+        append_entangler_layer("RZZ", zz_angle)
+
+    return Circuit(gates, use_classical_simplification=False)
+
+
 def _partition_gate_fractions(partitions: Iterable[Any]) -> Mapping[str, float]:
     """Return backend-labelled gate fractions derived from ``partitions``."""
 
@@ -398,6 +447,45 @@ def collect_tfim_trotter_metrics(result: BenchmarkResult) -> dict[str, float]:
     return metrics
 
 
+def collect_xxz_trotter_metrics(result: BenchmarkResult) -> dict[str, float]:
+    """Record χ growth, backend usage and runtime for the XXZ trotter workload."""
+
+    metrics = dict(collect_graph_state_metrics(result))
+    record = result.record
+    ssd = record.get("result")
+
+    trace_entries = list(getattr(ssd, "trace", ())) if ssd is not None else []
+    ranks = [float(entry.rank) for entry in trace_entries if getattr(entry, "rank", None)]
+    if ranks:
+        metrics["max_trace_rank"] = max(ranks)
+    else:
+        metrics["max_trace_rank"] = 0.0
+    boundaries = [
+        float(entry.boundary_size)
+        for entry in trace_entries
+        if getattr(entry, "boundary_size", 0)
+    ]
+    if boundaries:
+        metrics["max_boundary_size"] = max(boundaries)
+    else:
+        metrics["max_boundary_size"] = 0.0
+
+    partitions = list(getattr(ssd, "partitions", ())) if ssd is not None else []
+    if partitions:
+        backend_labels = {
+            getattr(getattr(part, "backend", None), "name", str(getattr(part, "backend", None)))
+            for part in partitions
+            if getattr(part, "backend", None) is not None
+        }
+        if backend_labels:
+            metrics["unique_backend_count"] = float(len(backend_labels))
+
+    conversions = list(getattr(ssd, "conversions", ())) if ssd is not None else []
+    metrics["conversions_skipped"] = 1.0 if not conversions else 0.0
+
+    return metrics
+
+
 register_family(
     BenchmarkCircuitFamily(
         name="graph_state_magic_injection",
@@ -488,6 +576,39 @@ register_family(
 )
 
 
+register_family(
+    BenchmarkCircuitFamily(
+        name="xxz_trotter_scramble",
+        display_name="XXZ Trotter scramble",
+        description=(
+            "Nearest-neighbour XXZ evolution with periodic swap networks to"
+            " scramble locality and inhibit conversion triggers."
+        ),
+        builder=build_xxz_trotter,
+        parameter_grid={
+            "qubits": (64,),
+            "steps": (100, 200),
+            "j_xy": (1.0,),
+            "j_z": (0.5,),
+            "swap_period": (4,),
+        },
+        metadata={
+            "scenario": "anti_conversion",
+            "expected_conversions": (
+                "Swap scramblers keep entanglement distributed without crossing"
+                " thresholds for conversion primitives, so the planner should"
+                " remain on a single backend."
+            ),
+            "notes": (
+                "Tracks χ growth and backend dwell metrics to verify that"
+                " conversion heuristics stay inactive despite long evolutions."
+            ),
+        },
+        metric_hooks=(collect_xxz_trotter_metrics,),
+    )
+)
+
+
 __all__ = [
     "BenchmarkCircuitFamily",
     "BenchmarkResult",
@@ -496,7 +617,9 @@ __all__ = [
     "build_graph_state_magic_injection",
     "build_qec_clifford_magic_patch",
     "build_tfim_trotter",
+    "build_xxz_trotter",
     "collect_graph_state_metrics",
     "collect_tfim_trotter_metrics",
+    "collect_xxz_trotter_metrics",
 ]
 
