@@ -142,13 +142,9 @@ def _load_estimator(calibration: Path | None) -> CostEstimator:
     """Return a cost estimator optionally initialised from calibration data."""
 
     estimator = CostEstimator()
-    coeff: dict[str, float] | None = None
-    if calibration is not None:
-        coeff = load_coefficients(calibration)
-    else:
-        coeff = latest_coefficients()
-    if coeff:
-        apply_calibration(estimator, coeff)
+    record = load_coefficients(calibration) if calibration is not None else latest_coefficients()
+    if record:
+        apply_calibration(estimator, record)
     return estimator
 
 
