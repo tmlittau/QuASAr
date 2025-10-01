@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from quasar.circuit import Circuit, Gate
-from quasar.cost import Backend, Cost, ConversionEstimate
+from quasar.cost import Backend, Cost, ConversionEstimate, CostEstimator
 from quasar.partitioner import Partitioner
 from quasar.sparsity import sparsity_estimate
 from quasar.symmetry import (
@@ -21,6 +21,8 @@ class SimpleEstimator:
     time: float = 1.0
     memory: float = 1.0
     coeff: dict[str, float] = field(default_factory=dict)
+
+    _baseline_estimator: CostEstimator = field(default_factory=CostEstimator, init=False, repr=False)
 
     def conversion(  # type: ignore[no-untyped-def]
         self,
@@ -56,6 +58,12 @@ class SimpleEstimator:
 
     def derive_conversion_window(self, num_qubits, *, rank, compressed_terms=None, bond_dimension=None):  # type: ignore[no-untyped-def]
         return min(num_qubits, 4)
+
+    def bond_dimensions(self, num_qubits, gates):  # type: ignore[no-untyped-def]
+        return self._baseline_estimator.bond_dimensions(num_qubits, gates)
+
+    def max_schmidt_rank(self, num_qubits, gates):  # type: ignore[no-untyped-def]
+        return self._baseline_estimator.max_schmidt_rank(num_qubits, gates)
 
 
 class MetricsAssertingSelector:
