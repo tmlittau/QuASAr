@@ -199,6 +199,22 @@ cheaper than continuing with the current backend.  Additional reasons such as
 ``statevector_lock`` and ``single_qubit_preamble`` capture fast-path rejections
 for dense fragments and single-qubit prefixes respectively.【F:quasar/partitioner.py†L283-L399】【F:quasar/partitioner.py†L495-L508】【F:quasar/partitioner.py†L536-L547】
 
+### Fragment metrics
+
+Explaining backend choices also benefits from structural statistics about each
+planned fragment.  Enabling ``explain=True`` now attaches a
+``fragment_metrics`` list to :class:`~quasar.planner.PlanDiagnostics`.  Each
+entry tracks the span, backend, sparsity, rotation diversity, entanglement
+estimate and locality measures for the selected fragment, along with the
+heuristic values that influenced the decision.【F:quasar/planner.py†L215-L235】【F:quasar/planner.py†L465-L508】 The helper
+``PlanDiagnostics.fragments_as_dicts()`` converts the records into plain
+dictionaries, while :func:`~quasar.metrics.export_fragment_metrics_json` and
+:func:`~quasar.metrics.export_fragment_metrics_csv` persist the metrics for
+notebook analysis or post-processing pipelines.【F:quasar/planner.py†L238-L242】【F:quasar/metrics.py†L96-L172】 Each
+fragment metric entry mirrors the machine-readable diagnostics emitted by the
+method selector for individual selection calls, making the planner and the
+offline theoretical notebooks consume the same observables.【F:quasar/method_selector.py†L190-L262】【F:quasar/method_selector.py†L466-L520】
+
 Rank and frontier diagnostics in these traces come from the conversion helper
 inside the partitioner.  Boundaries fall back to ``2**|boundary|`` when no
 external rank model is supplied, and the estimator's chosen primitive plus its

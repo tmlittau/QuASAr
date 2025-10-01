@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Sequence
+import csv
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
+
+from .cost import Backend
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .circuit import Gate
@@ -141,3 +146,102 @@ class FragmentMetrics:
             "num_2q": self.num_2q,
             "num_t": self.num_t,
         }
+
+
+@dataclass
+class FragmentMetricRecord:
+    """Structured fragment metrics suitable for serialization."""
+
+    start: int
+    end: int
+    backend: Backend | None
+    metrics: Dict[str, Any]
+    parallel: Sequence[Sequence[int]] | None = None
+
+    def to_mapping(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable mapping for ``self``."""
+
+        payload: Dict[str, Any] = {
+            "start": self.start,
+            "end": self.end,
+            "backend": self.backend.name if self.backend is not None else None,
+        }
+        if self.parallel:
+            payload["parallel_groups"] = [list(group) for group in self.parallel]
+
+        for key, value in self.metrics.items():
+            payload[key] = _normalise_value(value)
+        return payload
+
+
+def _normalise_value(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return [_normalise_value(v) for v in value]
+    if isinstance(value, list):
+        return [_normalise_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _normalise_value(v) for k, v in value.items()}
+    return value
+
+
+def _normalise_record(record: FragmentMetricRecord | Mapping[str, Any]) -> Dict[str, Any]:
+    if isinstance(record, FragmentMetricRecord):
+        return record.to_mapping()
+    if isinstance(record, Mapping):
+        return {k: _normalise_value(v) for k, v in record.items()}
+    raise TypeError(f"Unsupported fragment metric record: {type(record)!r}")
+
+
+def export_fragment_metrics_json(
+    records: Sequence[FragmentMetricRecord | Mapping[str, Any]],
+    path: str | Path,
+) -> Path:
+    """Write ``records`` to ``path`` in JSON format.
+
+    Parameters
+    ----------
+    records:
+        Iterable of :class:`FragmentMetricRecord` or plain mappings describing
+        fragment metrics.
+    path:
+        Destination file.  Parent directories are created automatically.
+    """
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = [_normalise_record(record) for record in records]
+    destination.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf8")
+    return destination
+
+
+def export_fragment_metrics_csv(
+    records: Sequence[FragmentMetricRecord | Mapping[str, Any]],
+    path: str | Path,
+) -> Path:
+    """Write ``records`` to ``path`` in CSV format."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    rows = [_normalise_record(record) for record in records]
+    if not rows:
+        destination.write_text("", encoding="utf8")
+        return destination
+
+    fieldnames: List[str] = sorted({key for row in rows for key in row.keys()})
+    with destination.open("w", newline="", encoding="utf8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            formatted = {
+                key: _format_csv_value(row.get(key)) for key in fieldnames
+            }
+            writer.writerow(formatted)
+    return destination
+
+
+def _format_csv_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, separators=(",", ":"))
+    return value
