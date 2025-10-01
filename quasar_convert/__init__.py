@@ -44,6 +44,17 @@ try:  # pragma: no cover - exercised when the extension is available
             self.truncation_max_terms = truncation_max_terms
             self.truncation_normalise = truncation_normalise
 
+        @property
+        def st_chi_cap(self) -> int:
+            return int(self.__dict__.get("_st_chi_cap", 16))
+
+        @st_chi_cap.setter
+        def st_chi_cap(self, value: int) -> None:
+            cap = max(1, int(value))
+            self.__dict__["_st_chi_cap"] = cap
+            if "_impl" in self.__dict__:
+                self._impl.st_chi_cap = cap
+
         def _ensure_impl(self) -> None:
             if "_impl" not in self.__dict__:
                 self.__dict__["_impl"] = _CEngine()
@@ -307,6 +318,15 @@ except Exception:  # pragma: no cover - exercised when extension missing
             self.truncation_max_terms = truncation_max_terms
             self.truncation_normalise = truncation_normalise
             self._compression_stats = CompressionStats()
+
+        @property
+        def st_chi_cap(self) -> int:
+            return int(getattr(self, "_st_chi_cap", 16))
+
+        @st_chi_cap.setter
+        def st_chi_cap(self, value: int) -> None:
+            cap = max(1, int(value))
+            self._st_chi_cap = cap
 
         def _apply_truncation(self, state: List[complex]) -> List[complex]:
             stats = CompressionStats(original_terms=len(state), retained_terms=len(state), fidelity=1.0)

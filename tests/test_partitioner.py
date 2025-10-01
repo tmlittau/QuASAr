@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -20,6 +20,7 @@ class SimpleEstimator:
 
     time: float = 1.0
     memory: float = 1.0
+    coeff: dict[str, float] = field(default_factory=dict)
 
     def conversion(  # type: ignore[no-untyped-def]
         self,

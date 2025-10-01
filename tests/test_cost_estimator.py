@@ -118,3 +118,51 @@ def test_conversion_window_reflects_entanglement() -> None:
     )
     assert estimate.primitive == selected_primitive
     assert estimate.window == selected_detail.window
+
+
+def test_staged_conversion_respects_cap_hint() -> None:
+    estimator = CostEstimator()
+    rank = 20
+    cap_hint = 8
+    details = estimator.conversion_candidates(
+        Backend.STATEVECTOR,
+        Backend.STATEVECTOR,
+        num_qubits=6,
+        rank=rank,
+        frontier=6,
+        chi_cap=cap_hint,
+    )
+    staged = details["ST"]
+    assert staged.chi_cap == cap_hint
+    assert staged.stages == 3
+    stage_coeff = estimator.coeff["st_stage"]
+    remaining = rank
+    dims = []
+    while remaining > 0:
+        dims.append(min(cap_hint, remaining))
+        remaining -= cap_hint
+    expected_stage = stage_coeff * sum(dim**3 for dim in dims)
+    assert staged.components["stage"] == pytest.approx(expected_stage)
+    ingest = estimator.coeff["ingest_sv"] * (2**6)
+    base = estimator.coeff.get("conversion_base", 0.0)
+    assert staged.cost.time == pytest.approx(expected_stage + ingest + base)
+
+
+def test_staged_conversion_single_stage_when_cap_suffices() -> None:
+    estimator = CostEstimator()
+    rank = 12
+    cap_hint = 32
+    details = estimator.conversion_candidates(
+        Backend.STATEVECTOR,
+        Backend.STATEVECTOR,
+        num_qubits=5,
+        rank=rank,
+        frontier=5,
+        chi_cap=cap_hint,
+    )
+    staged = details["ST"]
+    assert staged.chi_cap == cap_hint
+    assert staged.stages == 1
+    stage_coeff = estimator.coeff["st_stage"]
+    expected_stage = stage_coeff * (rank**3)
+    assert staged.components["stage"] == pytest.approx(expected_stage)

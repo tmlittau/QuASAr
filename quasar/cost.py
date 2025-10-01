@@ -75,6 +75,8 @@ class ConversionPrimitiveDetails:
     window: Optional[int] = None
     components: Dict[str, float] = None
     memory_components: Dict[str, float] = None
+    chi_cap: Optional[int] = None
+    stages: Optional[int] = None
 
     def __post_init__(self) -> None:  # pragma: no cover - defensive
         if self.components is None:
@@ -832,6 +834,7 @@ class CostEstimator:
         q_max: Optional[int] = None,
         compressed_terms: Optional[int] = None,
         bond_dimension: Optional[int] = None,
+        chi_cap: Optional[int] = None,
     ) -> Dict[str, ConversionPrimitiveDetails]:
         """Return time and memory for each conversion primitive.
 
@@ -857,6 +860,9 @@ class CostEstimator:
             Optional estimate of the Schmidt rank induced across the boundary.
             When provided, the LW window aims to cover ``log2(bond_dimension)``
             qubits.
+        chi_cap:
+            Optional staging cap hint applied to the ST primitive. When
+            omitted, the estimator falls back to ``coeff['st_chi_cap']``.
         """
 
         s_cap = s_max if s_max is not None else self.s_max
@@ -940,9 +946,24 @@ class CostEstimator:
         )
 
         # --- ST primitive ---
-        chi_cap = int(self.coeff.get("st_chi_cap", 16)) or 16
-        chi_tilde = min(rank, chi_cap)
-        stage_time = self.coeff["st_stage"] * (chi_tilde**3)
+        default_cap = int(self.coeff.get("st_chi_cap", 16)) or 16
+        cap_hint = chi_cap if chi_cap is not None else default_cap
+        try:
+            resolved_cap = int(cap_hint)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            resolved_cap = default_cap
+        if resolved_cap <= 0:
+            resolved_cap = 1
+        chi_tilde = min(rank, resolved_cap)
+        if rank > resolved_cap:
+            stage_dims = [resolved_cap] * (math.ceil(rank / resolved_cap) - 1)
+            remainder = rank - resolved_cap * len(stage_dims)
+            if remainder <= 0:
+                remainder = resolved_cap
+            stage_dims.append(remainder)
+        else:
+            stage_dims = [chi_tilde]
+        stage_time = sum(self.coeff["st_stage"] * (dim**3) for dim in stage_dims)
         st_time = stage_time + overhead
         st_mem = max(num_qubits * (chi_tilde**2), dense_total) + ingest_mem
         details["ST"] = ConversionPrimitiveDetails(
@@ -953,6 +974,8 @@ class CostEstimator:
                 "full_register": dense_total,
                 "ingest": ingest_mem,
             },
+            chi_cap=resolved_cap,
+            stages=len(stage_dims),
         )
 
         # --- Full extraction primitive ---
@@ -986,8 +1009,17 @@ class CostEstimator:
         q_max: Optional[int] = None,
         compressed_terms: Optional[int] = None,
         bond_dimension: Optional[int] = None,
+        chi_cap: Optional[int] = None,
     ) -> ConversionEstimate:
-        """Estimate cost to convert between representations."""
+        """Estimate cost to convert between representations.
+
+        Parameters
+        ----------
+        chi_cap:
+            Optional staging cap hint forwarded to
+            :meth:`conversion_candidates`. When provided the ST primitive
+            records the resolved cap and stage count in its details.
+        """
 
         details = self.conversion_candidates(
             source,
@@ -1003,6 +1035,7 @@ class CostEstimator:
             q_max=q_max,
             compressed_terms=compressed_terms,
             bond_dimension=bond_dimension,
+            chi_cap=chi_cap,
         )
 
         primitive, detail = min(details.items(), key=lambda kv: kv[1].cost.time)

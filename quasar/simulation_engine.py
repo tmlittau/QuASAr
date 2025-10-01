@@ -28,6 +28,7 @@ from .method_selector import NoFeasibleBackendError
 from .scheduler import Scheduler
 from .ssd import SSD, SSDPartition
 from .cost import CostEstimator, Backend
+from . import config
 from quasar_convert import ConversionEngine
 
 STATEVECTOR_MEMORY_ENV = "QUASAR_STATEVECTOR_MAX_MEMORY_BYTES"
@@ -184,14 +185,26 @@ class SimulationEngine:
         estimator: Optional[CostEstimator] = None,
         memory_threshold: float | None = None,
     ) -> None:
-        ce = conversion_engine or ConversionEngine()
+        if conversion_engine is not None:
+            ce = conversion_engine
+        else:
+            cap = config.DEFAULT.st_chi_cap
+            kwargs: dict[str, int] = {}
+            if cap is not None:
+                kwargs["st_chi_cap"] = max(1, int(cap))
+            ce = ConversionEngine(**kwargs)
         override_set, override_threshold = _coerce_explicit_threshold(memory_threshold)
 
         if planner is None:
             resolved_threshold = (
                 override_threshold if override_set else _autodetect_memory_ceiling()
             )
-            self.planner = Planner(estimator=estimator, max_memory=resolved_threshold)
+            self.planner = Planner(
+                estimator=estimator,
+                max_memory=resolved_threshold,
+                staging_chi_cap=getattr(ce, "st_chi_cap", None),
+                conversion_engine=ce,
+            )
         else:
             self.planner = planner
             if override_set:
@@ -199,6 +212,16 @@ class SimulationEngine:
                 resolved_threshold = override_threshold
             else:
                 resolved_threshold = _sanitize_threshold(getattr(self.planner, "max_memory", None))
+            if getattr(self.planner, "conversion_engine", None) is None:
+                self.planner.conversion_engine = ce
+            if hasattr(self.planner, "staging_chi_cap") and getattr(
+                self.planner, "staging_chi_cap"
+            ) is None:
+                cap_hint = getattr(ce, "st_chi_cap", None)
+                if cap_hint is not None:
+                    cap_value = max(1, int(cap_hint))
+                    self.planner.staging_chi_cap = cap_value
+                    self.planner.estimator.coeff["st_chi_cap"] = float(cap_value)
 
         if scheduler is None:
             self.scheduler = Scheduler(planner=self.planner, conversion_engine=ce)
