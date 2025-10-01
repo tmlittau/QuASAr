@@ -464,6 +464,18 @@ def _build_parser() -> argparse.ArgumentParser:
     """Create the CLI argument parser."""
 
     parser = showcase_benchmarks.build_arg_parser()
+    suite_names: tuple[str, ...] = ()
+    if hasattr(showcase_benchmarks, "available_suite_names"):
+        suite_names = showcase_benchmarks.available_suite_names()
+    has_suite_arg = any(getattr(action, "dest", None) == "suite" for action in parser._actions)
+    if suite_names and not has_suite_arg:
+        parser.add_argument(
+            "--suite",
+            choices=sorted(suite_names),
+            metavar="SUITE",
+            default=None,
+            help="Run a preconfigured showcase suite (e.g. stitched-big).",
+        )
     parser.description = (
         "Run QuASAr showcase benchmarks and optionally compute theoretical"
         " resource estimates."
@@ -627,6 +639,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         value = getattr(args, opt, None)
         if value is not None and value <= 0:
             parser.error(f"--{opt.replace('_', '-')} must be positive")
+    if getattr(args, "suite", None):
+        if getattr(args, "circuit_names", None):
+            parser.error("--suite cannot be combined with --circuit/--circuits")
+        if getattr(args, "groups", None):
+            parser.error("--suite cannot be combined with --group")
 
     return args
 

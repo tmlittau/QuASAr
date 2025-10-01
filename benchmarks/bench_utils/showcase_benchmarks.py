@@ -44,6 +44,7 @@ if __package__ in {None, ""}:
     )
     from runner import BenchmarkRunner  # type: ignore[no-redef]
     import circuits as circuit_lib  # type: ignore[no-redef]
+    import stitched_suite as stitched_suites  # type: ignore[no-redef]
     from database import BenchmarkDatabase, BenchmarkRun, open_database  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised when imported as a package module
     from .plot_utils import (
@@ -56,6 +57,7 @@ else:  # pragma: no cover - exercised when imported as a package module
     )
     from .runner import BenchmarkRunner
     from . import circuits as circuit_lib
+    from . import stitched_suite as stitched_suites
     from .database import BenchmarkDatabase, BenchmarkRun, open_database
 
 from quasar import SimulationEngine
@@ -356,6 +358,12 @@ SHOWCASE_GROUPS: Mapping[str, tuple[str, ...]] = {
 }
 
 
+def available_suite_names() -> tuple[str, ...]:
+    """Return the tuple of registered showcase suite names."""
+
+    return stitched_suites.available_suites()
+
+
 class ExtendAction(argparse.Action):
     """`argparse` action that accumulates values across multiple flags."""
 
@@ -384,14 +392,16 @@ def _resolve_selected_circuits(
     *,
     explicit: Sequence[str] | None,
     groups: Sequence[str] | None,
+    catalog: Mapping[str, ShowcaseCircuit] | None = None,
 ) -> list[str]:
     """Return the ordered list of circuits selected for this run."""
 
-    order = OrderedDict((name, None) for name in SHOWCASE_CIRCUITS)
+    available = SHOWCASE_CIRCUITS if catalog is None else catalog
+    order = OrderedDict((name, None) for name in available)
     selected = OrderedDict()
 
     def _add(name: str) -> None:
-        if name not in SHOWCASE_CIRCUITS:
+        if name not in available:
             raise SystemExit(f"unknown circuit name '{name}'")
         if name not in selected:
             selected[name] = None
@@ -935,12 +945,47 @@ def _export_plot(
 
 
 def run_showcase_benchmarks(args: argparse.Namespace) -> None:
+    suite_name = getattr(args, "suite", None)
+    suite_specs: tuple[stitched_suites.StitchedCircuitSpec, ...] = ()
+    suite_overrides: dict[str, tuple[int, ...]] = {}
+    if suite_name:
+        suite_specs = stitched_suites.resolve_suite(suite_name)
+        catalog: Mapping[str, ShowcaseCircuit] = OrderedDict(
+            (
+                spec.name,
+                ShowcaseCircuit(
+                    name=spec.name,
+                    display_name=spec.display_name,
+                    constructor=spec.factory,
+                    default_qubits=spec.widths,
+                    description=spec.description,
+                ),
+            )
+            for spec in suite_specs
+        )
+        suite_overrides = {spec.name: spec.widths for spec in suite_specs}
+    else:
+        catalog = SHOWCASE_CIRCUITS
+
     selected_names = _resolve_selected_circuits(
         explicit=args.circuit_names,
         groups=args.groups,
+        catalog=catalog,
     )
+    if suite_name:
+        LOGGER.info(
+            "Running showcase suite '%s' with circuits: %s",
+            suite_name,
+            ", ".join(selected_names),
+        )
 
-    qubit_overrides = _parse_qubit_overrides(args.qubits) if args.qubits else {}
+    qubit_overrides: dict[str, tuple[int, ...]] = dict(suite_overrides)
+    if args.qubits:
+        user_overrides = _parse_qubit_overrides(args.qubits)
+        for name in user_overrides:
+            if name not in catalog:
+                raise SystemExit(f"unknown circuit name '{name}'")
+        qubit_overrides.update(user_overrides)
 
     run_timeout = None if args.run_timeout <= 0 else args.run_timeout
     memory_bytes = args.memory_bytes if args.memory_bytes and args.memory_bytes > 0 else None
@@ -962,11 +1007,12 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
                 "memory_bytes": memory_bytes,
                 "classical_simplification": classical_simplification,
                 "metric": args.metric,
+                "suite": suite_name,
             },
         )
 
         for name in selected_names:
-            spec = SHOWCASE_CIRCUITS[name]
+            spec = catalog[name]
             widths = qubit_overrides.get(name, spec.default_qubits)
             LOGGER.info("Benchmarking %s across widths: %s", name, widths)
 
@@ -1043,6 +1089,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Run all circuits belonging to the named group(s).",
     )
+    suites = stitched_suites.available_suites()
+    if suites:
+        parser.add_argument(
+            "--suite",
+            choices=sorted(suites),
+            metavar="SUITE",
+            default=None,
+            help="Run a preconfigured showcase suite (e.g. stitched-big).",
+        )
     parser.add_argument(
         "--list-groups",
         action="store_true",
