@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from benchmarks.parallel_circuits import many_ghz_subsystems
@@ -151,3 +153,79 @@ def test_parallel_single_qubit_merge_creates_bridge_state() -> None:
     expected = np.zeros(4, dtype=complex)
     expected[2] = expected[3] = 1 / np.sqrt(2)
     assert np.allclose(bridge_state, expected)
+
+
+def test_disjoint_plan_steps_run_concurrently(monkeypatch) -> None:
+    """Disjoint plan steps without conversions should execute in parallel."""
+
+    delay = 0.05
+
+    class SleepingStatevectorBackend:
+        backend = Backend.STATEVECTOR
+
+        def load(self, num_qubits: int) -> None:  # pragma: no cover - trivial
+            _ = num_qubits
+
+        def apply_gate(self, name, qubits, params) -> None:  # pragma: no cover
+            _ = (name, qubits, params)
+            time.sleep(delay)
+
+        def extract_ssd(self):  # pragma: no cover - not used
+            return None
+
+    class SleepingMPSBackend(SleepingStatevectorBackend):
+        backend = Backend.MPS
+
+    def make_plan() -> tuple[Circuit, PlanResult]:
+        gates = [
+            {"gate": "H", "qubits": [0]},
+            {"gate": "X", "qubits": [0]},
+            {"gate": "Z", "qubits": [0]},
+            {"gate": "H", "qubits": [1]},
+            {"gate": "X", "qubits": [1]},
+            {"gate": "Z", "qubits": [1]},
+        ]
+        circuit = Circuit(gates, use_classical_simplification=False)
+        plan = PlanResult(
+            table=[],
+            final_backend=None,
+            gates=list(circuit.gates),
+            explicit_steps=[
+                PlanStep(0, 3, Backend.STATEVECTOR),
+                PlanStep(3, 6, Backend.MPS),
+            ],
+            explicit_conversions=[],
+        )
+        plan.step_costs = [
+            Cost(time=delay * 3, memory=0.0),
+            Cost(time=delay * 3, memory=0.0),
+        ]
+        return circuit, plan
+
+    def run_scheduler(scheduler: Scheduler) -> float:
+        circuit, plan = make_plan()
+        start = time.perf_counter()
+        scheduler.run(circuit, plan=plan)
+        return time.perf_counter() - start
+
+    backends = {
+        Backend.STATEVECTOR: SleepingStatevectorBackend(),
+        Backend.MPS: SleepingMPSBackend(),
+    }
+
+    scheduler_parallel = Scheduler(backends=backends)
+    parallel_time = run_scheduler(scheduler_parallel)
+
+    scheduler_sequential = Scheduler(backends=backends)
+
+    def no_parallel(self, steps, qubits, start):
+        return [start]
+
+    monkeypatch.setattr(
+        scheduler_sequential,
+        "_collect_disjoint_steps",
+        no_parallel.__get__(scheduler_sequential, Scheduler),
+    )
+    sequential_time = run_scheduler(scheduler_sequential)
+
+    assert parallel_time < sequential_time
