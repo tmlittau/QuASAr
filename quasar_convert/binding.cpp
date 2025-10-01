@@ -101,7 +101,8 @@ PYBIND11_MODULE(_conversion_engine, m) {
              &quasar::ConversionEngine::convert,
              py::arg("ssd"),
              py::arg("window_1q_gates") = 0,
-             py::arg("window_2q_gates") = 0)
+             py::arg("window_2q_gates") = 0,
+             py::arg("window") = py::none())
         .def("build_bridge_tensor", &quasar::ConversionEngine::build_bridge_tensor)
         .def("convert_boundary_to_statevector", &quasar::ConversionEngine::convert_boundary_to_statevector)
         .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)

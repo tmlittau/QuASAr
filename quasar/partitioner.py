@@ -123,6 +123,7 @@ class Partitioner:
             primitive: str | None = None
             conversion_cost: Cost | None = None
             target_cost: Cost | None = None
+            window: int | None = None
 
         pending_switch: _PendingSwitch | None = None
 
@@ -132,13 +133,21 @@ class Partitioner:
             boundary: Set[int],
             *,
             metrics: FragmentMetrics | None = None,
-        ) -> Tuple[Tuple[int, ...], int, int | None, int | None, str | None, Cost | None]:
+        ) -> Tuple[
+            Tuple[int, ...],
+            int,
+            int | None,
+            int | None,
+            str | None,
+            Cost | None,
+            int | None,
+        ]:
             boundary_tuple = tuple(sorted(boundary))
             size = len(boundary_tuple)
             if size == 0 or source is None or source == target:
                 rank = 1 if size == 0 else 2 ** size
                 frontier = size
-                return boundary_tuple, size, rank, frontier, None, None
+                return boundary_tuple, size, rank, frontier, None, None, None
             if metrics is not None:
                 approx = metrics.nnz
                 dense_terms = 1 << size
@@ -150,15 +159,29 @@ class Partitioner:
                 rank = 2 ** size
             frontier = size
             compressed_terms = rank
+            window = self.estimator.derive_conversion_window(
+                size,
+                rank=rank,
+                compressed_terms=compressed_terms,
+            )
             conv_est = self.estimator.conversion(
                 source,
                 target,
                 num_qubits=size,
                 rank=rank,
                 frontier=frontier,
+                window=window,
                 compressed_terms=compressed_terms,
             )
-            return boundary_tuple, size, rank, frontier, conv_est.primitive, conv_est.cost
+            return (
+                boundary_tuple,
+                size,
+                rank,
+                frontier,
+                conv_est.primitive,
+                conv_est.cost,
+                conv_est.window,
+            )
 
         def _gate_statistics(
             gate_seq: List['Gate'],
@@ -254,6 +277,7 @@ class Partitioner:
                     frontier,
                     primitive,
                     conv_cost,
+                    window,
                 ) = _conversion_diagnostics(
                     pending_switch.source_backend,
                     pending_switch.target_backend,
@@ -265,6 +289,7 @@ class Partitioner:
                 pending_switch.frontier = frontier
                 pending_switch.primitive = primitive
                 pending_switch.conversion_cost = conv_cost
+                pending_switch.window = window
                 if boundary_size == 0:
                     pending_switch.boundary_tuple = ()
             if pending_switch.boundary and (
@@ -304,6 +329,7 @@ class Partitioner:
                             frontier=pending_switch.frontier,
                             primitive=pending_switch.primitive,
                             cost=conversion_cost,
+                            window=pending_switch.window,
                         )
                     )
                 _emit_trace(
@@ -343,6 +369,7 @@ class Partitioner:
                 frontier,
                 primitive,
                 conv_cost,
+                window,
             ) = _conversion_diagnostics(source, target, boundary, metrics=current_metrics)
             entry = PartitionTraceEntry(
                 gate_index=gate_index,
@@ -353,6 +380,7 @@ class Partitioner:
                 boundary_size=boundary_size,
                 rank=rank,
                 frontier=frontier,
+                window=window,
                 primitive=primitive,
                 cost=conv_cost,
                 applied=applied,
@@ -473,6 +501,7 @@ class Partitioner:
                         frontier,
                         primitive,
                         conv_cost,
+                        window,
                     ) = _conversion_diagnostics(
                         p_backend, s_backend, boundary, metrics=current_metrics
                     )
@@ -490,6 +519,7 @@ class Partitioner:
                                 frontier=frontier,
                                 primitive=primitive,
                                 cost=conv_cost,
+                                window=window,
                             )
                         )
                     _emit_trace(
@@ -551,6 +581,7 @@ class Partitioner:
                     pending_switch.frontier = None
                     pending_switch.primitive = None
                     pending_switch.conversion_cost = None
+                    pending_switch.window = None
                 _emit_trace(
                     gate_index=idx,
                     gate_name=gate.gate,

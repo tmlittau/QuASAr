@@ -283,14 +283,19 @@ std::vector<std::complex<double>> ConversionEngine::build_bridge_tensor(const SS
 
 ConversionResult ConversionEngine::convert(const SSD& ssd,
                                            std::size_t window_1q_gates,
-                                           std::size_t window_2q_gates) const {
+                                           std::size_t window_2q_gates,
+                                           std::optional<std::size_t> window_override) const {
     const std::size_t boundary = ssd.boundary_qubits.size();
     const std::size_t rank = ssd.top_s;
 
     // Cost estimates mirror the simple analytical models used by the Python
     // ``CostEstimator``.  We treat the returned ``cost`` as a time cost and
     // ignore memory for now since the conversion planner only compares runtime.
-    const std::size_t window = std::min<std::size_t>(boundary, 4);
+    std::size_t window_cap = 4;
+    if (window_override.has_value()) {
+        window_cap = window_override.value();
+    }
+    const std::size_t window = std::min<std::size_t>(boundary, window_cap);
     const std::size_t dense = 1ULL << window;  // dense window size for LW
     const std::size_t chi_tilde = std::min<std::size_t>(rank, st_chi_cap);  // staged cap
     const std::size_t full = 1ULL << std::min<std::size_t>(boundary, 16);

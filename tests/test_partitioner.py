@@ -29,9 +29,14 @@ class SimpleEstimator:
         rank,
         frontier,
         compressed_terms=None,
+        window=None,
         **_kwargs,
     ) -> ConversionEstimate:
-        return ConversionEstimate("FAKE", Cost(time=0.0, memory=0.0, log_depth=float(frontier)))
+        return ConversionEstimate(
+            "FAKE",
+            Cost(time=0.0, memory=0.0, log_depth=float(frontier)),
+            window=window,
+        )
 
     def tableau(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=self.time, memory=self.memory)
@@ -47,6 +52,9 @@ class SimpleEstimator:
 
     def statevector(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=self.time, memory=self.memory)
+
+    def derive_conversion_window(self, num_qubits, *, rank, compressed_terms=None, bond_dimension=None):  # type: ignore[no-untyped-def]
+        return min(num_qubits, 4)
 
 
 class MetricsAssertingSelector:

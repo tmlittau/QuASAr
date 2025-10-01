@@ -40,6 +40,7 @@ class FakeEstimator:
         rank,
         frontier,
         compressed_terms=None,
+        window=None,
         **_kwargs,
     ) -> ConversionEstimate:
         return ConversionEstimate(
@@ -49,6 +50,7 @@ class FakeEstimator:
                 memory=self.conversion_memory * rank,
                 log_depth=float(frontier),
             ),
+            window=window,
         )
 
     def tableau(self, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -65,6 +67,9 @@ class FakeEstimator:
 
     def statevector(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=1.0, memory=2.0)
+
+    def derive_conversion_window(self, num_qubits, *, rank, compressed_terms=None, bond_dimension=None):  # type: ignore[no-untyped-def]
+        return min(num_qubits, 4)
 
 
 @dataclass
@@ -83,11 +88,13 @@ class LinearEstimator:
         rank,
         frontier,
         compressed_terms=None,
+        window=None,
         **_kwargs,
     ) -> ConversionEstimate:
         return ConversionEstimate(
             "FAKE",
             Cost(time=self.conversion_cost, memory=1.0, log_depth=float(frontier)),
+            window=window,
         )
 
     def tableau(self, _num_qubits, num_gates, **_kwargs):  # type: ignore[no-untyped-def]
@@ -112,6 +119,9 @@ class LinearEstimator:
     def statevector(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=1000.0, memory=1.0)
 
+    def derive_conversion_window(self, num_qubits, *, rank, compressed_terms=None, bond_dimension=None):  # type: ignore[no-untyped-def]
+        return min(num_qubits, 4)
+
 
 def build_circuit(*gates: Gate) -> Circuit:
     return Circuit(list(gates), use_classical_simplification=False)
@@ -126,6 +136,7 @@ def assert_trace_entry(
     target: Backend,
     boundary_size: int,
     primitive: str = "FAKE",
+    window: int | None = None,
 ):
     assert entry.reason == reason
     assert entry.applied is applied
@@ -138,6 +149,8 @@ def assert_trace_entry(
         assert entry.primitive == primitive
         assert entry.cost is not None
         assert entry.cost.time > 0
+        if window is not None:
+            assert entry.window == window
     else:
         assert entry.rank == 1
         assert entry.frontier == 0

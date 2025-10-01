@@ -30,6 +30,14 @@ class ConversionPrimitiveTests(unittest.TestCase):
         with_gates = self.eng.convert(ssd, window_1q_gates=3, window_2q_gates=1)
         self.assertGreater(with_gates.cost, base.cost)
 
+    def test_window_override_expands_dense_region(self):
+        ssd = qc.SSD()
+        ssd.boundary_qubits = list(range(8))
+        ssd.top_s = 2
+        default = self.eng.convert(ssd)
+        widened = self.eng.convert(ssd, window=6)
+        self.assertGreater(widened.cost, default.cost)
+
     def test_st_selected(self):
         ssd = qc.SSD()
         ssd.boundary_qubits = list(range(20))

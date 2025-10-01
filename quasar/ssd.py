@@ -44,6 +44,8 @@ class PartitionTraceEntry:
         Estimated Schmidt rank and decision diagram frontier across the cut.
     primitive, cost:
         Conversion primitive and estimated cost when a conversion is required.
+    window:
+        Dense window size requested for local-window conversions.
     applied:
         ``True`` when the backend change was accepted.
     reason:
@@ -58,6 +60,7 @@ class PartitionTraceEntry:
     boundary_size: int = 0
     rank: int | None = None
     frontier: int | None = None
+    window: int | None = None
     primitive: str | None = None
     cost: Cost | None = None
     applied: bool = False
@@ -1071,6 +1074,8 @@ class ConversionLayer:
         ``ST`` or ``Full``).
     cost:
         Estimated cost of performing the conversion.
+    window:
+        Dense window size used by local-window conversions (``None`` otherwise).
     """
 
     boundary: Tuple[int, ...]
@@ -1080,6 +1085,7 @@ class ConversionLayer:
     frontier: int
     primitive: str
     cost: Cost
+    window: int | None = None
 
 
 @dataclass

@@ -64,6 +64,7 @@ class ConversionEstimate:
 
     primitive: str
     cost: Cost
+    window: Optional[int] = None
 
 
 @dataclass
@@ -788,6 +789,33 @@ class CostEstimator:
 
     # Conversion cost estimation -------------------------------------
 
+    def derive_conversion_window(
+        self,
+        num_qubits: int,
+        *,
+        rank: int,
+        compressed_terms: Optional[int] = None,
+        bond_dimension: Optional[int] = None,
+    ) -> int:
+        """Return a dense-window size capturing observed entanglement."""
+
+        if num_qubits <= 0:
+            return 0
+
+        dense_terms = 1 << num_qubits
+        entanglement = max(1, min(dense_terms, rank))
+        if compressed_terms is not None:
+            entanglement = max(entanglement, min(dense_terms, max(1, compressed_terms)))
+        if bond_dimension is not None:
+            entanglement = max(entanglement, min(dense_terms, max(1, bond_dimension)))
+
+        target = int(math.ceil(math.log2(entanglement))) if entanglement > 1 else 0
+        base = min(num_qubits, 4) if num_qubits > 0 else 0
+        window = max(base, target)
+        if num_qubits > 0:
+            window = max(1, window)
+        return min(num_qubits, window)
+
     def conversion_candidates(
         self,
         source: Backend,
@@ -803,6 +831,7 @@ class CostEstimator:
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
         compressed_terms: Optional[int] = None,
+        bond_dimension: Optional[int] = None,
     ) -> Dict[str, ConversionPrimitiveDetails]:
         """Return time and memory for each conversion primitive.
 
@@ -824,6 +853,10 @@ class CostEstimator:
             Estimated number of amplitudes retained after compression. When
             provided, ingestion costs scale with this value instead of the
             dense register size ``2**num_qubits``.
+        bond_dimension:
+            Optional estimate of the Schmidt rank induced across the boundary.
+            When provided, the LW window aims to cover ``log2(bond_dimension)``
+            qubits.
         """
 
         s_cap = s_max if s_max is not None else self.s_max
@@ -871,7 +904,16 @@ class CostEstimator:
         )
 
         # --- LW primitive ---
-        w = window if window is not None else min(num_qubits, 4)
+        w = (
+            window
+            if window is not None
+            else self.derive_conversion_window(
+                num_qubits,
+                rank=rank,
+                compressed_terms=compressed_terms,
+                bond_dimension=bond_dimension,
+            )
+        )
         dense = 2**w
         gate_time = (
             self.coeff["sv_gate_1q"] * window_1q_gates
@@ -943,6 +985,7 @@ class CostEstimator:
         r_max: Optional[int] = None,
         q_max: Optional[int] = None,
         compressed_terms: Optional[int] = None,
+        bond_dimension: Optional[int] = None,
     ) -> ConversionEstimate:
         """Estimate cost to convert between representations."""
 
@@ -959,12 +1002,13 @@ class CostEstimator:
             r_max=r_max,
             q_max=q_max,
             compressed_terms=compressed_terms,
+            bond_dimension=bond_dimension,
         )
 
         primitive, detail = min(details.items(), key=lambda kv: kv[1].cost.time)
         if math.isinf(detail.cost.time):
             primitive = "Full"
-        return ConversionEstimate(primitive=primitive, cost=detail.cost)
+        return ConversionEstimate(primitive=primitive, cost=detail.cost, window=detail.window)
 
 
 __all__ = [
