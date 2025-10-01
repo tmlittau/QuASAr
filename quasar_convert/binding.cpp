@@ -56,6 +56,12 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .value("ST", quasar::Primitive::ST)
         .value("Full", quasar::Primitive::Full);
 
+    py::enum_<quasar::ExecutionMode>(m, "ExecutionMode")
+        .value("Auto", quasar::ExecutionMode::Auto)
+        .value("Serial", quasar::ExecutionMode::Serial)
+        .value("CPUThreads", quasar::ExecutionMode::CPUThreads)
+        .value("GPU", quasar::ExecutionMode::GPU);
+
     py::class_<quasar::ConversionResult>(m, "ConversionResult")
         .def_readonly("primitive", &quasar::ConversionResult::primitive)
         .def_readonly("cost", &quasar::ConversionResult::cost)
@@ -94,10 +100,16 @@ PYBIND11_MODULE(_conversion_engine, m) {
         .def_readwrite("truncation_tolerance", &quasar::ConversionEngine::truncation_tolerance)
         .def_readwrite("truncation_max_terms", &quasar::ConversionEngine::truncation_max_terms)
         .def_readwrite("truncation_normalise", &quasar::ConversionEngine::truncation_normalise)
+        .def_readwrite("execution_mode", &quasar::ConversionEngine::execution_mode)
+        .def_readwrite("cpu_thread_count", &quasar::ConversionEngine::cpu_thread_count)
         .def("estimate_cost", &quasar::ConversionEngine::estimate_cost)
         .def("extract_ssd", &quasar::ConversionEngine::extract_ssd)
         .def("extract_boundary_ssd", &quasar::ConversionEngine::extract_boundary_ssd)
-        .def("extract_local_window", &quasar::ConversionEngine::extract_local_window)
+        .def("extract_local_window",
+             &quasar::ConversionEngine::extract_local_window,
+             py::arg("state"),
+             py::arg("window_qubits"),
+             py::arg("mode") = quasar::ExecutionMode::Auto)
         .def("convert",
              &quasar::ConversionEngine::convert,
              py::arg("ssd"),
@@ -105,7 +117,10 @@ PYBIND11_MODULE(_conversion_engine, m) {
              py::arg("window_2q_gates") = 0,
              py::arg("window") = py::none())
         .def("build_bridge_tensor", &quasar::ConversionEngine::build_bridge_tensor)
-        .def("convert_boundary_to_statevector", &quasar::ConversionEngine::convert_boundary_to_statevector)
+        .def("convert_boundary_to_statevector",
+             &quasar::ConversionEngine::convert_boundary_to_statevector,
+             py::arg("ssd"),
+             py::arg("mode") = quasar::ExecutionMode::Auto)
         .def("convert_boundary_to_stn", &quasar::ConversionEngine::convert_boundary_to_stn)
         .def("mps_to_statevector", &quasar::ConversionEngine::mps_to_statevector)
         .def("dense_statevector_queries", &quasar::ConversionEngine::dense_statevector_queries)

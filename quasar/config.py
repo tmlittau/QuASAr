@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import List
 
 from .cost import Backend
+from quasar_convert import ExecutionMode
 
 
 def _int_from_env(name: str, default: int | None) -> int | None:
@@ -71,6 +72,21 @@ def _default_parallel_backends() -> List[Backend]:
     return _backends_from_env("QUASAR_PARALLEL_BACKENDS", base)
 
 
+def _execution_mode_from_env(name: str, default: ExecutionMode) -> ExecutionMode:
+    val = os.getenv(name)
+    if val is None or not val.strip():
+        return default
+    lookup = {
+        "auto": ExecutionMode.Auto,
+        "serial": ExecutionMode.Serial,
+        "cpu": ExecutionMode.CPUThreads,
+        "cpu_threads": ExecutionMode.CPUThreads,
+        "threads": ExecutionMode.CPUThreads,
+        "gpu": ExecutionMode.GPU,
+    }
+    return lookup.get(val.strip().lower(), default)
+
+
 @dataclass
 class Config:
     """Runtime configuration defaults for QuASAr.
@@ -95,6 +111,10 @@ class Config:
         )
     )
     parallel_backends: List[Backend] = field(default_factory=_default_parallel_backends)
+    ingestion_execution_mode: ExecutionMode = _execution_mode_from_env(
+        "QUASAR_INGESTION_MODE", ExecutionMode.CPUThreads
+    )
+    ingestion_threads: int | None = _int_from_env("QUASAR_INGESTION_THREADS", None)
     mps_target_fidelity: float = _float_from_env(
         "QUASAR_MPS_TARGET_FIDELITY", 1.0
     )

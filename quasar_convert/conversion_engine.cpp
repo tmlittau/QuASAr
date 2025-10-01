@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <numeric>
 #include <limits>
+#include <thread>
+#include <system_error>
 #ifdef QUASAR_USE_MQT
 #include <dd/Edge.hpp>
 #include <dd/Node.hpp>
@@ -24,6 +26,99 @@ ConversionEngine::ConversionEngine() {
 #ifdef QUASAR_USE_MQT
     dd_pkg = std::make_unique<dd::Package<>>();
 #endif
+}
+
+ExecutionMode ConversionEngine::resolve_execution_mode(ExecutionMode mode) const {
+    if (mode == ExecutionMode::Auto) {
+        if (execution_mode == ExecutionMode::Auto) {
+            return ExecutionMode::Serial;
+        }
+        return execution_mode;
+    }
+    return mode;
+}
+
+std::size_t ConversionEngine::resolve_thread_count(ExecutionMode mode,
+                                                   std::size_t work_items) const {
+    if (mode != ExecutionMode::CPUThreads || work_items <= 1) {
+        return 1;
+    }
+    std::size_t requested = cpu_thread_count;
+    if (requested == 0) {
+        requested = std::thread::hardware_concurrency();
+    }
+    if (requested == 0) {
+        requested = 1;
+    }
+    requested = std::min(requested, work_items);
+    const std::size_t min_chunk = 1024;
+    std::size_t max_allowed = std::max<std::size_t>(1, work_items / min_chunk);
+    requested = std::min(requested, std::max<std::size_t>(1, max_allowed));
+    return std::max<std::size_t>(1, requested);
+}
+
+std::size_t ConversionEngine::parallel_for_chunks(
+    std::size_t work_items,
+    std::size_t threads,
+    const std::function<void(std::size_t, std::size_t, std::size_t)>& fn) const {
+    if (work_items == 0) {
+        return 0;
+    }
+    std::size_t chunk_count = std::max<std::size_t>(1, std::min(threads, work_items));
+    if (chunk_count <= 1) {
+        fn(0, 0, work_items);
+        return 1;
+    }
+
+    std::vector<std::pair<std::size_t, std::size_t>> ranges;
+    ranges.reserve(chunk_count);
+    const std::size_t base = work_items / chunk_count;
+    const std::size_t remainder = work_items % chunk_count;
+    std::size_t begin = 0;
+    for (std::size_t idx = 0; idx < chunk_count; ++idx) {
+        std::size_t end = begin + base + (idx < remainder ? 1 : 0);
+        ranges.emplace_back(begin, end);
+        begin = end;
+    }
+
+    std::vector<std::thread> workers;
+    workers.reserve(chunk_count > 0 ? chunk_count - 1 : 0);
+    bool launched_all = true;
+    std::size_t idx = 0;
+    for (; idx + 1 < chunk_count; ++idx) {
+        auto [start, end] = ranges[idx];
+        if (start >= end) {
+            continue;
+        }
+        try {
+            workers.emplace_back([&, start, end, chunk = idx]() { fn(chunk, start, end); });
+        } catch (const std::system_error&) {
+            launched_all = false;
+            break;
+        }
+    }
+
+    if (launched_all) {
+        auto [start, end] = ranges.back();
+        if (start < end) {
+            fn(chunk_count - 1, start, end);
+        }
+    } else {
+        for (std::size_t fallback = idx; fallback < chunk_count; ++fallback) {
+            auto [start, end] = ranges[fallback];
+            if (start < end) {
+                fn(fallback, start, end);
+            }
+        }
+    }
+
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+
+    return chunk_count;
 }
 
 std::size_t ConversionEngine::compressed_cardinality() const {
@@ -247,18 +342,39 @@ SSD ConversionEngine::extract_boundary_ssd(
 
 std::vector<std::complex<double>> ConversionEngine::extract_local_window(
     const std::vector<std::complex<double>>& state,
-    const std::vector<uint32_t>& window_qubits) const {
+    const std::vector<uint32_t>& window_qubits,
+    ExecutionMode mode) const {
     const std::size_t k = window_qubits.size();
     const std::size_t dim = 1ULL << k;
     std::vector<std::complex<double>> window(dim, {0.0, 0.0});
-    for (std::size_t local = 0; local < dim; ++local) {
-        std::size_t idx = 0;
-        for (std::size_t bit = 0; bit < k; ++bit) {
-            if ((local >> bit) & 1ULL) {
-                idx |= 1ULL << window_qubits[bit];
+    if (dim == 0) {
+        return window;
+    }
+    const auto resolved = resolve_execution_mode(mode);
+    const std::size_t threads = resolve_thread_count(resolved, dim);
+    if (threads <= 1) {
+        for (std::size_t local = 0; local < dim; ++local) {
+            std::size_t idx = 0;
+            for (std::size_t bit = 0; bit < k; ++bit) {
+                if ((local >> bit) & 1ULL) {
+                    idx |= 1ULL << window_qubits[bit];
+                }
             }
+            window[local] = state[idx];
         }
-        window[local] = state[idx];
+    } else {
+        auto worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+            for (std::size_t local = begin; local < end; ++local) {
+                std::size_t idx = 0;
+                for (std::size_t bit = 0; bit < k; ++bit) {
+                    if ((local >> bit) & 1ULL) {
+                        idx |= 1ULL << window_qubits[bit];
+                    }
+                }
+                window[local] = state[idx];
+            }
+        };
+        parallel_for_chunks(dim, threads, worker);
     }
     apply_truncation(window);
     return window;
@@ -352,7 +468,9 @@ ConversionResult ConversionEngine::convert(const SSD& ssd,
     return result;
 }
 
-std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevector(const SSD& ssd) const {
+std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevector(
+    const SSD& ssd,
+    ExecutionMode mode) const {
     const std::size_t n = ssd.boundary_qubits.size();
     const std::size_t dim = 1ULL << n;
     std::vector<std::complex<double>> state(dim, {0.0, 0.0});
@@ -369,14 +487,31 @@ std::vector<std::complex<double>> ConversionEngine::convert_boundary_to_statevec
             }
         }
     }
-    for (std::size_t idx = 0; idx < dim; ++idx) {
-        std::complex<double> amp{1.0, 0.0};
-        for (std::size_t bit = 0; bit < n; ++bit) {
-            if ((idx >> bit) & 1ULL) {
-                amp *= phases[bit];
+    const auto resolved = resolve_execution_mode(mode);
+    const std::size_t threads = resolve_thread_count(resolved, dim);
+    if (threads <= 1) {
+        for (std::size_t idx = 0; idx < dim; ++idx) {
+            std::complex<double> amp{1.0, 0.0};
+            for (std::size_t bit = 0; bit < n; ++bit) {
+                if ((idx >> bit) & 1ULL) {
+                    amp *= phases[bit];
+                }
             }
+            state[idx] = amp * norm;
         }
-        state[idx] = amp * norm;
+    } else {
+        auto worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+            for (std::size_t idx = begin; idx < end; ++idx) {
+                std::complex<double> amp{1.0, 0.0};
+                for (std::size_t bit = 0; bit < n; ++bit) {
+                    if ((idx >> bit) & 1ULL) {
+                        amp *= phases[bit];
+                    }
+                }
+                state[idx] = amp * norm;
+            }
+        };
+        parallel_for_chunks(dim, threads, worker);
     }
     apply_truncation(state);
     return state;
@@ -583,6 +718,7 @@ ConversionEngine::dd_to_mps(const dd::vEdge& edge, std::size_t chi) const {
     }
 
     std::vector<std::vector<std::complex<double>>> tensors;
+    const auto resolved_mode = resolve_execution_mode(ExecutionMode::Auto);
     tensors.reserve(n);
 
     std::size_t left_dim = 1;
@@ -628,42 +764,101 @@ ConversionEngine::dd_to_mps(const dd::vEdge& edge, std::size_t chi) const {
         std::vector<std::complex<double>> Q(rows * rank, {0.0, 0.0});
         std::vector<std::complex<double>> R(rank * cols, {0.0, 0.0});
 
+        const std::size_t threads = resolve_thread_count(resolved_mode, rows);
+
         for (std::size_t k = 0; k < rank; ++k) {
             auto& column = ordered[k].second;
-            for (std::size_t r = 0; r < rows; ++r) {
-                Q[r * rank + k] = column[r];
-            }
+            auto copy_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                for (std::size_t r = begin; r < end; ++r) {
+                    Q[r * rank + k] = column[r];
+                }
+            };
+            parallel_for_chunks(rows, threads, copy_worker);
             for (std::size_t j = 0; j < k; ++j) {
                 std::complex<double> dot{0.0, 0.0};
-                for (std::size_t r = 0; r < rows; ++r) {
-                    dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                if (threads <= 1) {
+                    for (std::size_t r = 0; r < rows; ++r) {
+                        dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                    }
+                } else {
+                    std::vector<std::complex<double>> partials(threads, {0.0, 0.0});
+                    auto dot_worker = [&](std::size_t chunk, std::size_t begin, std::size_t end) {
+                        std::complex<double> local{0.0, 0.0};
+                        for (std::size_t r = begin; r < end; ++r) {
+                            local += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                        }
+                        partials[chunk] = local;
+                    };
+                    std::size_t used = parallel_for_chunks(rows, threads, dot_worker);
+                    for (std::size_t chunk = 0; chunk < used; ++chunk) {
+                        dot += partials[chunk];
+                    }
                 }
-                for (std::size_t r = 0; r < rows; ++r) {
-                    Q[r * rank + k] -= dot * Q[r * rank + j];
-                }
+                auto subtract_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        Q[r * rank + k] -= dot * Q[r * rank + j];
+                    }
+                };
+                parallel_for_chunks(rows, threads, subtract_worker);
                 R[j * cols + k] = dot;
             }
             double norm_col = 0.0;
-            for (std::size_t r = 0; r < rows; ++r) {
-                norm_col += std::norm(Q[r * rank + k]);
+            if (threads <= 1) {
+                for (std::size_t r = 0; r < rows; ++r) {
+                    norm_col += std::norm(Q[r * rank + k]);
+                }
+            } else {
+                std::vector<double> partials(threads, 0.0);
+                auto norm_worker = [&](std::size_t chunk, std::size_t begin, std::size_t end) {
+                    double local = 0.0;
+                    for (std::size_t r = begin; r < end; ++r) {
+                        local += std::norm(Q[r * rank + k]);
+                    }
+                    partials[chunk] = local;
+                };
+                std::size_t used = parallel_for_chunks(rows, threads, norm_worker);
+                for (std::size_t chunk = 0; chunk < used; ++chunk) {
+                    norm_col += partials[chunk];
+                }
             }
             norm_col = std::sqrt(norm_col);
             if (norm_col > 0.0) {
-                for (std::size_t r = 0; r < rows; ++r) {
-                    Q[r * rank + k] /= norm_col;
-                }
+                auto normalise_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        Q[r * rank + k] /= norm_col;
+                    }
+                };
+                parallel_for_chunks(rows, threads, normalise_worker);
             }
             R[k * cols + k] = norm_col;
             for (std::size_t c = k + 1; c < cols; ++c) {
                 std::complex<double> dot{0.0, 0.0};
                 auto& vec = ordered[c].second;
-                for (std::size_t r = 0; r < rows; ++r) {
-                    dot += std::conj(Q[r * rank + k]) * vec[r];
+                if (threads <= 1) {
+                    for (std::size_t r = 0; r < rows; ++r) {
+                        dot += std::conj(Q[r * rank + k]) * vec[r];
+                    }
+                } else {
+                    std::vector<std::complex<double>> partials(threads, {0.0, 0.0});
+                    auto dot_worker = [&](std::size_t chunk, std::size_t begin, std::size_t end) {
+                        std::complex<double> local{0.0, 0.0};
+                        for (std::size_t r = begin; r < end; ++r) {
+                            local += std::conj(Q[r * rank + k]) * vec[r];
+                        }
+                        partials[chunk] = local;
+                    };
+                    std::size_t used = parallel_for_chunks(rows, threads, dot_worker);
+                    for (std::size_t chunk = 0; chunk < used; ++chunk) {
+                        dot += partials[chunk];
+                    }
                 }
                 R[k * cols + c] = dot;
-                for (std::size_t r = 0; r < rows; ++r) {
-                    vec[r] -= dot * Q[r * rank + k];
-                }
+                auto update_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        vec[r] -= dot * Q[r * rank + k];
+                    }
+                };
+                parallel_for_chunks(rows, threads, update_worker);
             }
         }
 
@@ -879,6 +1074,7 @@ ConversionEngine::statevector_to_mps(const std::vector<std::complex<double>>& st
     std::vector<std::vector<std::complex<double>>> tensors;
     std::vector<std::complex<double>> current = state;
     std::size_t left_dim = 1;
+    const auto resolved_mode = resolve_execution_mode(ExecutionMode::Auto);
 
     for (std::size_t qubit = 0; qubit < n; ++qubit) {
         const std::size_t cols = 1ULL << (n - qubit - 1);
@@ -892,41 +1088,111 @@ ConversionEngine::statevector_to_mps(const std::vector<std::complex<double>>& st
         std::vector<std::complex<double>> Q(rows * rank, {0.0, 0.0});
         std::vector<std::complex<double>> R(rank * cols, {0.0, 0.0});
 
+        const std::size_t threads = resolve_thread_count(resolved_mode, rows);
+
+        auto copy_column = [&](std::size_t, std::size_t begin, std::size_t end) {
+            for (std::size_t r = begin; r < end; ++r) {
+                Q[r * rank + 0] = current[r * cols + 0];
+            }
+        };
+
         for (std::size_t k = 0; k < rank; ++k) {
-            for (std::size_t r = 0; r < rows; ++r) {
-                Q[r * rank + k] = current[r * cols + k];
+            if (k == 0) {
+                parallel_for_chunks(rows, threads, copy_column);
+            } else {
+                auto copy_other = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        Q[r * rank + k] = current[r * cols + k];
+                    }
+                };
+                parallel_for_chunks(rows, threads, copy_other);
             }
             for (std::size_t j = 0; j < k; ++j) {
-                std::complex<double> dot = {0.0, 0.0};
-                for (std::size_t r = 0; r < rows; ++r) {
-                    dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                std::complex<double> dot{0.0, 0.0};
+                if (threads <= 1) {
+                    for (std::size_t r = 0; r < rows; ++r) {
+                        dot += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                    }
+                } else {
+                    std::vector<std::complex<double>> partials(threads, {0.0, 0.0});
+                    auto dot_worker = [&](std::size_t chunk, std::size_t begin, std::size_t end) {
+                        std::complex<double> local{0.0, 0.0};
+                        for (std::size_t r = begin; r < end; ++r) {
+                            local += std::conj(Q[r * rank + j]) * Q[r * rank + k];
+                        }
+                        partials[chunk] = local;
+                    };
+                    std::size_t used = parallel_for_chunks(rows, threads, dot_worker);
+                    for (std::size_t chunk = 0; chunk < used; ++chunk) {
+                        dot += partials[chunk];
+                    }
                 }
-                for (std::size_t r = 0; r < rows; ++r) {
-                    Q[r * rank + k] -= dot * Q[r * rank + j];
-                }
+                auto subtract_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        Q[r * rank + k] -= dot * Q[r * rank + j];
+                    }
+                };
+                parallel_for_chunks(rows, threads, subtract_worker);
                 R[j * cols + k] = dot;
             }
-            double norm = 0.0;
-            for (std::size_t r = 0; r < rows; ++r) {
-                norm += std::norm(Q[r * rank + k]);
-            }
-            norm = std::sqrt(norm);
-            if (norm > 0.0) {
+
+            double norm_sq = 0.0;
+            if (threads <= 1) {
                 for (std::size_t r = 0; r < rows; ++r) {
-                    Q[r * rank + k] /= norm;
+                    norm_sq += std::norm(Q[r * rank + k]);
                 }
+            } else {
+                std::vector<double> partials(threads, 0.0);
+                auto norm_worker = [&](std::size_t chunk, std::size_t begin, std::size_t end) {
+                    double local = 0.0;
+                    for (std::size_t r = begin; r < end; ++r) {
+                        local += std::norm(Q[r * rank + k]);
+                    }
+                    partials[chunk] = local;
+                };
+                std::size_t used = parallel_for_chunks(rows, threads, norm_worker);
+                for (std::size_t chunk = 0; chunk < used; ++chunk) {
+                    norm_sq += partials[chunk];
+                }
+            }
+            double norm = std::sqrt(norm_sq);
+            if (norm > 0.0) {
+                auto normalise_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        Q[r * rank + k] /= norm;
+                    }
+                };
+                parallel_for_chunks(rows, threads, normalise_worker);
             }
             R[k * cols + k] = norm;
 
             for (std::size_t c = k + 1; c < cols; ++c) {
-                std::complex<double> dot = {0.0, 0.0};
-                for (std::size_t r = 0; r < rows; ++r) {
-                    dot += std::conj(Q[r * rank + k]) * current[r * cols + c];
+                std::complex<double> dot{0.0, 0.0};
+                if (threads <= 1) {
+                    for (std::size_t r = 0; r < rows; ++r) {
+                        dot += std::conj(Q[r * rank + k]) * current[r * cols + c];
+                    }
+                } else {
+                    std::vector<std::complex<double>> partials(threads, {0.0, 0.0});
+                    auto dot_worker = [&](std::size_t chunk, std::size_t begin, std::size_t end) {
+                        std::complex<double> local{0.0, 0.0};
+                        for (std::size_t r = begin; r < end; ++r) {
+                            local += std::conj(Q[r * rank + k]) * current[r * cols + c];
+                        }
+                        partials[chunk] = local;
+                    };
+                    std::size_t used = parallel_for_chunks(rows, threads, dot_worker);
+                    for (std::size_t chunk = 0; chunk < used; ++chunk) {
+                        dot += partials[chunk];
+                    }
                 }
                 R[k * cols + c] = dot;
-                for (std::size_t r = 0; r < rows; ++r) {
-                    current[r * cols + c] -= dot * Q[r * rank + k];
-                }
+                auto update_worker = [&](std::size_t, std::size_t begin, std::size_t end) {
+                    for (std::size_t r = begin; r < end; ++r) {
+                        current[r * cols + c] -= dot * Q[r * rank + k];
+                    }
+                };
+                parallel_for_chunks(rows, threads, update_worker);
             }
         }
 
