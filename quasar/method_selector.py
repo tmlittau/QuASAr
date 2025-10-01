@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING
 
 from .cost import Backend, Cost, CostEstimator
 from . import config
+from .metrics import FragmentMetrics
 
 if TYPE_CHECKING:  # pragma: no cover
     from .circuit import Gate
@@ -139,6 +140,87 @@ class MethodSelector:
 
     def __init__(self, estimator: CostEstimator | None = None) -> None:
         self.estimator = estimator or CostEstimator()
+
+    def describe_fragment(self, gates: Sequence['Gate']) -> Dict[str, Any]:
+        """Compute structural metrics for ``gates``.
+
+        The returned mapping is JSON serialisable and mirrors the quantities the
+        selector evaluates when ranking backends, including sparsity,
+        interaction locality and an entanglement proxy.
+        """
+
+        fragment = FragmentMetrics.from_gates(gates)
+        base = fragment.metrics_entry()
+        qubit_list = list(base["qubits"])
+        multi = [gate for gate in gates if len(gate.qubits) > 1]
+        two_qubit = [gate for gate in multi if len(gate.qubits) == 2]
+        higher_arity = len(multi) - len(two_qubit)
+        non_local_two = [
+            gate for gate in two_qubit if abs(gate.qubits[0] - gate.qubits[1]) > 1
+        ]
+        non_local_count = len(non_local_two) + max(higher_arity, 0)
+        total_multi = len(multi)
+        max_interaction_distance = 0
+        for gate in multi:
+            qubits = sorted(gate.qubits)
+            if not qubits:
+                continue
+            span = qubits[-1] - qubits[0]
+            if span > max_interaction_distance:
+                max_interaction_distance = span
+        if total_multi:
+            long_range_fraction = non_local_count / total_multi
+            extent_den = max(fragment.num_qubits - 1, 1)
+            long_range_extent = max(0.0, (max_interaction_distance - 1) / extent_den)
+        else:
+            long_range_fraction = 0.0
+            long_range_extent = 0.0
+
+        qubit_tuple = tuple(qubit_list)
+        if qubit_tuple:
+            remap = {q: i for i, q in enumerate(qubit_tuple)}
+            remapped = [
+                SimpleNamespace(qubits=[remap[q] for q in gate.qubits])
+                for gate in gates
+            ]
+            entanglement = self.estimator.entanglement_entropy(
+                len(qubit_tuple), remapped
+            )
+        else:
+            entanglement = 0.0
+
+        rotation_total = (
+            fragment.phase_rotation_diversity + fragment.amplitude_rotation_diversity
+        )
+        rotation_density = (
+            rotation_total / max(fragment.num_gates, 1)
+            if fragment.num_gates
+            else 0.0
+        )
+
+        summary: Dict[str, Any] = {
+            "qubits": qubit_list,
+            "num_qubits": fragment.num_qubits,
+            "num_gates": fragment.num_gates,
+            "num_meas": fragment.num_meas,
+            "num_1q": fragment.num_1q,
+            "num_2q": fragment.num_2q,
+            "num_t": fragment.num_t,
+            "sparsity": fragment.sparsity,
+            "phase_rotation_diversity": fragment.phase_rotation_diversity,
+            "amplitude_rotation_diversity": fragment.amplitude_rotation_diversity,
+            "rotation_density": min(max(rotation_density, 0.0), 1.0),
+            "entanglement_entropy": entanglement,
+            "long_range_fraction": long_range_fraction,
+            "long_range_extent": long_range_extent,
+            "max_interaction_distance": max_interaction_distance,
+            "local": total_multi > 0 and non_local_count == 0,
+            "multi_qubit_gates": total_multi,
+            "non_local_multi_qubit_gates": non_local_count,
+            "non_local_two_qubit_gates": len(non_local_two),
+            "higher_arity_gates": max(higher_arity, 0),
+        }
+        return summary
 
     def select(
         self,
@@ -300,6 +382,67 @@ class MethodSelector:
                     reasons.append("time > threshold")
                     feasible = False
                 if feasible:
+                    if diag is not None:
+                        metrics = diag.setdefault("metrics", {})
+                        overall_summary = self.describe_fragment(gates)
+                        fragment_entries: List[Dict[str, Any]] = []
+                        overall_entry = dict(overall_summary)
+                        overall_entry["scope"] = "fragment"
+                        fragment_entries.append(overall_entry)
+                        if subsystem_info:
+                            for idx, ((_, seq), info) in enumerate(zip(groups, subsystem_info)):
+                                sub_diag = info.get("diagnostics") or {}
+                                sub_metrics = sub_diag.get("metrics") or {}
+                                sub_fragments = sub_metrics.get("fragments")
+                                if sub_fragments:
+                                    for frag in sub_fragments:
+                                        frag_entry = dict(frag)
+                                        frag_entry.setdefault("scope", "subsystem")
+                                        frag_entry["subsystem_index"] = idx
+                                        fragment_entries.append(frag_entry)
+                                else:
+                                    sub_entry = dict(self.describe_fragment(seq))
+                                    sub_entry["scope"] = "subsystem"
+                                    sub_entry["subsystem_index"] = idx
+                                    fragment_entries.append(sub_entry)
+                        overall_metrics_seq = [
+                            {
+                                "qubits": tuple(sorted({q for gate in gates for q in gate.qubits})),
+                                "num_qubits": num_qubits,
+                                "num_gates": num_gates,
+                                "num_meas": num_meas,
+                                "num_1q": num_1q,
+                                "num_2q": num_2q,
+                                "num_t": num_t_gates,
+                            }
+                        ]
+                        temp_diag: dict[str, Any] = {}
+                        temp_backends: dict[Backend, dict[str, Any]] = {}
+                        try:
+                            self._select_fragment(
+                                gates=gates,
+                                names=names,
+                                num_qubits=num_qubits,
+                                num_gates=num_gates,
+                                num_meas=num_meas,
+                                num_1q=num_1q,
+                                num_2q=num_2q,
+                                num_t_gates=num_t_gates,
+                                metrics_seq=overall_metrics_seq,
+                                allow_tableau=allow_tableau,
+                                max_memory=max_memory,
+                                max_time=max_time,
+                                target_accuracy=target_accuracy,
+                                sparsity=sparsity,
+                                phase_rotation_diversity=phase_rotation_diversity,
+                                amplitude_rotation_diversity=amplitude_rotation_diversity,
+                                diagnostics=temp_diag,
+                                diag_backends=temp_backends,
+                            )
+                        except NoFeasibleBackendError:
+                            temp_diag = {}
+                        metrics.update(temp_diag.get("metrics", {}))
+                        metrics["fragments"] = fragment_entries
                     if diag is not None and diag_backends is not None:
                         entry = diag_backends.setdefault(
                             subsystem_backend,
@@ -392,28 +535,35 @@ class MethodSelector:
             if metrics_seq
             else 0
         )
-        sparse = min(max(sparsity if sparsity is not None else 0.0, 0.0), 1.0)
-        phase_rot = float(phase_rotation_diversity or 0)
-        amp_rot = float(amplitude_rotation_diversity or 0)
+        fragment_summary = self.describe_fragment(gates)
+        sparse_fragment = fragment_summary["sparsity"]
+        phase_fragment = fragment_summary["phase_rotation_diversity"]
+        amp_fragment = fragment_summary["amplitude_rotation_diversity"]
+        entanglement = fragment_summary["entanglement_entropy"]
+        long_range_fraction = fragment_summary["long_range_fraction"]
+        long_range_extent = fragment_summary["long_range_extent"]
+        max_interaction_distance = fragment_summary["max_interaction_distance"]
+        local = fragment_summary["local"]
+        total_multi = fragment_summary["multi_qubit_gates"]
+
+        sparse = min(
+            max(sparsity if sparsity is not None else sparse_fragment, 0.0), 1.0
+        )
+        phase_rot = float(
+            phase_rotation_diversity
+            if phase_rotation_diversity is not None
+            else phase_fragment
+        )
+        amp_rot = float(
+            amplitude_rotation_diversity
+            if amplitude_rotation_diversity is not None
+            else amp_fragment
+        )
         rotation_total = phase_rot + amp_rot
-        rotation_density = rotation_total / max(num_gates, 1) if num_gates else 0.0
+        rotation_density = (
+            rotation_total / max(num_gates, 1) if num_gates else fragment_summary["rotation_density"]
+        )
         rotation_density = min(max(rotation_density, 0.0), 1.0)
-        if gates:
-            qubit_set = sorted({q for gate in gates for q in gate.qubits})
-            remap = {q: i for i, q in enumerate(qubit_set)}
-            if qubit_set:
-                remapped = [
-                    SimpleNamespace(qubits=[remap[q] for q in gate.qubits])
-                    for gate in gates
-                ]
-                entanglement_qubits = len(qubit_set)
-                entanglement = self.estimator.entanglement_entropy(
-                    entanglement_qubits, remapped
-                )
-            else:
-                entanglement = 0.0
-        else:
-            entanglement = 0.0
         if diag is not None:
             metrics = diag.setdefault("metrics", {})
             metrics.update(
@@ -425,6 +575,20 @@ class MethodSelector:
                     "entanglement_entropy": entanglement,
                 }
             )
+            fragments: List[Dict[str, Any]] = []
+            fragment_entry = dict(fragment_summary)
+            fragment_entry["scope"] = "fragment"
+            fragments.append(fragment_entry)
+            if len(metrics_seq) > 1:
+                for idx, (qubits, seq) in enumerate(_parallel_groups(gates) if gates else []):
+                    if not qubits or not seq:
+                        continue
+                    sub_summary = self.describe_fragment(seq)
+                    sub_entry = dict(sub_summary)
+                    sub_entry["scope"] = "subsystem"
+                    sub_entry["subsystem_index"] = idx
+                    fragments.append(sub_entry)
+            metrics["fragments"] = fragments
 
         if allow_tableau and names and all(n in CLIFFORD_GATES for n in names):
             tableau_costs = [
@@ -638,32 +802,6 @@ class MethodSelector:
                 "reasons": reasons,
                 "hybrid_frontier": hybrid_frontier,
             }
-
-        # Characterise locality for matrix product state simulation.
-        multi = [g for g in gates if len(g.qubits) > 1]
-        two_qubit = [g for g in multi if len(g.qubits) == 2]
-        higher_arity = len(multi) - len(two_qubit)
-        long_range_two = [
-            g for g in two_qubit if abs(g.qubits[0] - g.qubits[1]) > 1
-        ]
-        non_local_count = len(long_range_two) + max(higher_arity, 0)
-        total_multi = len(multi)
-        long_range_fraction = (
-            non_local_count / total_multi if total_multi else 0.0
-        )
-        max_interaction_distance = 0
-        for gate in multi:
-            qubits = sorted(gate.qubits)
-            if qubits:
-                span = qubits[-1] - qubits[0]
-                if span > max_interaction_distance:
-                    max_interaction_distance = span
-        long_range_extent = (
-            max(0.0, (max_interaction_distance - 1) / max(num_qubits - 1, 1))
-            if total_multi
-            else 0.0
-        )
-        local = total_multi > 0 and non_local_count == 0
 
         if diag is not None:
             metrics = diag.setdefault("metrics", {})

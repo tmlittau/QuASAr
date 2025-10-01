@@ -23,6 +23,7 @@ from .ssd import ConversionLayer, SSD
 from . import config
 from .analyzer import AnalysisResult
 from .method_selector import MethodSelector, NoFeasibleBackendError
+from .metrics import FragmentMetricRecord
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -248,6 +249,7 @@ class PlanDiagnostics:
     strategy: str | None = None
     conversion_estimates: List[ConversionEstimate] = field(default_factory=list)
     backend_selection: Dict[str, dict[str, Any]] = field(default_factory=dict)
+    fragment_metrics: List[FragmentMetricRecord] = field(default_factory=list)
 
     def record_conversion(
         self,
@@ -279,6 +281,11 @@ class PlanDiagnostics:
                 window=window,
             )
         )
+
+    def fragments_as_dicts(self) -> List[Dict[str, Any]]:
+        """Return fragment metrics as plain dictionaries."""
+
+        return [record.to_mapping() for record in self.fragment_metrics]
 
 
 @dataclass
@@ -2060,6 +2067,51 @@ class Planner:
             for part in circuit.ssd.partitions:
                 if part.backend not in part.compatible_methods:
                     raise ValueError("Assigned backend incompatible with partition")
+            if res.diagnostics is not None:
+                fragments: List[FragmentMetricRecord] = []
+                steps = list(res.steps)
+                for idx, step in enumerate(steps):
+                    segment = gates[step.start : step.end]
+                    summary = self.selector.describe_fragment(segment)
+                    payload = dict(summary)
+                    payload["scope"] = "plan"
+                    payload["fragment_index"] = idx
+                    heuristic_sparsity = (
+                        circuit.sparsity
+                        if getattr(circuit, "sparsity", None) is not None
+                        else payload["sparsity"]
+                    )
+                    heuristic_phase = (
+                        circuit.phase_rotation_diversity
+                        if getattr(circuit, "phase_rotation_diversity", None) is not None
+                        else payload["phase_rotation_diversity"]
+                    )
+                    heuristic_amp = (
+                        circuit.amplitude_rotation_diversity
+                        if getattr(circuit, "amplitude_rotation_diversity", None) is not None
+                        else payload["amplitude_rotation_diversity"]
+                    )
+                    payload["heuristic_sparsity"] = heuristic_sparsity
+                    payload["heuristic_phase_rotation_diversity"] = heuristic_phase
+                    payload["heuristic_amplitude_rotation_diversity"] = heuristic_amp
+                    num_gates = payload.get("num_gates", 0) or 0
+                    if num_gates:
+                        density = (float(heuristic_phase) + float(heuristic_amp)) / max(
+                            num_gates, 1
+                        )
+                    else:
+                        density = 0.0
+                    payload["heuristic_rotation_density"] = density
+                    fragments.append(
+                        FragmentMetricRecord(
+                            start=step.start,
+                            end=step.end,
+                            backend=step.backend,
+                            metrics=payload,
+                            parallel=step.parallel if step.parallel else None,
+                        )
+                    )
+                res.diagnostics.fragment_metrics = fragments
             return res
 
         cached: PlanResult | None = None

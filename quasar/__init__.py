@@ -7,6 +7,11 @@ from .planner import Planner, PlanResult, PlanStep, DPEntry
 from .method_selector import MethodSelector, NoFeasibleBackendError
 from .scheduler import Scheduler
 from .simulation_engine import SimulationEngine, SimulationResult
+from .metrics import (
+    FragmentMetricRecord,
+    export_fragment_metrics_json,
+    export_fragment_metrics_csv,
+)
 from .ssd import SSD, SSDPartition, ConversionLayer, PartitionTraceEntry
 from .calibration import (
     run_calibration,
@@ -63,4 +68,7 @@ __all__ = [
     "DecisionDiagramBackend",
     "CircuitAnalyzer",
     "AnalysisResult",
+    "FragmentMetricRecord",
+    "export_fragment_metrics_json",
+    "export_fragment_metrics_csv",
 ]
