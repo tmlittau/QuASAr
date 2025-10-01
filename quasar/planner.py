@@ -230,6 +230,7 @@ class ConversionEstimate:
     primitive: str | None = None
     feasible: bool = True
     reason: str | None = None
+    window: int | None = None
 
 
 @dataclass
@@ -259,6 +260,7 @@ class PlanDiagnostics:
         primitive: str | None = None,
         feasible: bool = True,
         reason: str | None = None,
+        window: int | None = None,
     ) -> None:
         self.conversion_estimates.append(
             ConversionEstimate(
@@ -272,6 +274,7 @@ class PlanDiagnostics:
                 primitive=primitive,
                 feasible=feasible,
                 reason=reason,
+                window=window,
             )
         )
 
@@ -1514,12 +1517,18 @@ class Planner:
                                 compressed = _compressed_terms(j, len(boundary))
                                 rank = compressed
                                 frontier = len(boundary)
+                                window = self.estimator.derive_conversion_window(
+                                    len(boundary),
+                                    rank=rank,
+                                    compressed_terms=compressed,
+                                )
                                 conv_est = self.estimator.conversion(
                                     prev_backend,
                                     backend,
                                     num_qubits=len(boundary),
                                     rank=rank,
                                     frontier=frontier,
+                                    window=window,
                                     compressed_terms=compressed,
                                 )
                                 est_time = conv_est.cost.time
@@ -1551,6 +1560,7 @@ class Planner:
                                             primitive=primitive,
                                             feasible=False,
                                             reason="memory",
+                                            window=conv_est.window,
                                         )
                                     continue
                                 if diagnostics is not None and stage is not None:
@@ -1563,6 +1573,7 @@ class Planner:
                                         boundary=boundary,
                                         cost=conv_cost,
                                         primitive=primitive,
+                                        window=conv_est.window,
                                     )
                         total_cost = _add_cost(
                             _add_cost(prev_entry.cost, conv_cost), sim_cost
@@ -1696,12 +1707,18 @@ class Planner:
             compressed = compressed_for_cut(cut, len(boundary))
             rank = compressed
             frontier = len(boundary)
+            window = self.estimator.derive_conversion_window(
+                len(boundary),
+                rank=rank,
+                compressed_terms=compressed,
+            )
             conv_est = self.estimator.conversion(
                 prev.backend,
                 step.backend,
                 num_qubits=len(boundary),
                 rank=rank,
                 frontier=frontier,
+                window=window,
                 compressed_terms=compressed,
             )
             layers.append(
@@ -1713,6 +1730,7 @@ class Planner:
                     frontier=frontier,
                     primitive=conv_est.primitive,
                     cost=conv_est.cost,
+                    window=conv_est.window,
                 )
             )
         return layers

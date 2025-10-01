@@ -121,7 +121,8 @@ class ConversionEngine {
     // for dense region depth when considering the LW primitive.
     ConversionResult convert(const SSD& ssd,
                              std::size_t window_1q_gates = 0,
-                             std::size_t window_2q_gates = 0) const;
+                             std::size_t window_2q_gates = 0,
+                             std::optional<std::size_t> window_override = std::nullopt) const;
 
     // Provide a concrete statevector representation for the boundary qubits.
     // A phase-factorable stabilizer state is synthesised from the leading

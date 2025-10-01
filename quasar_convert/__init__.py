@@ -489,12 +489,16 @@ except Exception:  # pragma: no cover - exercised when extension missing
             ssd: SSD,
             window_1q_gates: int = 0,
             window_2q_gates: int = 0,
+            window: int | None = None,
         ) -> ConversionResult:
             boundary = len(ssd.boundary_qubits or [])
             rank = ssd.top_s
 
-            window = min(boundary, 4)
-            dense = 1 << window
+            if window is None:
+                window_size = min(boundary, 4)
+            else:
+                window_size = min(boundary, max(window, 0))
+            dense = 1 << window_size
             chi_tilde = min(rank, self.st_chi_cap)
             full = 1 << min(boundary, 16)
 

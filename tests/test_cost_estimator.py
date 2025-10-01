@@ -4,7 +4,7 @@ import pytest
 
 from benchmarks.bench_utils.circuits import layered_clifford_delayed_magic_circuit
 
-from quasar.cost import CostEstimator
+from quasar.cost import Backend, CostEstimator
 
 
 DELAYED_MAGIC_TEST_DEPTH = 40
@@ -80,3 +80,41 @@ def test_scalar_chi_matches_per_cut_cap() -> None:
     assert scalar_cost.log_depth == pytest.approx(list_cost.log_depth)
     assert scalar_cost.conversion == pytest.approx(list_cost.conversion)
     assert scalar_cost.replay == pytest.approx(list_cost.replay)
+
+
+def test_conversion_window_reflects_entanglement() -> None:
+    estimator = CostEstimator()
+
+    dense_details = estimator.conversion_candidates(
+        Backend.STATEVECTOR,
+        Backend.MPS,
+        num_qubits=6,
+        rank=64,
+        frontier=6,
+        compressed_terms=64,
+    )
+    assert dense_details["LW"].window == 6
+
+    sparse_details = estimator.conversion_candidates(
+        Backend.STATEVECTOR,
+        Backend.MPS,
+        num_qubits=6,
+        rank=2,
+        frontier=6,
+        compressed_terms=2,
+    )
+    assert sparse_details["LW"].window == 4
+
+    selected_primitive, selected_detail = min(
+        dense_details.items(), key=lambda kv: kv[1].cost.time
+    )
+    estimate = estimator.conversion(
+        Backend.STATEVECTOR,
+        Backend.MPS,
+        num_qubits=6,
+        rank=64,
+        frontier=6,
+        compressed_terms=64,
+    )
+    assert estimate.primitive == selected_primitive
+    assert estimate.window == selected_detail.window

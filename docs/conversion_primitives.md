@@ -9,7 +9,7 @@ Conversion estimates depend on the boundary descriptors emitted by the planner:
 - **Boundary size ``q``** – the number of qubits along the cut. Logged as ``boundary``/``boundary_size`` on :class:`~quasar.ssd.PartitionTraceEntry` and ``ConversionLayer.boundary`` on the SSD.【F:quasar/ssd.py†L18-L66】【F:quasar/ssd.py†L118-L160】
 - **Rank ``s``** – the Schmidt-rank bound used for SVD-based primitives. Stored as ``rank`` in planner traces and SSD conversion layers. When no upstream estimator supplies a refined value the partitioner defaults to ``2**q`` before scoring primitives.【F:quasar/ssd.py†L30-L66】【F:quasar/ssd.py†L118-L160】【F:quasar/partitioner.py†L143-L201】
 - **Frontier ``r``** – the decision-diagram frontier estimate recorded alongside ``rank`` to size DD-style conversions. The sequential backlog logic uses the boundary size as the default frontier when queuing pending conversions.【F:quasar/ssd.py†L30-L66】【F:quasar/ssd.py†L118-L160】【F:quasar/partitioner.py†L143-L201】
-- **Window ``w``** – the optional dense window size for LW extractions. When not specified by the planner the estimator defaults to ``min(q, 4)`` before scoring the primitives.【F:quasar/cost.py†L698-L739】
+- **Window ``w``** – the optional dense window size for LW extractions. When not specified by the planner the estimator derives an entanglement-aware window (clamped to at least ``min(q, 4)``) before scoring the primitives.【F:quasar/cost.py†L812-L881】
 
 The planner always threads ``q``, ``s`` and ``r`` into the cost estimator when emitting trace diagnostics. The LW window parameter remains implicit in the traces but can be reproduced analytically through the estimator helpers described below.
 
@@ -28,7 +28,7 @@ All primitives include a fixed ``conversion_base`` overhead and per-amplitude in
 
 The helper :func:`docs.utils.partitioning_analysis.build_conversion_primitive_examples` uses the calibrated estimator to tabulate per-primitive costs for small scenarios, matching the planner's ``debug=True`` traces.【F:docs/utils/partitioning_analysis.py†L188-L224】 Running the helper with ``calibration/coeff_v1.json`` yields the following illustrative tables.【7a22ef†L1-L20】
 
-Scenario 1 – statevector→tableau with default LW windows (``w = min(q, 4)``):
+Scenario 1 – statevector→tableau with heuristic LW windows (derived ``w``):
 
 | Boundary q | Rank s | Frontier r | Primitive | Time (a.u.) | Memory (a.u.) | Selected? |
 |---|---|---|---|---|---|---|
