@@ -44,6 +44,11 @@ class Partitioner:
         max_time: float | None = None,
         target_accuracy: float | None = None,
         staging_chi_cap: int | None = config.DEFAULT.st_chi_cap,
+        graph_cut_candidate_limit: int | None = config.DEFAULT.graph_cut_candidate_limit,
+        graph_cut_neighbor_radius: int = config.DEFAULT.graph_cut_neighbor_radius,
+        graph_cut_boundary_weight: float = config.DEFAULT.graph_cut_boundary_weight,
+        graph_cut_rank_weight: float = config.DEFAULT.graph_cut_rank_weight,
+        graph_cut_cost_weight: float = config.DEFAULT.graph_cut_cost_weight,
     ):
         self.estimator = estimator or CostEstimator()
         self.selector = selector or MethodSelector(self.estimator)
@@ -55,6 +60,15 @@ class Partitioner:
             cap = max(1, int(staging_chi_cap))
             self.staging_chi_cap = cap
             self.estimator.coeff["st_chi_cap"] = float(cap)
+        self.graph_cut_candidate_limit = (
+            None
+            if graph_cut_candidate_limit is None
+            else max(1, int(graph_cut_candidate_limit))
+        )
+        self.graph_cut_neighbor_radius = max(0, int(graph_cut_neighbor_radius))
+        self.graph_cut_boundary_weight = float(graph_cut_boundary_weight)
+        self.graph_cut_rank_weight = float(graph_cut_rank_weight)
+        self.graph_cut_cost_weight = float(graph_cut_cost_weight)
 
     def partition(
         self,
@@ -781,48 +795,173 @@ class Partitioner:
             result.append((tuple(sorted(qubits)), gate_list))
         return result
 
+    def _estimate_boundary_rank(
+        self, gates: List['Gate'], boundary: Set[int]
+    ) -> int:
+        """Heuristically bound the Schmidt rank across ``boundary``.
+
+        The method remaps the fragment's qubits into a dense ordering that
+        places the boundary first, allowing reuse of the estimator's
+        bond-dimension heuristic without mutating the original gates.
+        """
+
+        if not gates or not boundary:
+            return 1
+
+        boundary_tuple = tuple(sorted(boundary))
+        boundary_size = len(boundary_tuple)
+        fragment_qubits: List[int] = []
+        for gate in gates:
+            for qubit in gate.qubits:
+                if qubit not in boundary and qubit not in fragment_qubits:
+                    fragment_qubits.append(qubit)
+
+        ordering: List[int] = list(boundary_tuple)
+        ordering.extend(fragment_qubits)
+        if len(ordering) <= boundary_size:
+            return 1
+
+        remap = {qubit: idx for idx, qubit in enumerate(ordering)}
+
+        class _StubGate:
+            __slots__ = ("qubits",)
+
+            def __init__(self, qubits: Tuple[int, ...]):
+                self.qubits = qubits
+
+        remapped_gates: List[_StubGate] = []
+        for gate in gates:
+            mapped = tuple(remap[q] for q in gate.qubits if q in remap)
+            if len(mapped) >= 2:
+                remapped_gates.append(_StubGate(mapped))
+
+        if not remapped_gates:
+            return 1
+
+        bonds = self.estimator.bond_dimensions(len(ordering), remapped_gates)
+        if not bonds:
+            return 1
+
+        idx = boundary_size - 1
+        if idx < 0 or idx >= len(bonds):
+            return 1
+
+        rank_est = max(1, min(2 ** boundary_size, bonds[idx]))
+        return rank_est
+
     def _select_cut_point(
         self, gates: List['Gate'], gate: 'Gate', future: Set[int]
     ) -> Tuple[int, Set[int]]:
         """Return a cut index and boundary for ``gates``.
 
-        A simple graph-based heuristic evaluates all possible cut positions
-        within ``gates`` and chooses the one that minimises a cost function
-        combining boundary size and load imbalance.  ``gate`` is the first
-        operation of the new fragment and ``future`` are the qubits used by
-        the remaining gates in the circuit.
+        Candidate cuts are ranked using three signals:
+
+        - boundary size (number of shared qubits between fragments),
+        - an estimated Schmidt rank for the boundary derived from the cached
+          entanglement estimator, and
+        - the projected downstream execution cost of the suffix once the
+          backend switch is applied.
+
+        Only a shortlist of cut positions is evaluated in detail; it is built
+        from the smallest conversion boundaries and optionally expanded with
+        neighbouring indices to approximate a lightweight graph/min-cut pass.
         """
 
         if not gates:
             return 0, set()
 
+        num_gates = len(gates)
+
         # Prefix and suffix qubit sets -------------------------------
-        prefix: List[Set[int]] = []
+        prefix_qubits: List[Set[int]] = []
         running: Set[int] = set()
         for g in gates:
             running |= set(g.qubits)
-            prefix.append(running.copy())
+            prefix_qubits.append(running.copy())
 
-        suffix: List[Set[int]] = []
+        suffix_qubits: List[Set[int]] = [set() for _ in range(num_gates + 1)]
         running = set(gate.qubits) | set(future)
-        suffix.append(running.copy())
-        for g in reversed(gates):
-            running |= set(g.qubits)
-            suffix.append(running.copy())
-        suffix.reverse()  # index i corresponds to cut after gates[:i]
+        suffix_qubits[num_gates] = running.copy()
+        for i in range(num_gates - 1, -1, -1):
+            running |= set(gates[i].qubits)
+            suffix_qubits[i] = running.copy()
 
-        best_cost: float | None = None
-        best_idx = len(gates)
-        best_boundary: Set[int] = set()
+        boundary_map: Dict[int, Set[int]] = {}
+        for idx in range(1, num_gates + 1):
+            left = prefix_qubits[idx - 1]
+            right = suffix_qubits[idx]
+            boundary_map[idx] = left & right
 
-        for idx in range(1, len(gates) + 1):
-            left = prefix[idx - 1]
-            right = suffix[idx]
-            boundary = left & right
-            load_diff = abs(idx - (len(gates) - idx + 1))
-            cost = len(boundary) * 10 + load_diff
-            if best_cost is None or cost < best_cost:
-                best_cost = cost
+        limit = self.graph_cut_candidate_limit
+        if limit is None or limit > num_gates:
+            limit = num_gates
+
+        # Start with the smallest conversion boundaries.
+        sorted_indices = sorted(
+            boundary_map.keys(), key=lambda i: (len(boundary_map[i]), i)
+        )
+        base_candidates = sorted_indices[:limit]
+        candidate_set = set(base_candidates)
+        candidate_set.add(num_gates)
+
+        if self.graph_cut_neighbor_radius > 0 and base_candidates:
+            for idx in base_candidates:
+                for offset in range(1, self.graph_cut_neighbor_radius + 1):
+                    for neighbour in (idx - offset, idx + offset):
+                        if 1 <= neighbour <= num_gates:
+                            candidate_set.add(neighbour)
+
+        candidate_indices = sorted(candidate_set)
+
+        best_score: float | None = None
+        best_idx = num_gates
+        best_boundary: Set[int] = boundary_map.get(num_gates, set())
+
+        for idx in candidate_indices:
+            boundary = boundary_map.get(idx, set())
+            prefix_gates = gates[:idx]
+            suffix_gates = gates[idx:] + [gate]
+
+            # Estimate entanglement using previously analysed metrics.
+            rank_est = (
+                self._estimate_boundary_rank(prefix_gates, boundary)
+                if prefix_gates
+                else 1
+            )
+
+            # Evaluate the projected downstream cost using the estimator.
+            suffix_metrics = FragmentMetrics.from_gates(suffix_gates)
+            s_qubits = suffix_metrics.qubits
+            sparsity = suffix_metrics.sparsity
+            phase_rot = suffix_metrics.phase_rotation_diversity
+            amp_rot = suffix_metrics.amplitude_rotation_diversity
+            _, cost = self.selector.select(
+                suffix_gates,
+                len(s_qubits),
+                sparsity=sparsity,
+                phase_rotation_diversity=phase_rot,
+                amplitude_rotation_diversity=amp_rot,
+                max_memory=self.max_memory,
+                max_time=self.max_time,
+                target_accuracy=self.target_accuracy,
+            )
+
+            cost_score = math.log1p(cost.memory) + cost.time
+            rank_score = math.log2(rank_est) if rank_est > 1 else 0.0
+            boundary_score = float(len(boundary))
+
+            score = (
+                self.graph_cut_boundary_weight * boundary_score
+                + self.graph_cut_rank_weight * rank_score
+                + self.graph_cut_cost_weight * cost_score
+            )
+
+            # Slight bias towards keeping larger fragments together on ties.
+            load_balance = abs(idx - (num_gates - idx))
+            score += 0.01 * load_balance
+
+            if best_score is None or score < best_score:
+                best_score = score
                 best_idx = idx
                 best_boundary = boundary
 

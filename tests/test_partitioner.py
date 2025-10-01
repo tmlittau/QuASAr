@@ -94,6 +94,26 @@ class MetricsAssertingSelector:
         return Backend.STATEVECTOR, Cost(time=1.0, memory=1.0)
 
 
+class LinearSelector:
+    """Selector returning a simple cost proportional to gate arity."""
+
+    def select(  # type: ignore[no-untyped-def]
+        self,
+        gates,
+        num_qubits,
+        *,
+        sparsity,
+        phase_rotation_diversity,
+        amplitude_rotation_diversity,
+        **kwargs,
+    ):
+        num_1q = sum(1 for g in gates if len(g.qubits) == 1)
+        num_multi = sum(1 for g in gates if len(g.qubits) > 1)
+        time = float(num_1q + 2 * num_multi)
+        memory = float(max(1, num_qubits))
+        return Backend.STATEVECTOR, Cost(time=time, memory=memory)
+
+
 def test_partitioner_metrics_match_circuit_analysis() -> None:
     estimator = SimpleEstimator()
     selector = MetricsAssertingSelector(estimator)
@@ -114,3 +134,39 @@ def test_partitioner_metrics_match_circuit_analysis() -> None:
     partitioner.partition(circuit, debug=True)
 
     assert selector.calls > 0
+
+
+def test_graph_cut_widens_segments_for_entanglement() -> None:
+    estimator = SimpleEstimator()
+    selector = LinearSelector()
+    partitioner = Partitioner(
+        estimator=estimator,
+        selector=selector,
+        graph_cut_candidate_limit=2,
+        graph_cut_neighbor_radius=1,
+    )
+
+    future_gate = Gate("T", [3])
+    future = {3}
+
+    weak_fragment = [
+        Gate("H", [0]),
+        Gate("CX", [0, 3]),
+        Gate("H", [1]),
+    ]
+
+    entangled_fragment = [
+        Gate("H", [0]),
+        Gate("H", [1]),
+        Gate("H", [2]),
+        Gate("CX", [0, 3]),
+        Gate("CX", [1, 3]),
+        Gate("CX", [2, 3]),
+    ]
+
+    weak_idx, _ = partitioner._select_cut_point(weak_fragment, future_gate, future)
+    entangled_idx, _ = partitioner._select_cut_point(
+        entangled_fragment, future_gate, future
+    )
+
+    assert entangled_idx > weak_idx
