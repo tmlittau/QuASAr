@@ -25,7 +25,7 @@ from .circuit import Circuit
 from .analyzer import CircuitAnalyzer, AnalysisResult
 from .planner import Planner, PlanResult
 from .method_selector import NoFeasibleBackendError
-from .scheduler import Scheduler
+from .scheduler import Scheduler, ConversionProfile
 from .ssd import SSD, SSDPartition
 from .cost import CostEstimator, Backend
 from . import config
@@ -99,6 +99,9 @@ class SimulationResult:
         Number of times execution changed between backends.
     conversion_durations:
         Wall-clock durations for each state conversion.
+    conversion_profiles:
+        Detailed telemetry for each conversion primitive executed during the
+        run.  Entries mirror :class:`quasar.scheduler.ConversionProfile`.
     plan_cache_hits:
         Number of times a plan was reused from the planner cache.
     fidelity:
@@ -113,6 +116,7 @@ class SimulationResult:
     execution_time: float = 0.0
     backend_switches: int = 0
     conversion_durations: List[float] = field(default_factory=list)
+    conversion_profiles: List[ConversionProfile] = field(default_factory=list)
     plan_cache_hits: int = 0
     fidelity: float | None = None
 
@@ -341,6 +345,7 @@ class SimulationEngine:
             execution_time=execution_time,
             backend_switches=metrics.backend_switches,
             conversion_durations=metrics.conversion_durations,
+            conversion_profiles=metrics.conversion_profiles,
             plan_cache_hits=total_cache_hits,
             fidelity=metrics.fidelity,
         )
