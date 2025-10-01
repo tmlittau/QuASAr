@@ -353,7 +353,14 @@ class PlanResult:
             )
             if parallel_groups is None:
                 if part is None:
-                    part = Partitioner(staging_chi_cap=self.staging_chi_cap)
+                    part = Partitioner(
+                        staging_chi_cap=self.staging_chi_cap,
+                        graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+                        graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+                        graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+                        graph_cut_rank_weight=self.graph_cut_rank_weight,
+                        graph_cut_cost_weight=self.graph_cut_cost_weight,
+                    )
                 segment = self.gates[entry.prev_index : i]
                 groups = part.parallel_groups(segment)
                 parallel_groups = tuple(g[0] for g in groups) if groups else ()
@@ -905,6 +912,11 @@ class Planner:
         selector: MethodSelector | None = None,
         staging_chi_cap: int | None = config.DEFAULT.st_chi_cap,
         conversion_engine: ConversionEngine | None = None,
+        graph_cut_candidate_limit: int | None = config.DEFAULT.graph_cut_candidate_limit,
+        graph_cut_neighbor_radius: int = config.DEFAULT.graph_cut_neighbor_radius,
+        graph_cut_boundary_weight: float = config.DEFAULT.graph_cut_boundary_weight,
+        graph_cut_rank_weight: float = config.DEFAULT.graph_cut_rank_weight,
+        graph_cut_cost_weight: float = config.DEFAULT.graph_cut_cost_weight,
     ):
         """Create a new planner instance.
 
@@ -954,6 +966,23 @@ class Planner:
             Upper bound on the staged conversion bond dimension. Defaults to
             ``config.DEFAULT.st_chi_cap`` and is forwarded to the cost model
             when evaluating ST primitives.
+        graph_cut_candidate_limit:
+            Maximum number of candidate cut locations evaluated when the
+            partitioner performs a graph-cut refinement. ``None`` disables the
+            limit.
+        graph_cut_neighbor_radius:
+            Number of neighbouring indices to probe around each shortlisted cut
+            candidate. Increasing the radius approximates a more exhaustive
+            min-cut sweep at additional estimator cost.
+        graph_cut_boundary_weight:
+            Weight assigned to boundary size when ranking graph-cut
+            candidates.
+        graph_cut_rank_weight:
+            Weight assigned to the estimated Schmidt rank when ranking
+            graph-cut candidates.
+        graph_cut_cost_weight:
+            Weight assigned to the projected downstream execution cost when
+            ranking graph-cut candidates.
         """
 
         self.estimator = estimator or CostEstimator()
@@ -979,6 +1008,11 @@ class Planner:
             cap = max(1, int(staging_chi_cap))
             self.staging_chi_cap = cap
             self.estimator.coeff["st_chi_cap"] = float(cap)
+        self.graph_cut_candidate_limit = graph_cut_candidate_limit
+        self.graph_cut_neighbor_radius = graph_cut_neighbor_radius
+        self.graph_cut_boundary_weight = graph_cut_boundary_weight
+        self.graph_cut_rank_weight = graph_cut_rank_weight
+        self.graph_cut_cost_weight = graph_cut_cost_weight
         # Cache mapping gate fingerprints to ``PlanResult`` objects.
         # The cache allows reusing planning results for repeated gate
         # sequences which can occur when subcircuits are analysed multiple
@@ -2061,7 +2095,14 @@ class Planner:
                 raise ValueError("Requested backend exceeds memory threshold")
             if max_time is not None and cost.time > max_time:
                 raise ValueError("Requested backend exceeds time threshold")
-            part = Partitioner(staging_chi_cap=self.staging_chi_cap)
+            part = Partitioner(
+                staging_chi_cap=self.staging_chi_cap,
+                graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+                graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+                graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+                graph_cut_rank_weight=self.graph_cut_rank_weight,
+                graph_cut_cost_weight=self.graph_cut_cost_weight,
+            )
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(start=0, end=len(gates), backend=backend, parallel=parallel)
@@ -2110,7 +2151,14 @@ class Planner:
                 diagnostics.backend_selection["single"] = single_selection
             self._print_selection_diagnostics(single_selection, stage="single")
 
-        part = Partitioner(staging_chi_cap=self.staging_chi_cap)
+        part = Partitioner(
+            staging_chi_cap=self.staging_chi_cap,
+            graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+            graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+            graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+            graph_cut_rank_weight=self.graph_cut_rank_weight,
+            graph_cut_cost_weight=self.graph_cut_cost_weight,
+        )
         groups = part.parallel_groups(gates) if num_qubits > 1 else []
         if single_backend_choice is not None and len(groups) > 1:
             par_cost = _parallel_simulation_cost(
@@ -2137,7 +2185,14 @@ class Planner:
                 (threshold is None or single_cost.memory <= threshold)
                 and (max_time is None or single_cost.time <= max_time)
             ):
-                part = Partitioner(staging_chi_cap=self.staging_chi_cap)
+                part = Partitioner(
+                    staging_chi_cap=self.staging_chi_cap,
+                    graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+                    graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+                    graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+                    graph_cut_rank_weight=self.graph_cut_rank_weight,
+                    graph_cut_cost_weight=self.graph_cut_cost_weight,
+                )
                 groups = part.parallel_groups(gates)
                 parallel = tuple(g[0] for g in groups) if groups else ()
                 step = PlanStep(
@@ -2192,7 +2247,14 @@ class Planner:
             and (threshold is None or single_cost.memory <= threshold)
             and (max_time is None or single_cost.time <= max_time)
         ):
-            part = Partitioner(staging_chi_cap=self.staging_chi_cap)
+            part = Partitioner(
+                staging_chi_cap=self.staging_chi_cap,
+                graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+                graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+                graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+                graph_cut_rank_weight=self.graph_cut_rank_weight,
+                graph_cut_cost_weight=self.graph_cut_cost_weight,
+            )
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(
@@ -2254,7 +2316,14 @@ class Planner:
             and (threshold is None or single_cost.memory <= threshold)
             and (max_time is None or single_cost.time <= max_time)
         ):
-            part = Partitioner(staging_chi_cap=self.staging_chi_cap)
+            part = Partitioner(
+                staging_chi_cap=self.staging_chi_cap,
+                graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+                graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+                graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+                graph_cut_rank_weight=self.graph_cut_rank_weight,
+                graph_cut_cost_weight=self.graph_cut_cost_weight,
+            )
             groups = part.parallel_groups(gates)
             parallel = tuple(g[0] for g in groups) if groups else ()
             step = PlanStep(

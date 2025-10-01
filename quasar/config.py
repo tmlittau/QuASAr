@@ -164,6 +164,22 @@ class Config:
     verbose_selection: bool = _bool_from_env("QUASAR_VERBOSE_SELECTION", False)
     coeff_ema_decay: float = _float_from_env("QUASAR_COEFF_EMA_DECAY", 0.5)
     st_chi_cap: int | None = _int_from_env("QUASAR_ST_CHI_CAP", 16)
+    graph_cut_candidate_limit: int | None = _int_from_env(
+        "QUASAR_GRAPH_CUT_CANDIDATES", 4
+    )
+    graph_cut_neighbor_radius: int = max(
+        0,
+        _int_from_env("QUASAR_GRAPH_CUT_NEIGHBOR_RADIUS", 1) or 0,
+    )
+    graph_cut_boundary_weight: float = _float_from_env(
+        "QUASAR_GRAPH_CUT_BOUNDARY_WEIGHT", 1.0
+    )
+    graph_cut_rank_weight: float = _float_from_env(
+        "QUASAR_GRAPH_CUT_RANK_WEIGHT", 0.75
+    )
+    graph_cut_cost_weight: float = _float_from_env(
+        "QUASAR_GRAPH_CUT_COST_WEIGHT", 0.25
+    )
 
 
 # Global configuration instance used when modules import ``quasar.config``.
