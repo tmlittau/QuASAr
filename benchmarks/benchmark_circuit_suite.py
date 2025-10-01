@@ -126,6 +126,65 @@ def build_graph_state_magic_injection(
     return Circuit(gates)
 
 
+def build_qec_clifford_magic_patch(
+    qubits: int = 200, ring_size: int = 20
+) -> Circuit:
+    """Create a planar QEC patch with Clifford rounds and a T-ring injection.
+
+    The circuit mirrors a pair of syndrome extraction Clifford layers around a
+    contiguous ring of ``T`` injections.  The prelude entangles four-qubit
+    plaquettes through ``CX`` and ``CZ`` scaffolding, the T-ring injects magic
+    resources across ``ring_size`` qubits and the closing layer reuses the
+    Clifford template to hand control back to tableau simulation.
+    """
+
+    if qubits <= 0:
+        return Circuit([])
+
+    active_ring = max(0, min(qubits, ring_size))
+    start = max(0, (qubits - active_ring) // 2)
+    ring_indices = list(range(start, start + active_ring))
+
+    gates: list[Gate] = []
+    stabiliser_span = 4 if qubits >= 4 else max(1, qubits)
+
+    # Clifford syndrome extraction prelude.
+    for q in range(qubits):
+        gates.append(Gate("H", [q]))
+    for anchor in range(0, qubits, stabiliser_span):
+        ancilla = anchor
+        span = min(stabiliser_span, qubits - anchor)
+        gates.append(Gate("S", [ancilla]))
+        for offset in range(1, span):
+            target = anchor + offset
+            gates.append(Gate("CX", [ancilla, target]))
+            if target + 1 < anchor + span:
+                gates.append(Gate("CZ", [target, target + 1]))
+
+    # Magic ring injection.
+    if ring_indices:
+        for idx in ring_indices:
+            gates.append(Gate("T", [idx]))
+        if len(ring_indices) > 1:
+            for left, right in zip(ring_indices, ring_indices[1:]):
+                gates.append(Gate("CZ", [left, right]))
+            gates.append(Gate("CZ", [ring_indices[-1], ring_indices[0]]))
+
+    # Closing Clifford layer returning stabiliser structure.
+    for anchor in range(0, qubits, stabiliser_span):
+        ancilla = anchor
+        span = min(stabiliser_span, qubits - anchor)
+        gates.append(Gate("SDG", [ancilla]))
+        for offset in range(span - 1, 0, -1):
+            target = anchor + offset
+            if target < qubits:
+                gates.append(Gate("CX", [ancilla, target]))
+    for q in range(qubits):
+        gates.append(Gate("H", [q]))
+
+    return Circuit(gates)
+
+
 def _partition_gate_fractions(partitions: Iterable[Any]) -> Mapping[str, float]:
     """Return backend-labelled gate fractions derived from ``partitions``."""
 
@@ -149,7 +208,7 @@ def _partition_gate_fractions(partitions: Iterable[Any]) -> Mapping[str, float]:
 
 
 def collect_graph_state_metrics(result: BenchmarkResult) -> dict[str, float]:
-    """Extract execution diagnostics for the graph-state magic benchmark."""
+    """Extract execution diagnostics shared across hybrid magic benchmarks."""
 
     metrics: dict[str, float] = {}
     record = result.record
@@ -159,8 +218,10 @@ def collect_graph_state_metrics(result: BenchmarkResult) -> dict[str, float]:
     metrics["run_peak_memory_bytes"] = run_memory
 
     baseline: Mapping[str, Any] | None = None
+    no_conversion: Mapping[str, Any] | None = None
     if result.baselines is not None:
         baseline = result.baselines.get("statevector")
+        no_conversion = result.baselines.get("no_conversion")
     if baseline is not None:
         sv_time = float(baseline.get("run_time", 0.0) or 0.0)
         sv_memory = float(baseline.get("run_peak_memory", 0) or 0)
@@ -170,6 +231,13 @@ def collect_graph_state_metrics(result: BenchmarkResult) -> dict[str, float]:
             metrics["speedup_vs_statevector"] = sv_time / run_time
         elif sv_time > 0:
             metrics["speedup_vs_statevector"] = float("inf")
+    if no_conversion is not None:
+        nc_time = float(no_conversion.get("run_time", 0.0) or 0.0)
+        nc_memory = float(no_conversion.get("run_peak_memory", 0) or 0)
+        metrics["no_conversion_run_time_seconds"] = nc_time
+        metrics["no_conversion_peak_memory_bytes"] = nc_memory
+        if run_time > 0:
+            metrics["speedup_vs_no_conversion"] = nc_time / run_time
 
     ssd = record.get("result")
     partitions = getattr(ssd, "partitions", None)
@@ -182,9 +250,13 @@ def collect_graph_state_metrics(result: BenchmarkResult) -> dict[str, float]:
     for conv in conversions:
         primitive = getattr(conv, "primitive", None)
         if primitive:
-            primitive_counts[primitive.lower()] = primitive_counts.get(primitive.lower(), 0) + 1
+            key = primitive.lower()
+            primitive_counts[key] = primitive_counts.get(key, 0) + 1
+    total_conversions = sum(primitive_counts.values())
     for primitive, count in primitive_counts.items():
         metrics[f"conversion_primitive_{primitive}"] = float(count)
+        if total_conversions:
+            metrics[f"conversion_primitive_fraction_{primitive}"] = count / total_conversions
 
     trace_entries = list(getattr(ssd, "trace", ())) if ssd is not None else []
     tableau_to_sv = 0
@@ -205,6 +277,26 @@ def collect_graph_state_metrics(result: BenchmarkResult) -> dict[str, float]:
         metrics["tableau_to_statevector_switches"] = float(tableau_to_sv)
     if sv_to_tableau:
         metrics["statevector_to_tableau_switches"] = float(sv_to_tableau)
+
+    backend_costs: dict[str, float] = {}
+    if partitions:
+        total_cost = 0.0
+        for part in partitions:
+            backend = getattr(part, "backend", None)
+            backend_name = (
+                getattr(backend, "name", str(backend)) if backend is not None else "unknown"
+            )
+            cost = getattr(part, "cost", None)
+            runtime = float(getattr(cost, "time", 0.0) or 0.0)
+            weight = max(1, getattr(part, "multiplicity", 1))
+            contribution = runtime * weight
+            if contribution <= 0:
+                continue
+            backend_costs[backend_name] = backend_costs.get(backend_name, 0.0) + contribution
+            total_cost += contribution
+        if total_cost > 0:
+            for backend_name, contribution in backend_costs.items():
+                metrics[f"backend_dwell_fraction_{backend_name.lower()}"] = contribution / total_cost
 
     return metrics
 
@@ -238,6 +330,34 @@ register_family(
     )
 )
 
+register_family(
+    BenchmarkCircuitFamily(
+        name="qec_clifford_magic_patch",
+        display_name="QEC Clifford magic patch",
+        description=(
+            "Planar QEC patch with Clifford syndrome rounds bracketing a ring"
+            " of injected T gates to force Tableau↔SV hand-offs."
+        ),
+        builder=build_qec_clifford_magic_patch,
+        parameter_grid={
+            "qubits": (200,),
+            "ring_size": (20,),
+        },
+        metadata={
+            "expected_conversions": (
+                "Initial Clifford layers dwell on tableau backends before magic",
+                " injections promote the ring to dense simulation. A closing",
+                " Clifford sweep returns control to stabiliser simulation.",
+            ),
+            "expected_conversion_path": (
+                "tableau → statevector during the T-ring, then back to tableau",
+                " once the Clifford cleanup completes.",
+            ),
+        },
+        metric_hooks=(collect_graph_state_metrics,),
+    )
+)
+
 
 __all__ = [
     "BenchmarkCircuitFamily",
@@ -245,6 +365,7 @@ __all__ = [
     "BENCHMARK_FAMILIES",
     "register_family",
     "build_graph_state_magic_injection",
+    "build_qec_clifford_magic_patch",
     "collect_graph_state_metrics",
 ]
 
