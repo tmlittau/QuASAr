@@ -50,6 +50,9 @@ class PartitionTraceEntry:
         ``True`` when the backend change was accepted.
     reason:
         Short textual explanation for the decision.
+    break_even_horizon:
+        Number of gates from the backlog origin required to amortise a pending
+        conversion. ``None`` when no break-even is predicted.
     """
 
     gate_index: int
@@ -65,6 +68,7 @@ class PartitionTraceEntry:
     cost: Cost | None = None
     applied: bool = False
     reason: str = ""
+    break_even_horizon: int | None = None
 
 
 @dataclass

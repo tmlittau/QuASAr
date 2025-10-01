@@ -49,6 +49,7 @@ class Partitioner:
         graph_cut_boundary_weight: float = config.DEFAULT.graph_cut_boundary_weight,
         graph_cut_rank_weight: float = config.DEFAULT.graph_cut_rank_weight,
         graph_cut_cost_weight: float = config.DEFAULT.graph_cut_cost_weight,
+        backlog_projection_window: int = config.DEFAULT.backlog_projection_window,
     ):
         self.estimator = estimator or CostEstimator()
         self.selector = selector or MethodSelector(self.estimator)
@@ -69,6 +70,7 @@ class Partitioner:
         self.graph_cut_boundary_weight = float(graph_cut_boundary_weight)
         self.graph_cut_rank_weight = float(graph_cut_rank_weight)
         self.graph_cut_cost_weight = float(graph_cut_cost_weight)
+        self.backlog_projection_window = max(0, int(backlog_projection_window))
 
     def partition(
         self,
@@ -146,7 +148,14 @@ class Partitioner:
             primitive: str | None = None
             conversion_cost: Cost | None = None
             target_cost: Cost | None = None
+            source_suffix_cost: Cost | None = None
             window: int | None = None
+            lookahead_metrics: FragmentMetrics | None = None
+            lookahead_rank: int | None = None
+            lookahead_frontier: int | None = None
+            break_even_horizon: int | None = None
+            projected_savings_per_gate: float | None = None
+            abandon: bool = False
 
         pending_switch: _PendingSwitch | None = None
 
@@ -363,6 +372,138 @@ class Partitioner:
         def _cost_key(cost: Cost) -> Tuple[float, float]:
             return cost.memory, cost.time
 
+        def _prepare_pending_switch(
+            pending: _PendingSwitch,
+            idx: int,
+            trial_gates: List['Gate'],
+        ) -> Tuple[List['Gate'], int]:
+            suffix = trial_gates[pending.start_index :]
+            pending.abandon = False
+            pending.break_even_horizon = None
+            pending.projected_savings_per_gate = None
+            if not suffix:
+                pending.target_cost = None
+                pending.source_suffix_cost = None
+                pending.lookahead_metrics = None
+                pending.lookahead_rank = None
+                pending.lookahead_frontier = None
+                return [], 0
+
+            pending.target_cost = _estimate_cost(pending.target_backend, suffix)
+            pending.source_suffix_cost = _estimate_cost(pending.source_backend, suffix)
+            suffix_len = len(suffix)
+
+            if pending.source_metrics is None and pending.start_index:
+                pending.source_metrics = FragmentMetrics.from_gates(
+                    trial_gates[: pending.start_index]
+                )
+
+            if pending.boundary_tuple == () and pending.boundary:
+                (
+                    boundary_tuple,
+                    boundary_size,
+                    rank,
+                    frontier,
+                    primitive,
+                    conv_cost,
+                    window,
+                ) = _conversion_diagnostics(
+                    pending.source_backend,
+                    pending.target_backend,
+                    pending.boundary,
+                    metrics=pending.source_metrics,
+                )
+                pending.boundary_tuple = boundary_tuple
+                pending.rank = rank
+                pending.frontier = frontier
+                pending.primitive = primitive
+                pending.conversion_cost = conv_cost
+                pending.window = window
+                if boundary_size == 0:
+                    pending.boundary_tuple = ()
+
+            lookahead_seq: List['Gate'] = []
+            if self.backlog_projection_window > 0:
+                start = idx + 1
+                end = min(len(gates), start + self.backlog_projection_window)
+                if start < end:
+                    lookahead_seq = gates[start:end]
+            if lookahead_seq:
+                lookahead_metrics = FragmentMetrics.from_gates(lookahead_seq)
+                pending.lookahead_metrics = lookahead_metrics
+                boundary_tuple = pending.boundary_tuple
+                if not boundary_tuple and pending.boundary:
+                    boundary_tuple = tuple(sorted(pending.boundary))
+                if boundary_tuple:
+                    cache_key = (boundary_tuple, _fragment_key(lookahead_metrics))
+                    cached = entanglement_cache.get(cache_key)
+                    if cached is not None:
+                        lookahead_rank, lookahead_frontier = cached
+                    elif pending.rank is not None and pending.frontier is not None:
+                        lookahead_rank = pending.rank
+                        lookahead_frontier = pending.frontier
+                    else:
+                        lookahead_rank = 2 ** len(boundary_tuple)
+                        lookahead_frontier = len(boundary_tuple)
+                else:
+                    lookahead_rank, lookahead_frontier = (1, 0)
+                pending.lookahead_rank = lookahead_rank
+                pending.lookahead_frontier = lookahead_frontier
+            else:
+                pending.lookahead_metrics = None
+                if pending.boundary:
+                    pending.lookahead_rank = None
+                    pending.lookahead_frontier = None
+                else:
+                    pending.lookahead_rank = 1
+                    pending.lookahead_frontier = 0
+            return lookahead_seq, suffix_len
+
+        def _update_break_even(
+            pending: _PendingSwitch,
+            idx: int,
+            lookahead_seq: List['Gate'],
+            suffix_len: int,
+        ) -> None:
+            pending.break_even_horizon = None
+            pending.projected_savings_per_gate = None
+            pending.abandon = False
+            if pending.target_cost is None or pending.source_suffix_cost is None:
+                return
+            conversion_time = (
+                pending.conversion_cost.time if pending.conversion_cost is not None else 0.0
+            )
+            source_suffix_time = pending.source_suffix_cost.time
+            target_suffix_time = pending.target_cost.time
+            deficit = (conversion_time + target_suffix_time) - source_suffix_time
+            if deficit <= 0:
+                pending.break_even_horizon = suffix_len
+                return
+
+            savings_per_gate: float | None = None
+            if lookahead_seq:
+                source_window_cost = _estimate_cost(pending.source_backend, lookahead_seq)
+                target_window_cost = _estimate_cost(pending.target_backend, lookahead_seq)
+                if len(lookahead_seq) > 0:
+                    savings_per_gate = (
+                        source_window_cost.time - target_window_cost.time
+                    ) / len(lookahead_seq)
+            pending.projected_savings_per_gate = savings_per_gate
+            remaining_after_current = len(gates) - (idx + 1)
+            if not lookahead_seq:
+                if remaining_after_current <= 0:
+                    pending.abandon = True
+                return
+            if savings_per_gate is None or savings_per_gate <= 0.0:
+                pending.abandon = True
+                return
+
+            extra_gates = int(math.ceil(deficit / savings_per_gate))
+            if extra_gates > remaining_after_current:
+                pending.abandon = True
+                return
+            pending.break_even_horizon = suffix_len + extra_gates
+
         def _maybe_finalize_pending_switch() -> None:
             nonlocal pending_switch, current_gates, current_qubits, current_backend, current_cost, current_metrics
             if pending_switch is None:
@@ -371,7 +512,10 @@ class Partitioner:
             if not suffix:
                 pending_switch = None
                 return
-            suffix_cost = _estimate_cost(pending_switch.target_backend, suffix)
+            suffix_cost = pending_switch.target_cost
+            if suffix_cost is None:
+                suffix_cost = _estimate_cost(pending_switch.target_backend, suffix)
+                pending_switch.target_cost = suffix_cost
             source_metrics = pending_switch.source_metrics
             if source_metrics is None and pending_switch.start_index:
                 source_metrics = FragmentMetrics.from_gates(
@@ -419,6 +563,7 @@ class Partitioner:
                 suffix_cost,
             )
             if _cost_key(combined) < _cost_key(total_current):
+                pending_switch.break_even_horizon = len(suffix)
                 prefix = current_gates[: pending_switch.start_index]
                 if prefix:
                     partitions.extend(
@@ -441,6 +586,15 @@ class Partitioner:
                             window=pending_switch.window,
                         )
                     )
+                diagnostics = (
+                    pending_switch.boundary_tuple,
+                    len(pending_switch.boundary_tuple),
+                    pending_switch.rank,
+                    pending_switch.frontier,
+                    pending_switch.primitive,
+                    conversion_cost,
+                    pending_switch.window,
+                )
                 _emit_trace(
                     gate_index=pending_switch.gate_index,
                     gate_name=current_gates[pending_switch.start_index].gate,
@@ -450,6 +604,8 @@ class Partitioner:
                     applied=True,
                     reason="deferred_backend_switch",
                     metrics_override=source_metrics,
+                    break_even_horizon=pending_switch.break_even_horizon,
+                    conversion_override=diagnostics,
                 )
                 current_gates = suffix.copy()
                 current_metrics = FragmentMetrics.from_gates(current_gates)
@@ -470,23 +626,44 @@ class Partitioner:
             applied: bool,
             reason: str,
             metrics_override: FragmentMetrics | None = None,
+            break_even_horizon: int | None = None,
+            conversion_override: Tuple[
+                Tuple[int, ...],
+                int,
+                int | None,
+                int | None,
+                str | None,
+                Cost | None,
+                int | None,
+            ] | None = None,
         ) -> None:
             if trace_log is None and trace is None:
                 return
-            (
-                boundary_tuple,
-                boundary_size,
-                rank,
-                frontier,
-                primitive,
-                conv_cost,
-                window,
-            ) = _conversion_diagnostics(
-                source,
-                target,
-                boundary,
-                metrics=metrics_override if metrics_override is not None else current_metrics,
-            )
+            if conversion_override is None:
+                (
+                    boundary_tuple,
+                    boundary_size,
+                    rank,
+                    frontier,
+                    primitive,
+                    conv_cost,
+                    window,
+                ) = _conversion_diagnostics(
+                    source,
+                    target,
+                    boundary,
+                    metrics=metrics_override if metrics_override is not None else current_metrics,
+                )
+            else:
+                (
+                    boundary_tuple,
+                    boundary_size,
+                    rank,
+                    frontier,
+                    primitive,
+                    conv_cost,
+                    window,
+                ) = conversion_override
             entry = PartitionTraceEntry(
                 gate_index=gate_index,
                 gate_name=gate_name,
@@ -501,6 +678,7 @@ class Partitioner:
                 cost=conv_cost,
                 applied=applied,
                 reason=reason,
+                break_even_horizon=break_even_horizon,
             )
             if trace is not None:
                 trace(entry)
@@ -691,15 +869,83 @@ class Partitioner:
                         source_metrics=current_metrics.copy() if current_metrics is not None else None,
                     )
                 else:
+                    previous_target = pending_switch.target_backend
+                    previous_boundary = set(pending_switch.boundary)
                     pending_switch.gate_index = idx
                     pending_switch.target_backend = backend_trial
                     pending_switch.boundary |= set(boundary)
-                    pending_switch.boundary_tuple = ()
-                    pending_switch.rank = None
-                    pending_switch.frontier = None
-                    pending_switch.primitive = None
-                    pending_switch.conversion_cost = None
-                    pending_switch.window = None
+                    if previous_boundary != pending_switch.boundary or previous_target != backend_trial:
+                        pending_switch.boundary_tuple = ()
+                        pending_switch.rank = None
+                        pending_switch.frontier = None
+                        pending_switch.primitive = None
+                        pending_switch.conversion_cost = None
+                        pending_switch.window = None
+                    pending_switch.lookahead_metrics = None
+                    pending_switch.lookahead_rank = None
+                    pending_switch.lookahead_frontier = None
+                    pending_switch.break_even_horizon = None
+                    pending_switch.projected_savings_per_gate = None
+                    pending_switch.abandon = False
+                lookahead_seq, suffix_len = _prepare_pending_switch(
+                    pending_switch, idx, trial_gates
+                )
+                if pending_switch.boundary and (
+                    pending_switch.conversion_cost is None
+                    or pending_switch.primitive is None
+                    or pending_switch.boundary_tuple == ()
+                ):
+                    metrics_key = (
+                        _fragment_key(pending_switch.source_metrics)
+                        if pending_switch.source_metrics is not None
+                        else ()
+                    )
+                    boundary_tuple_cache = tuple(sorted(pending_switch.boundary))
+                    cache_key = (boundary_tuple_cache, metrics_key)
+                    if cache_key not in entanglement_cache:
+                        default_rank = 2 ** len(boundary_tuple_cache)
+                        if (
+                            pending_switch.rank is not None
+                            and pending_switch.frontier is not None
+                        ):
+                            rank_seed = max(pending_switch.rank, default_rank)
+                            frontier_seed = min(
+                                len(boundary_tuple_cache), pending_switch.frontier
+                            )
+                        else:
+                            rank_seed = default_rank
+                            frontier_seed = len(boundary_tuple_cache)
+                        entanglement_cache[cache_key] = (rank_seed, frontier_seed)
+                    (
+                        boundary_tuple,
+                        boundary_size,
+                        rank,
+                        frontier,
+                        primitive,
+                        conv_cost,
+                        window,
+                    ) = _conversion_diagnostics(
+                        pending_switch.source_backend,
+                        pending_switch.target_backend,
+                        pending_switch.boundary,
+                        metrics=pending_switch.source_metrics,
+                    )
+                    pending_switch.boundary_tuple = boundary_tuple if boundary_size else ()
+                    pending_switch.rank = rank
+                    pending_switch.frontier = frontier
+                    pending_switch.primitive = primitive
+                    pending_switch.conversion_cost = conv_cost
+                    pending_switch.window = window
+                _update_break_even(pending_switch, idx, lookahead_seq, suffix_len)
+                diagnostics = (
+                    pending_switch.boundary_tuple,
+                    len(pending_switch.boundary_tuple),
+                    pending_switch.rank,
+                    pending_switch.frontier,
+                    pending_switch.primitive,
+                    pending_switch.conversion_cost,
+                    pending_switch.window,
+                )
                 _emit_trace(
                     gate_index=idx,
                     gate_name=gate.gate,
@@ -709,12 +955,17 @@ class Partitioner:
                     applied=False,
                     reason="deferred_switch_candidate",
                     metrics_override=pending_switch.source_metrics,
+                    break_even_horizon=pending_switch.break_even_horizon,
+                    conversion_override=diagnostics,
                 )
+                if pending_switch.abandon:
+                    pending_switch = None
                 current_gates = trial_gates
                 current_qubits = trial_qubits
                 current_metrics = trial_metrics
                 current_cost = _estimate_cost(current_backend, current_gates)
-                _maybe_finalize_pending_switch()
+                if pending_switch is not None:
+                    _maybe_finalize_pending_switch()
                 continue
             else:
                 current_gates = trial_gates
