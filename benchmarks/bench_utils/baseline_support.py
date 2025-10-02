@@ -65,8 +65,6 @@ def estimate_backend_cost(
         metrics.num_qubits,
         metrics.num_1q,
         metrics.num_2q,
-        metrics.num_diag_2q,
-        metrics.num_3q,
         metrics.num_meas,
         num_t_gates=metrics.num_t,
         depth=depth,

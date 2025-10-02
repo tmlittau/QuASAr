@@ -67,7 +67,11 @@ def test_collect_backend_data_marks_statevector_unsupported(monkeypatch, recwarn
     row = forced.iloc[0]
     assert bool(row["unsupported"])
     assert row["framework"] == Backend.STATEVECTOR.name
-    assert row["backend"] == Backend.STATEVECTOR.name
+    assert (
+        row["backend"]
+        == f"{Backend.STATEVECTOR.name.lower()}_theoretical"
+    )
+    assert row.get("is_theoretical", False)
     assert int(row["actual_qubits"]) == 5
     assert "exceeding statevector limit" in row["error"]
     assert Backend.STATEVECTOR not in calls
@@ -125,11 +129,13 @@ def test_collect_backend_data_runs_grover_mps(monkeypatch, recwarn, caplog):
 
     assert len(forced) == 1
     row = forced.iloc[0]
-    assert not bool(row["unsupported"])
+    assert bool(row["unsupported"])
     assert row["framework"] == Backend.MPS.name
-    assert row["backend"] == Backend.MPS.name
+    assert row["backend"] == f"{Backend.MPS.name.lower()}_theoretical"
+    assert row.get("is_theoretical", False)
+    assert "theoretical estimate" in row.get("comment", "")
     assert int(row["actual_qubits"]) == 20
-    assert calls and calls[0] == Backend.MPS
+    assert Backend.MPS not in calls
 
     assert auto.shape[0] == 1
     row_auto = auto.iloc[0]
