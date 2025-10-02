@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
-REPO_ROOT = PACKAGE_ROOT.parents[1]
+REPO_ROOT = PACKAGE_ROOT.parents[2]
 
 if __package__ in {None, ""}:
     if str(PACKAGE_ROOT) not in os.sys.path:
@@ -46,6 +46,16 @@ if __package__ in {None, ""}:
     import circuits as circuit_lib  # type: ignore[no-redef]
     import stitched_suite as stitched_suites  # type: ignore[no-redef]
     from database import BenchmarkDatabase, BenchmarkRun, open_database  # type: ignore[no-redef]
+    from memory_utils import max_qubits_statevector  # type: ignore[no-redef]
+    from progress import ProgressReporter  # type: ignore[no-redef]
+    from ssd_metrics import partition_metrics_from_result  # type: ignore[no-redef]
+    from threading_utils import resolve_worker_count, thread_engine  # type: ignore[no-redef]
+    from theoretical_baselines import (  # type: ignore[no-redef]
+        count_gates,
+        predict_sv_peak_bytes,
+        predict_sv_runtime_au,
+        will_sv_oom,
+    )
 else:  # pragma: no cover - exercised when imported as a package module
     from .plot_utils import (
         backend_labels,
@@ -59,20 +69,19 @@ else:  # pragma: no cover - exercised when imported as a package module
     from . import circuits as circuit_lib
     from . import stitched_suite as stitched_suites
     from .database import BenchmarkDatabase, BenchmarkRun, open_database
-
-from quasar import SimulationEngine
-from quasar.cost import Backend
-
-try:  # shared utilities for both package and script execution
     from .memory_utils import max_qubits_statevector
     from .progress import ProgressReporter
     from .ssd_metrics import partition_metrics_from_result
     from .threading_utils import resolve_worker_count, thread_engine
-except ImportError:  # pragma: no cover - fallback when executed as a script
-    from memory_utils import max_qubits_statevector  # type: ignore
-    from progress import ProgressReporter  # type: ignore
-    from ssd_metrics import partition_metrics_from_result  # type: ignore
-    from threading_utils import resolve_worker_count, thread_engine  # type: ignore
+    from .theoretical_baselines import (
+        count_gates,
+        predict_sv_peak_bytes,
+        predict_sv_runtime_au,
+        will_sv_oom,
+    )
+
+from quasar import SimulationEngine
+from quasar.cost import Backend
 
 
 LOGGER = logging.getLogger(__name__)
@@ -531,10 +540,50 @@ def _run_backend_suite_for_width(
     classical_simplification: bool,
     baseline_backends: Iterable[Backend],
     quasar_quick: bool,
+    include_theoretical_sv: bool,
+    theoretical_sv_options: Mapping[str, Any] | None,
     step_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
+    baseline_backends = tuple(baseline_backends)
     records: list[dict[str, object]] = []
     messages: list[str] = []
+
+    theoretical_options: dict[str, Any] = {
+        "mem_budget_bytes": None,
+        "scratch_factor": 1.5,
+        "dtype_bytes": 16,
+        "c_1q": 1.0,
+        "c_2q": 2.5,
+        "c_diag2q": 0.8,
+        "c_3q": 5.0,
+        "c_other": 2.0,
+    }
+    if theoretical_sv_options:
+        for key, value in theoretical_sv_options.items():
+            if value is None:
+                continue
+            theoretical_options[key] = value
+    mem_budget_bytes_raw = theoretical_options.get("mem_budget_bytes")
+    if isinstance(mem_budget_bytes_raw, (int, float)):
+        mem_budget_bytes = int(mem_budget_bytes_raw)
+    else:
+        mem_budget_bytes = None
+    dtype_bytes = max(1, int(theoretical_options.get("dtype_bytes", 16)))
+    scratch_factor = float(theoretical_options.get("scratch_factor", 1.5))
+    runtime_constants = {
+        "c_1q": float(theoretical_options.get("c_1q", 1.0)),
+        "c_2q": float(theoretical_options.get("c_2q", 2.5)),
+        "c_diag2q": float(
+            theoretical_options.get("c_diag2q", theoretical_options.get("c_diag", 0.8))
+        ),
+        "c_3q": float(theoretical_options.get("c_3q", 5.0)),
+        "c_other": float(theoretical_options.get("c_other", 2.0)),
+    }
+
+    has_statevector_backend = Backend.STATEVECTOR in baseline_backends
+    consider_sv_baseline = include_theoretical_sv or has_statevector_backend
+    sv_successful = False
+    sv_failure_reason: str | None = None
 
     LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
 
@@ -564,6 +613,8 @@ def _run_backend_suite_for_width(
                 width,
                 reason,
             )
+            if backend == Backend.STATEVECTOR and consider_sv_baseline:
+                sv_failure_reason = reason
             record = _finalise_record(
                 {
                     "unsupported": True,
@@ -597,6 +648,8 @@ def _run_backend_suite_for_width(
                 width,
                 reason,
             )
+            if backend == Backend.STATEVECTOR and consider_sv_baseline:
+                sv_failure_reason = reason
             record = _finalise_record(
                 {
                     "unsupported": True,
@@ -642,6 +695,8 @@ def _run_backend_suite_for_width(
                 width,
                 exc,
             )
+            if backend == Backend.STATEVECTOR and consider_sv_baseline:
+                sv_failure_reason = str(exc)
             record = _finalise_record(
                 {
                     "unsupported": True,
@@ -667,8 +722,87 @@ def _run_backend_suite_for_width(
             backend=backend.name,
             mode="forced",
         )
+        if backend == Backend.STATEVECTOR and consider_sv_baseline:
+            if not rec.get("failed") and not rec.get("unsupported"):
+                sv_successful = True
+                sv_failure_reason = None
+            else:
+                comment = rec.get("comment") or rec.get("error")
+                if comment:
+                    sv_failure_reason = str(comment)
         records.append(record)
         messages.append(status_msg)
+
+    if consider_sv_baseline:
+        predicted_oom = will_sv_oom(
+            width,
+            mem_budget_bytes,
+            dtype_bytes=dtype_bytes,
+            scratch_factor=scratch_factor,
+        )
+        add_theoretical = include_theoretical_sv or (
+            has_statevector_backend and (predicted_oom or not sv_successful)
+        )
+        if add_theoretical:
+            circuit = _ensure_circuit()
+            gates = getattr(circuit, "gates", ())
+            gate_counts = count_gates(gates)
+            runtime_value = float(
+                predict_sv_runtime_au(width, gate_counts, **runtime_constants)
+            )
+            peak_bytes = predict_sv_peak_bytes(
+                width, dtype_bytes=dtype_bytes, scratch_factor=scratch_factor
+            )
+            note = (
+                sv_failure_reason
+                or (
+                    "statevector backend skipped; recording theoretical baseline"
+                    if has_statevector_backend
+                    else "theoretical statevector baseline"
+                )
+            )
+            base_record: dict[str, Any] = {
+                "framework": Backend.STATEVECTOR.name,
+                "backend": "sv_theoretical",
+                "repetitions": 0,
+                "prepare_time_mean": 0.0,
+                "prepare_time_std": 0.0,
+                "run_time_mean": runtime_value,
+                "run_time_std": 0.0,
+                "total_time_mean": runtime_value,
+                "total_time_std": 0.0,
+                "prepare_peak_memory_mean": 0.0,
+                "prepare_peak_memory_std": 0.0,
+                "run_peak_memory_mean": float(peak_bytes),
+                "run_peak_memory_std": 0.0,
+                "runtime": runtime_value,
+                "peak_mem": float(peak_bytes),
+                "peak_memory": float(peak_bytes),
+                "result": None,
+                "failed": False,
+                "unsupported": True,
+                "comment": note,
+                "is_baseline": True,
+                "is_theoretical": True,
+                "oom_predicted": predicted_oom,
+                "sv_gate_counts": gate_counts,
+                "sv_mem_budget_bytes": mem_budget_bytes,
+                "sv_runtime_constants": dict(runtime_constants),
+                "sv_dtype_bytes": dtype_bytes,
+                "sv_scratch_factor": scratch_factor,
+            }
+            theoretical_record = _finalise_record(
+                base_record,
+                spec=spec,
+                width=width,
+                framework=Backend.STATEVECTOR.name,
+                backend="sv_theoretical",
+                mode="theoretical",
+            )
+            theoretical_record["runtime"] = runtime_value
+            theoretical_record["peak_mem"] = float(peak_bytes)
+            theoretical_record.setdefault("peak_memory", float(peak_bytes))
+            records.append(theoretical_record)
 
     circuit = _ensure_circuit()
     runner = BenchmarkRunner()
@@ -733,6 +867,8 @@ def _run_backend_suite_for_width_worker(
     classical_simplification: bool,
     baseline_backends: Iterable[Backend],
     quasar_quick: bool,
+    include_theoretical_sv: bool,
+    theoretical_sv_options: Mapping[str, Any] | None,
     step_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     engine = thread_engine()
@@ -746,6 +882,8 @@ def _run_backend_suite_for_width_worker(
         classical_simplification=classical_simplification,
         baseline_backends=baseline_backends,
         quasar_quick=quasar_quick,
+        include_theoretical_sv=include_theoretical_sv,
+        theoretical_sv_options=theoretical_sv_options,
         step_callback=step_callback,
     )
 
@@ -762,6 +900,8 @@ def _run_backend_suite(
     include_baselines: bool = True,
     baseline_backends: Iterable[Backend] | None = None,
     quasar_quick: bool = False,
+    include_theoretical_sv: bool = False,
+    theoretical_sv_options: Mapping[str, Any] | None = None,
     database: BenchmarkDatabase | None = None,
     run: BenchmarkRun | None = None,
 ) -> pd.DataFrame:
@@ -822,6 +962,10 @@ def _run_backend_suite(
                         workers=worker_count,
                         metadata={
                             "description": spec.description,
+                            "include_theoretical_sv": include_theoretical_sv,
+                            "sv_mem_budget_bytes": mem_budget_bytes,
+                            "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
+                            "sv_dtype_bytes": dtype_bytes,
                         },
                     )
                 recs, messages = _run_backend_suite_for_width(
@@ -834,6 +978,8 @@ def _run_backend_suite(
                     classical_simplification=classical_simplification,
                     baseline_backends=baselines,
                     quasar_quick=quasar_quick,
+                    include_theoretical_sv=include_theoretical_sv,
+                    theoretical_sv_options=theoretical_sv_options,
                     step_callback=progress.announce,
                 )
                 ordered[index] = recs
@@ -864,6 +1010,10 @@ def _run_backend_suite(
                             workers=worker_count,
                             metadata={
                                 "description": spec.description,
+                                "include_theoretical_sv": include_theoretical_sv,
+                                "sv_mem_budget_bytes": mem_budget_bytes,
+                                "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
+                                "sv_dtype_bytes": dtype_bytes,
                             },
                         )
                     benchmark_ids[index] = benchmark_id
@@ -877,6 +1027,8 @@ def _run_backend_suite(
                         classical_simplification=classical_simplification,
                         baseline_backends=baselines,
                         quasar_quick=quasar_quick,
+                        include_theoretical_sv=include_theoretical_sv,
+                        theoretical_sv_options=theoretical_sv_options,
                     )
                     futures[future] = index
 
@@ -999,6 +1151,22 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
     run_timeout = None if args.run_timeout <= 0 else args.run_timeout
     memory_bytes = args.memory_bytes if args.memory_bytes and args.memory_bytes > 0 else None
     classical_simplification = args.enable_classical_simplification
+    include_theoretical_sv = bool(getattr(args, "include_theoretical_sv", False))
+    mem_budget_gib = getattr(args, "sv_mem_budget_gib", None)
+    mem_budget_bytes: int | None = None
+    if mem_budget_gib is not None and mem_budget_gib > 0:
+        mem_budget_bytes = int(mem_budget_gib * (1024 ** 3))
+    dtype_bytes = max(1, int(getattr(args, "sv_dtype_bytes", 16)))
+    theoretical_sv_options = {
+        "mem_budget_bytes": mem_budget_bytes,
+        "scratch_factor": float(getattr(args, "sv_scratch_factor", 1.5)),
+        "dtype_bytes": dtype_bytes,
+        "c_1q": float(getattr(args, "sv_c1", 1.0)),
+        "c_2q": float(getattr(args, "sv_c2", 2.5)),
+        "c_diag2q": float(getattr(args, "sv_cdiag", 0.8)),
+        "c_3q": float(getattr(args, "sv_c3", 5.0)),
+        "c_other": float(getattr(args, "sv_cother", 2.0)),
+    }
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1017,6 +1185,16 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
                 "classical_simplification": classical_simplification,
                 "metric": args.metric,
                 "suite": suite_name,
+                "include_theoretical_sv": include_theoretical_sv,
+                "sv_mem_budget_gib": mem_budget_gib,
+                "sv_mem_budget_bytes": mem_budget_bytes,
+                "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
+                "sv_dtype_bytes": dtype_bytes,
+                "sv_c1": theoretical_sv_options["c_1q"],
+                "sv_c2": theoretical_sv_options["c_2q"],
+                "sv_cdiag": theoretical_sv_options["c_diag2q"],
+                "sv_c3": theoretical_sv_options["c_3q"],
+                "sv_cother": theoretical_sv_options["c_other"],
             },
         )
 
@@ -1033,6 +1211,8 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
                 memory_bytes=memory_bytes,
                 classical_simplification=classical_simplification,
                 max_workers=args.workers,
+                include_theoretical_sv=include_theoretical_sv,
+                theoretical_sv_options=theoretical_sv_options,
                 database=database,
                 run=run,
             )
@@ -1137,6 +1317,59 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional memory cap for dense statevector backends.",
+    )
+    parser.add_argument(
+        "--include-theoretical-sv",
+        action="store_true",
+        help="Append a theoretical statevector baseline when SV cannot run.",
+    )
+    parser.add_argument(
+        "--sv-mem-budget-gib",
+        type=float,
+        default=8.0,
+        help="Memory budget per worker in GiB for SV OOM prediction (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--sv-scratch-factor",
+        type=float,
+        default=1.5,
+        help="Scratch factor applied to the SV peak memory model (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--sv-dtype-bytes",
+        type=int,
+        default=16,
+        help="Bytes per amplitude assumed for the SV estimate (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--sv-c1",
+        type=float,
+        default=1.0,
+        help="Per-gate cost constant for 1q gates in the SV runtime model.",
+    )
+    parser.add_argument(
+        "--sv-c2",
+        type=float,
+        default=2.5,
+        help="Per-gate cost constant for non-diagonal 2q gates in the SV runtime model.",
+    )
+    parser.add_argument(
+        "--sv-cdiag",
+        type=float,
+        default=0.8,
+        help="Per-gate cost constant for diagonal 2q gates in the SV runtime model.",
+    )
+    parser.add_argument(
+        "--sv-c3",
+        type=float,
+        default=5.0,
+        help="Per-gate cost constant for 3q gates in the SV runtime model.",
+    )
+    parser.add_argument(
+        "--sv-cother",
+        type=float,
+        default=2.0,
+        help="Per-gate cost constant for remaining gates in the SV runtime model.",
     )
     parser.add_argument(
         "--metric",
