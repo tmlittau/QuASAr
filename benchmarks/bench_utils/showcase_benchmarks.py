@@ -261,6 +261,15 @@ SHOWCASE_CIRCUITS: Mapping[str, ShowcaseCircuit] = {
             "GHZ clusters with a random prefix, global QFT interlude and random tail."
         ),
     ),
+    "clustered_ghz_random_workqft_random": ShowcaseCircuit(
+        name="clustered_ghz_random_workqft_random",
+        display_name="Clustered GHZ random-workQFT-random",
+        constructor=circuit_lib.clustered_ghz_random_workqft_random_circuit,
+        default_qubits=(128, 160, 192),
+        description=(
+            "Random layers stitched with a bounded work-register QFT window."
+        ),
+    ),
     "clustered_ghz_diag_globalqft_diag": ShowcaseCircuit(
         name="clustered_ghz_diag_globalqft_diag",
         display_name="Clustered GHZ diag-QFT-diag",
