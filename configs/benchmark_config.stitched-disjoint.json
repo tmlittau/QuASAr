@@ -1,0 +1,32 @@
+{
+  "suite": [
+    {
+      "name": "rand-bandedqft-rand",
+      "builder": "clustered_ghz_random_bandedqft_random_circuit",
+      "params": [
+        {"num_qubits": 128, "block_size": 8, "region_blocks": 3},
+        {"num_qubits": 160, "block_size": 8, "region_blocks": 3},
+        {"num_qubits": 192, "block_size": 8, "region_blocks": 3}
+      ],
+      "baselines": ["mps", "sv"]
+    },
+    {
+      "name": "diag-bandedqft-diag",
+      "builder": "clustered_ghz_diag_bandedqft_diag_circuit",
+      "params": [
+        {"num_qubits": 128, "block_size": 8, "region_blocks": 3},
+        {"num_qubits": 160, "block_size": 8, "region_blocks": 3}
+      ],
+      "baselines": ["sv", "dd"]
+    },
+    {
+      "name": "rand-bridge-rand",
+      "builder": "clustered_w_random_neighborbridge_random_circuit",
+      "params": [
+        {"num_qubits": 192, "block_size": 8, "region_blocks": 3, "bridge_layers": 2},
+        {"num_qubits": 256, "block_size": 8, "region_blocks": 3, "bridge_layers": 2}
+      ],
+      "baselines": ["mps", "sv"]
+    }
+  ]
+}

@@ -166,9 +166,44 @@ def build_stitched_2x_suite() -> Tuple[StitchedCircuitSpec, ...]:
     )
 
 
+def build_stitched_disjoint_suite() -> Tuple[StitchedCircuitSpec, ...]:
+    """Return the stitched-disjoint showcase suite specification."""
+
+    return (
+        StitchedCircuitSpec(
+            name="stitched_rand_bandedqft_rand",
+            display_name="Random – Banded QFT – Random",
+            description="Random layers stitched with bounded QFT regions per cluster.",
+            factory=lambda width: circuit_lib.clustered_ghz_random_bandedqft_random_circuit(
+                width, block_size=8, region_blocks=3
+            ),
+            widths=(128, 160, 192),
+        ),
+        StitchedCircuitSpec(
+            name="stitched_diag_bandedqft_diag",
+            display_name="Diag – Banded QFT – Diag",
+            description="Diagonal slabs surrounding bounded banded QFT windows.",
+            factory=lambda width: circuit_lib.clustered_ghz_diag_bandedqft_diag_circuit(
+                width, block_size=8, region_blocks=3
+            ),
+            widths=(128, 160),
+        ),
+        StitchedCircuitSpec(
+            name="stitched_rand_bridge_rand",
+            display_name="Random – Bridge – Random",
+            description="W clusters with neighbour bridges confined to local regions.",
+            factory=lambda width: circuit_lib.clustered_w_random_neighborbridge_random_circuit(
+                width, block_size=8, region_blocks=3, bridge_layers=2
+            ),
+            widths=(192, 256),
+        ),
+    )
+
+
 SUITES: Mapping[str, Callable[[], Tuple[StitchedCircuitSpec, ...]]] = {
     "stitched-big": build_stitched_big_suite,
     "stitched-2x": build_stitched_2x_suite,
+    "stitched-disjoint": build_stitched_disjoint_suite,
 }
 
 

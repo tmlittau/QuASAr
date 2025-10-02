@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 from random import Random
-from typing import Callable, Iterable, List, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -1108,8 +1108,15 @@ def clustered_entanglement_circuit(
     depth: int | Sequence[int] = 1000,
     *,
     seed: int | None = 1337,
+    stage_params: Dict[str, Dict[str, Any]] | None = None,
 ) -> Circuit:
-    """Prepare clustered entangled states followed by configurable workloads."""
+    """Prepare clustered entangled states followed by configurable workloads.
+
+    The ``stage_params`` mapping customises individual entangler stages by
+    name, letting callers bound interaction windows (e.g. for
+    ``"banded_qft"`` or ``"neighbor_bridge"``) without altering the public
+    entangler string.
+    """
 
     if num_qubits <= 0:
         return Circuit([])
@@ -1148,9 +1155,11 @@ def clustered_entanglement_circuit(
     layer_offsets: List[int] = []
     stage_summaries: List[dict] = []
 
+    params_map = stage_params or {}
     for stage in entangler_sequence:
         stage_start = len(gates)
         summary: dict = {"stage": stage, "start": stage_start}
+        sp = params_map.get(stage, {})
         if stage == "random":
             if random_index >= len(random_depths):
                 stage_depth = random_depths[-1]
@@ -1222,6 +1231,66 @@ def clustered_entanglement_circuit(
         elif stage == "iqft":
             stage_gates = _build_block_local_stage(blocks, _iqft_spec)
             summary["layers"] = None
+        elif stage == "banded_qft":
+            region_blocks = max(1, int(sp.get("region_blocks", 3)))
+            stage_gates = []
+            for idx in range(0, len(blocks), region_blocks):
+                region = [q for block in blocks[idx : idx + region_blocks] for q in block]
+                if not region:
+                    continue
+                local_gates = _qft_spec(len(region))
+                stage_gates.extend(_remap_gates(local_gates, region))
+            summary.update({"layers": None, "region_blocks": region_blocks})
+        elif stage == "work_qft":
+            work_qubits = max(1, min(num_qubits, int(sp.get("work_qubits", 24))))
+            work_region = list(range(num_qubits - work_qubits, num_qubits))
+            local_gates = _qft_spec(len(work_region))
+            stage_gates = _remap_gates(local_gates, work_region)
+            summary.update({"layers": None, "work_qubits": len(work_region)})
+        elif stage == "neighbor_bridge":
+            bridge_layers = max(1, min(3, int(sp.get("bridge_layers", 2))))
+            region_blocks = max(1, int(sp.get("region_blocks", 3)))
+            stage_gates = []
+            for _ in range(bridge_layers):
+                for idx in range(0, len(blocks), region_blocks):
+                    region_blocks_slice = blocks[idx : idx + region_blocks]
+                    for block_idx in range(len(region_blocks_slice) - 1):
+                        qa = region_blocks_slice[block_idx][-1]
+                        qb = region_blocks_slice[block_idx + 1][0]
+                        stage_gates.append(Gate("CX", [qa, qb]))
+            summary.update(
+                {
+                    "layers": bridge_layers,
+                    "region_blocks": region_blocks,
+                    "bridge_layers": bridge_layers,
+                }
+            )
+        elif stage == "diag_blocked":
+            if random_index >= len(random_depths):
+                layers = random_depths[-1] or 2
+            else:
+                layers = max(1, random_depths[random_index])
+            random_index += 1
+            stage_gates = []
+            for layer in range(layers):
+                phi = (layer % 8 + 1) * (math.pi / 16.0)
+                for block in blocks:
+                    if len(block) < 2:
+                        continue
+                    ctrls = block[: min(3, len(block))]
+                    for target in block:
+                        if target in ctrls:
+                            continue
+                        stage_gates.append(Gate("CRZ", [ctrls[0], target], {"phi": phi}))
+                    if len(ctrls) >= 2 and len(block) >= 4:
+                        stage_gates.append(Gate("CCZ", [ctrls[0], ctrls[1], block[-1]]))
+            summary.update({"layers": layers, "phi_stride": math.pi / 16.0})
+        elif stage == "cz_window":
+            stage_gates = []
+            for block in blocks:
+                for control, target in zip(block[::2], block[1::2]):
+                    stage_gates.append(Gate("CZ", [control, target]))
+            summary.update({"layers": 1})
         elif stage == "grover":
             iterations = max(1, max(1, num_qubits // max(1, block_size)) // 2)
             stage_gates = list(grover_circuit(num_qubits, iterations).gates)
@@ -1437,6 +1506,75 @@ def clustered_ghz_diag_globalqft_diag_circuit(
         entangler="diag+global_qft+diag",
         depth=stage_depths,
         seed=seed,
+    )
+
+
+def clustered_ghz_random_bandedqft_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 8,
+    depth: int | Sequence[int] = (600, 0, 600),
+    seed: int | None = 1337,
+    region_blocks: int = 3,
+) -> Circuit:
+    """Random layers stitched with a banded QFT landing zone per region."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="ghz",
+        entangler="random+banded_qft+random",
+        depth=depth,
+        seed=seed,
+        stage_params={"banded_qft": {"region_blocks": region_blocks}},
+    )
+
+
+def clustered_ghz_diag_bandedqft_diag_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 8,
+    depth: int | Sequence[int] = (3, 0, 3),
+    seed: int | None = 1337,
+    region_blocks: int = 3,
+) -> Circuit:
+    """Diagonal slabs stitched with banded QFT regions."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="ghz",
+        entangler="diag_blocked+banded_qft+diag_blocked",
+        depth=depth,
+        seed=seed,
+        stage_params={"banded_qft": {"region_blocks": region_blocks}},
+    )
+
+
+def clustered_w_random_neighborbridge_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 8,
+    depth: int | Sequence[int] = (400, 2, 400),
+    seed: int | None = 1337,
+    region_blocks: int = 3,
+    bridge_layers: int = 2,
+) -> Circuit:
+    """W-state clusters with bounded neighbour-bridging stages."""
+
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="w",
+        entangler="random+neighbor_bridge+random",
+        depth=depth,
+        seed=seed,
+        stage_params={
+            "neighbor_bridge": {
+                "region_blocks": region_blocks,
+                "bridge_layers": bridge_layers,
+            }
+        },
     )
 
 
