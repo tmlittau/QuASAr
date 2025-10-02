@@ -79,6 +79,13 @@ For example, the stitched-big suite covers nine circuits split across
 ``stitched_classical_diag_windows`` (32/40/48 qubits).  The CLI advertises the
 available suite names in ``--help`` and accepts the usual overrides:
 
+``stitched-disjoint`` complements the existing options with banded, region-
+aware stitched circuits.  Each entry keeps the stitched regions disjoint so the
+planner can distribute workloads across workers without spiking the statevector
+width.  The preconfigured JSON file
+``configs/benchmark_config.stitched-disjoint.json`` mirrors the CLI suite and
+lets automation trigger the same runs via ``--config``.
+
 ```bash
 python benchmarks/run_benchmark.py --suite stitched-big --workers 16 \
   --reuse-existing
