@@ -911,6 +911,13 @@ def _run_backend_suite(
     if not width_list:
         return pd.DataFrame()
 
+    sv_options = dict(theoretical_sv_options or {})
+    mem_budget_bytes = sv_options.get("mem_budget_bytes")
+    dtype_bytes_opt = sv_options.get("dtype_bytes")
+    dtype_bytes = int(dtype_bytes_opt) if dtype_bytes_opt is not None else 16
+    scratch_factor_opt = sv_options.get("scratch_factor")
+    scratch_factor = float(scratch_factor_opt) if scratch_factor_opt is not None else 1.5
+
     baselines: tuple[Backend, ...]
     if not include_baselines:
         baselines = ()
@@ -964,7 +971,7 @@ def _run_backend_suite(
                             "description": spec.description,
                             "include_theoretical_sv": include_theoretical_sv,
                             "sv_mem_budget_bytes": mem_budget_bytes,
-                            "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
+                            "sv_scratch_factor": scratch_factor,
                             "sv_dtype_bytes": dtype_bytes,
                         },
                     )
@@ -979,7 +986,7 @@ def _run_backend_suite(
                     baseline_backends=baselines,
                     quasar_quick=quasar_quick,
                     include_theoretical_sv=include_theoretical_sv,
-                    theoretical_sv_options=theoretical_sv_options,
+                    theoretical_sv_options=sv_options,
                     step_callback=progress.announce,
                 )
                 ordered[index] = recs
@@ -1012,7 +1019,7 @@ def _run_backend_suite(
                                 "description": spec.description,
                                 "include_theoretical_sv": include_theoretical_sv,
                                 "sv_mem_budget_bytes": mem_budget_bytes,
-                                "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
+                                "sv_scratch_factor": scratch_factor,
                                 "sv_dtype_bytes": dtype_bytes,
                             },
                         )
@@ -1028,7 +1035,7 @@ def _run_backend_suite(
                         baseline_backends=baselines,
                         quasar_quick=quasar_quick,
                         include_theoretical_sv=include_theoretical_sv,
-                        theoretical_sv_options=theoretical_sv_options,
+                        theoretical_sv_options=sv_options,
                     )
                     futures[future] = index
 
