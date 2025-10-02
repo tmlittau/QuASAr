@@ -20,7 +20,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
 
@@ -175,6 +175,8 @@ def run_showcase_suite(
     database: BenchmarkDatabase | None = None,
     run: BenchmarkRun | None = None,
     database_path: Path | None = None,
+    include_theoretical_sv: bool = False,
+    theoretical_sv_options: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Execute a subset of the showcase suite programmatically.
 
@@ -210,6 +212,8 @@ def run_showcase_suite(
             quasar_quick=quick,
             database=database,
             run=run,
+            include_theoretical_sv=include_theoretical_sv,
+            theoretical_sv_options=theoretical_sv_options,
         )
     finally:
         if managed_db is not None:
@@ -639,6 +643,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         value = getattr(args, opt, None)
         if value is not None and value <= 0:
             parser.error(f"--{opt.replace('_', '-')} must be positive")
+    if getattr(args, "sv_mem_budget_gib", None) is not None and args.sv_mem_budget_gib < 0:
+        parser.error("--sv-mem-budget-gib must be non-negative")
+    if getattr(args, "sv_scratch_factor", None) is not None and args.sv_scratch_factor <= 0:
+        parser.error("--sv-scratch-factor must be positive")
+    if getattr(args, "sv_dtype_bytes", None) is not None and args.sv_dtype_bytes <= 0:
+        parser.error("--sv-dtype-bytes must be positive")
     if getattr(args, "suite", None):
         if getattr(args, "circuit_names", None):
             parser.error("--suite cannot be combined with --circuit/--circuits")
