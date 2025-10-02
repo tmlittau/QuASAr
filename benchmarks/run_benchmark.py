@@ -172,6 +172,7 @@ def run_showcase_suite(
     include_baselines: bool = True,
     baseline_backends: Iterable[Backend] | None = None,
     quick: bool = False,
+    reuse_existing: bool = False,
     database: BenchmarkDatabase | None = None,
     run: BenchmarkRun | None = None,
     database_path: Path | None = None,
@@ -185,7 +186,10 @@ def run_showcase_suite(
     artefacts produced by the CLI entry point.  Optional flags allow the
     benchmark to skip baseline simulators (``include_baselines=False``), limit
     the baseline set (``baseline_backends``) or force QuASAr's quick-path
-    execution (``quick=True``) which is useful for CI smoke tests.
+    execution (``quick=True``) which is useful for CI smoke tests.  When
+    ``reuse_existing`` is ``True`` and a SQLite database is supplied, cached
+    measurements are loaded instead of rerunning simulations when the
+    configuration matches a previous benchmark run.
     """
 
     if circuit not in showcase_benchmarks.SHOWCASE_CIRCUITS:
@@ -198,12 +202,35 @@ def run_showcase_suite(
     if database is None and database_path is not None:
         managed_db = BenchmarkDatabase(database_path)
         database = managed_db
+    effective_timeout = None if timeout <= 0 else timeout
     try:
+        if reuse_existing and database is not None:
+            baseline_selection: Iterable[Backend] | None
+            if include_baselines:
+                baseline_selection = baseline_backends
+            else:
+                baseline_selection = ()
+            cached = showcase_benchmarks._load_cached_suite_results(  # type: ignore[attr-defined]
+                database,
+                spec=spec,
+                widths=widths,
+                repetitions=repetitions,
+                run_timeout=effective_timeout,
+                memory_bytes=memory_bytes,
+                classical_simplification=classical_simplification,
+                include_baselines=include_baselines,
+                baseline_backends=baseline_selection,
+                quasar_quick=quick,
+                include_theoretical_sv=include_theoretical_sv,
+                theoretical_sv_options=theoretical_sv_options,
+            )
+            if cached is not None:
+                return cached
         return showcase_benchmarks._run_backend_suite(  # type: ignore[attr-defined]
             spec,
             widths,
             repetitions=repetitions,
-            run_timeout=None if timeout <= 0 else timeout,
+            run_timeout=effective_timeout,
             memory_bytes=memory_bytes,
             classical_simplification=classical_simplification,
             max_workers=workers,

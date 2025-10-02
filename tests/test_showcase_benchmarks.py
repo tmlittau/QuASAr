@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import contextlib
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
-from typing import List
+from typing import Iterable, List
 
 import pandas as pd
 import pytest
@@ -14,6 +15,7 @@ import pytest
 from benchmarks.bench_utils import showcase_benchmarks as sb
 from benchmarks.bench_utils import stitched_suite
 from benchmarks.bench_utils.runner import BenchmarkRunner
+from benchmarks.run_benchmark import run_showcase_suite
 from benchmarks.circuits import (
     CLIFFORD_GATES,
     classical_controlled_circuit,
@@ -661,3 +663,195 @@ def test_run_showcase_benchmarks_suite_invokes_factories(monkeypatch, tmp_path) 
         assert widths == expected_widths[name]
     assert dummy_db.start_kwargs is not None
     assert dummy_db.start_kwargs["parameters"]["suite"] == "stitched-big"
+
+
+def _prepare_cached_showcase_results(
+    db_path: Path, spec: sb.ShowcaseCircuit, width: int, *, widths: Iterable[int] | None = None
+) -> None:
+    mem_budget_gib = 8.0
+    mem_budget_bytes = int(mem_budget_gib * (1024 ** 3))
+    database = sb.BenchmarkDatabase(db_path)
+    try:
+        run = database.start_run(
+            description="showcase_cli",
+            parameters={
+                "circuits": [spec.name],
+                "repetitions": 1,
+                "workers": None,
+                "run_timeout": None,
+                "memory_bytes": None,
+                "classical_simplification": False,
+                "metric": "run_time_mean",
+                "suite": None,
+                "include_theoretical_sv": False,
+                "sv_mem_budget_gib": mem_budget_gib,
+                "sv_mem_budget_bytes": mem_budget_bytes,
+                "sv_scratch_factor": 1.5,
+                "sv_dtype_bytes": 16,
+                "sv_c1": 1.0,
+                "sv_c2": 2.5,
+                "sv_cdiag": 0.8,
+                "sv_c3": 5.0,
+                "sv_cother": 2.0,
+            },
+        )
+        for current_width in tuple(widths) if widths is not None else (width,):
+            benchmark_id = database.create_benchmark(
+                run,
+                circuit_id=spec.name,
+                circuit_display_name=spec.display_name,
+                repetitions=1,
+                qubits=current_width,
+                run_timeout=None,
+                memory_bytes=None,
+                classical_simplification=False,
+                include_baselines=True,
+                quick=False,
+                baseline_backends=[backend.name for backend in sb.BASELINE_BACKENDS],
+                workers=1,
+                metadata={
+                    "description": spec.description,
+                    "include_theoretical_sv": False,
+                    "sv_mem_budget_bytes": mem_budget_bytes,
+                    "sv_scratch_factor": 1.5,
+                    "sv_dtype_bytes": 16,
+                },
+            )
+
+            baseline_record = sb._finalise_record(
+                {
+                    "repetitions": 1,
+                    "prepare_time_mean": 0.2,
+                    "prepare_time_std": 0.0,
+                    "run_time_mean": 2.0,
+                    "run_time_std": 0.0,
+                    "total_time_mean": 2.2,
+                    "total_time_std": 0.0,
+                    "prepare_peak_memory_mean": 0.1,
+                    "prepare_peak_memory_std": 0.0,
+                    "run_peak_memory_mean": 0.2,
+                    "run_peak_memory_std": 0.0,
+                    "unsupported": False,
+                    "failed": False,
+                    "result": None,
+                },
+                spec=spec,
+                width=current_width,
+                framework=Backend.STATEVECTOR.name,
+                backend=Backend.STATEVECTOR.name,
+                mode="forced",
+            )
+            quasar_record = sb._finalise_record(
+                {
+                    "repetitions": 1,
+                    "prepare_time_mean": 0.1,
+                    "prepare_time_std": 0.0,
+                    "run_time_mean": 1.0,
+                    "run_time_std": 0.0,
+                    "total_time_mean": 1.1,
+                    "total_time_std": 0.0,
+                    "prepare_peak_memory_mean": 0.1,
+                    "prepare_peak_memory_std": 0.0,
+                    "run_peak_memory_mean": 0.2,
+                    "run_peak_memory_std": 0.0,
+                    "unsupported": False,
+                    "failed": False,
+                    "result": None,
+                },
+                spec=spec,
+                width=current_width,
+                framework="quasar",
+                backend="quasar_backend",
+                mode="auto",
+            )
+            database.insert_simulation_run(benchmark_id, baseline_record, qubits=current_width)
+            database.insert_simulation_run(benchmark_id, quasar_record, qubits=current_width)
+    finally:
+        database.close()
+
+
+def test_run_showcase_benchmarks_reuses_existing(monkeypatch, tmp_path) -> None:
+    spec = next(iter(sb.SHOWCASE_CIRCUITS.values()))
+    width = spec.default_qubits[0]
+    db_path = tmp_path / "cached.sqlite"
+    _prepare_cached_showcase_results(db_path, spec, width, widths=spec.default_qubits)
+
+    def _should_not_run(*args, **kwargs):
+        raise AssertionError("benchmarks should not execute when reusing cache")
+
+    monkeypatch.setattr(sb, "_run_backend_suite", _should_not_run)
+    monkeypatch.setattr(
+        sb,
+        "compute_baseline_best",
+        lambda df, metrics: df[df["framework"] != "quasar"].copy(),
+    )
+    monkeypatch.setattr(sb, "_export_plot", lambda *args, **kwargs: (None, None))
+    monkeypatch.setattr(sb, "FIGURES_DIR", tmp_path)
+
+    args = SimpleNamespace(
+        suite=None,
+        circuit_names=[spec.name],
+        groups=None,
+        qubits=None,
+        repetitions=1,
+        run_timeout=0.0,
+        memory_bytes=None,
+        enable_classical_simplification=False,
+        workers=None,
+        metric="run_time_mean",
+        database=db_path,
+        reuse_existing=True,
+        include_theoretical_sv=False,
+        sv_mem_budget_gib=8.0,
+        sv_scratch_factor=1.5,
+        sv_dtype_bytes=16,
+        sv_c1=1.0,
+        sv_c2=2.5,
+        sv_cdiag=0.8,
+        sv_c3=5.0,
+        sv_cother=2.0,
+    )
+
+    sb.run_showcase_benchmarks(args)
+
+    with sb.open_database(db_path) as database:
+        count = database.connection().execute("SELECT COUNT(*) FROM benchmark_run").fetchone()[0]
+    assert count == 1
+
+
+def test_run_showcase_suite_reuses_existing(monkeypatch, tmp_path) -> None:
+    spec = next(iter(sb.SHOWCASE_CIRCUITS.values()))
+    width = spec.default_qubits[0]
+    db_path = tmp_path / "suite_cached.sqlite"
+    _prepare_cached_showcase_results(db_path, spec, width, widths=(width,))
+
+    def _should_not_run(*args, **kwargs):
+        raise AssertionError("should reuse cached showcase results")
+
+    monkeypatch.setattr(sb, "_run_backend_suite", _should_not_run)
+
+    df = run_showcase_suite(
+        spec.name,
+        (width,),
+        repetitions=1,
+        run_timeout=0.0,
+        memory_bytes=None,
+        classical_simplification=False,
+        include_baselines=True,
+        quick=False,
+        reuse_existing=True,
+        database_path=db_path,
+        theoretical_sv_options={
+            "mem_budget_bytes": int(8.0 * (1024 ** 3)),
+            "scratch_factor": 1.5,
+            "dtype_bytes": 16,
+            "c_1q": 1.0,
+            "c_2q": 2.5,
+            "c_diag2q": 0.8,
+            "c_3q": 5.0,
+            "c_other": 2.0,
+        },
+    )
+
+    assert not df.empty
+    assert set(df["qubits"].tolist()) == {width}
