@@ -89,6 +89,34 @@ When the figure still becomes cluttered, consider toggling
 ``include_entanglement=False`` on :meth:`Circuit.to_networkx_ssd` to hide
 less critical edges and rely on the Plotly backend for targeted zooming.
 
+## Minimal partition-only layout
+
+For a compact example that focuses purely on partition structure, the
+[`docs/examples/ssd_visualisation_minimal.py`](examples/ssd_visualisation_minimal.py)
+script constructs a three-gate circuit consisting of two disjoint
+single-qubit fragments (`H` on qubit 0 and `RX` on qubit 2) and a single
+entangling `CX` acting on qubits 0 and 1.  Invoking
+``Circuit.ssd.to_networkx(include_conversions=False, include_backends=False)``
+removes conversion layers and backend nodes so the resulting SSD clearly
+shows how partitions connect.
+
+![Minimal SSD partition layout](data/ssd_visualisation_minimal.svg)
+
+In the rendered graph, partition ``P0`` represents the `H` gate on qubit 0
+and feeds into partition ``P2`` that contains the `CX` gate on qubits 0 and
+1, encoding the execution dependency introduced by the entangling
+operation.  Partition ``P1`` captures the `RX` rotation on qubit 2 and
+remains isolated because it manipulates a qubit that does not interact
+with the other fragments.
+
+Recreate the diagram with::
+
+    PYTHONPATH=. python docs/examples/ssd_visualisation_minimal.py --output docs/data/ssd_visualisation_minimal.svg
+
+The command emits the SVG used above, letting readers modify the circuit
+or plotting parameters to explore other partitioning outcomes.
+
+
 ## Filtering problematic regions
 
 Both rendering helpers accept :class:`HighlightOptions`.  Use the
