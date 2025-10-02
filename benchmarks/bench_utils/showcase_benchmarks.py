@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1112,6 +1113,157 @@ def _export_plot(
     return speedups, png_path
 
 
+def _normalise_optional_number(value: Any) -> float | None:
+    """Return ``value`` as a float when possible, otherwise ``None``."""
+
+    if value is None:
+        return None
+    if pd.isna(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number):
+        return None
+    return number
+
+
+def _normalise_optional_int(value: Any) -> int | None:
+    """Return ``value`` as an int when possible, otherwise ``None``."""
+
+    number = _normalise_optional_number(value)
+    if number is None:
+        return None
+    return int(number)
+
+
+def _serialise_record(
+    row: Mapping[str, Any],
+    *,
+    spec: ShowcaseCircuit,
+    suite: str | None,
+    treat_as_quasar: bool,
+) -> dict[str, Any] | None:
+    """Convert a raw benchmark row into the stitched JSON structure."""
+
+    runtime = _normalise_optional_number(row.get("run_time_mean"))
+    if runtime is None:
+        runtime = _normalise_optional_number(row.get("total_time_mean"))
+    if runtime is None:
+        return None
+
+    peak_mem = _normalise_optional_number(row.get("run_peak_memory_mean"))
+    if peak_mem is None:
+        peak_mem = _normalise_optional_number(row.get("run_peak_memory"))
+
+    qubits = _normalise_optional_int(row.get("qubits"))
+    repetitions = _normalise_optional_int(row.get("repetitions"))
+
+    framework = str(row.get("framework", ""))
+    backend = row.get("backend")
+    backend_name = str(backend) if backend is not None else None
+
+    params: dict[str, Any] = {}
+    if qubits is not None:
+        params["num_qubits"] = qubits
+    if suite:
+        params["suite"] = suite
+
+    record: dict[str, Any] = {
+        "name": spec.name,
+        "circuit": spec.name,
+        "display_name": spec.display_name,
+        "framework": framework,
+        "runtime": runtime,
+    }
+    if params:
+        record["params"] = params
+    if repetitions is not None:
+        record["repetitions"] = repetitions
+
+    if treat_as_quasar:
+        record["backend"] = "quasar"
+        if backend_name:
+            record["quasar_backend"] = backend_name
+    else:
+        if backend_name:
+            record["backend"] = backend_name
+
+    if peak_mem is not None:
+        record["peak_mem"] = peak_mem
+
+    total_time = _normalise_optional_number(row.get("total_time_mean"))
+    if total_time is not None:
+        record["total_time"] = total_time
+
+    mode = row.get("mode")
+    if mode is not None and not pd.isna(mode):
+        record["mode"] = str(mode)
+
+    unsupported = row.get("unsupported")
+    if unsupported is not None and not pd.isna(unsupported):
+        record["unsupported"] = bool(unsupported)
+
+    failed = row.get("failed")
+    if failed is not None and not pd.isna(failed):
+        record["failed"] = bool(failed)
+
+    comment = row.get("comment")
+    if comment is not None and not pd.isna(comment):
+        record["comment"] = str(comment)
+
+    # Conversion summary fields provide additional context for stacked plots.
+    for key in (
+        "conversion_count",
+        "conversion_boundary_mean",
+        "conversion_rank_mean",
+        "conversion_frontier_mean",
+        "conversion_primitive_summary",
+    ):
+        value = row.get(key)
+        if value is None or pd.isna(value):
+            continue
+        if isinstance(value, (str, bool)):
+            record[key] = value
+            continue
+        numeric = float(value)
+        record[key] = int(numeric) if numeric.is_integer() else numeric
+
+    # Partition summary metrics describe the resulting plan.
+    for key in (
+        "partition_count",
+        "partition_total_subsystems",
+        "partition_unique_backends",
+        "partition_max_multiplicity",
+        "partition_mean_multiplicity",
+        "partition_backend_breakdown",
+        "hierarchy_available",
+    ):
+        value = row.get(key)
+        if value is None or pd.isna(value):
+            continue
+        if isinstance(value, (str, bool)):
+            record[key] = value
+        else:
+            numeric = float(value)
+            record[key] = int(numeric) if numeric.is_integer() else numeric
+
+    if treat_as_quasar:
+        record["is_quasar"] = True
+    else:
+        record["is_baseline"] = True
+
+    # Mark theoretical entries explicitly to allow specialised styling.
+    is_theoretical = str(row.get("mode", "")).lower() == "theoretical"
+    if not is_theoretical and backend_name:
+        is_theoretical = "theoretical" in backend_name.lower()
+    if is_theoretical:
+        record["is_theoretical"] = True
+
+    return record
+
+
 def run_showcase_benchmarks(args: argparse.Namespace) -> None:
     suite_name = getattr(args, "suite", None)
     suite_specs: tuple[stitched_suites.StitchedCircuitSpec, ...] = ()
@@ -1179,6 +1331,17 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
 
     database_path = Path(getattr(args, "database", DATABASE_PATH))
     LOGGER.info("Recording benchmark results in %s", database_path)
+
+    out_dir = getattr(args, "out", None)
+    output_dir: Path | None
+    if out_dir:
+        output_dir = Path(out_dir)
+    else:
+        output_dir = None
+    export_records: list[dict[str, Any]] = []
+    export_summaries: list[pd.DataFrame] = []
+    export_speedups: list[pd.DataFrame] = []
+    choose_best_baseline = bool(getattr(args, "choose_best_baseline", False))
 
     with open_database(database_path) as database:
         run = database.start_run(
@@ -1249,6 +1412,32 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
             summary_df["circuit"] = spec.name
             summary_df["display_name"] = spec.display_name
 
+            if output_dir is not None:
+                baseline_export = (
+                    baseline_best if choose_best_baseline and not baseline_best.empty else raw_df[raw_df["framework"] != "quasar"]
+                )
+                for _, row in baseline_export.iterrows():
+                    record = _serialise_record(
+                        row,
+                        spec=spec,
+                        suite=suite_name,
+                        treat_as_quasar=False,
+                    )
+                    if record is not None:
+                        export_records.append(record)
+                for _, row in quasar_df.iterrows():
+                    record = _serialise_record(
+                        row,
+                        spec=spec,
+                        suite=suite_name,
+                        treat_as_quasar=True,
+                    )
+                    if record is not None:
+                        export_records.append(record)
+
+                export_summary = summary_df.drop(columns=["result_json", "result"], errors="ignore")
+                export_summaries.append(export_summary)
+
             speedups, figure_path = _export_plot(
                 summary_df,
                 spec,
@@ -1257,8 +1446,30 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
             )
             if speedups is not None and not speedups.empty:
                 speedups["circuit"] = spec.name
+                if output_dir is not None:
+                    export_speedups.append(speedups)
             if figure_path is not None:
                 LOGGER.info("Saved figure for %s to %s", name, figure_path)
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        results_path = output_dir / "results.json"
+        with results_path.open("w", encoding="utf-8") as fh:
+            json.dump(export_records, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        LOGGER.info("Wrote stitched benchmark summary to %s", results_path)
+
+        if export_summaries:
+            summary_df = pd.concat(export_summaries, ignore_index=True)
+            summary_path = output_dir / "summary.csv"
+            summary_df.to_csv(summary_path, index=False)
+            LOGGER.info("Wrote stitched benchmark table to %s", summary_path)
+
+        if export_speedups:
+            speedup_df = pd.concat(export_speedups, ignore_index=True)
+            speedup_path = output_dir / "speedups.csv"
+            speedup_df.to_csv(speedup_path, index=False)
+            LOGGER.info("Wrote stitched benchmark speedups to %s", speedup_path)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -1310,6 +1521,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Number of repetitions per configuration (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--repeats",
+        dest="repetitions",
+        type=int,
+        help="Alias for --repetitions.",
+        default=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--run-timeout",
@@ -1389,10 +1607,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Enable classical control simplification in the generated circuits.",
     )
     parser.add_argument(
+        "--choose-best-baseline",
+        action="store_true",
+        help="Only include the fastest baseline backend per circuit in exported summaries.",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=None,
         help="Number of worker threads for circuit execution (default: auto).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Optional directory for stitched JSON/CSV outputs.",
     )
     parser.add_argument(
         "--database",
