@@ -13,12 +13,15 @@ dependencies:
 - [`stim`](https://github.com/quantumlib/Stim) for fast Clifford circuit
   simulation.
 - [`qiskit`](https://qiskit.org/) and `qiskit-aer` for statevector benchmarks.
+- [`mqt.ddsim`](https://ddsimgate.readthedocs.io/en/latest/) (optional) for the
+  decision-diagram baseline.
+- [`psutil`](https://psutil.readthedocs.io/) (optional) to report process RSS.
 - `matplotlib` and `seaborn` for visualization.
 
 Install them into your active environment:
 
 ```bash
-pip install stim qiskit qiskit-aer matplotlib seaborn
+pip install stim qiskit qiskit-aer matplotlib seaborn mqt.ddsim psutil
 ```
 
 > **Note:** If `qiskit-aer` is unavailable the runner automatically falls back to the theoretical statevector estimator. Real execution is strongly recommended for small problem sizes to calibrate the estimator constants.
@@ -72,12 +75,48 @@ The JSON payload saved as `<out>/results.json` has the structure:
       "sv_oom": false,
       "sv_timed_out": false,
       "sv_mode": "measured",
-      "speedup_vs_sv": 1.82
+      "speedup_vs_sv": 1.82,
+      "dd_runtime": 0.17,
+      "dd_peak_mem": 58511360,
+      "dd_timed_out": false,
+      "dd_error": null,
+      "dd_mode": "measured",
+      "es_runtime": null,
+      "es_peak_mem": null,
+      "es_timed_out": null,
+      "es_error": null,
+      "es_mode": null
     },
     ...
   ]
 }
 ```
+
+When the extended-stabilizer backend cannot accept a circuit (for example when
+arbitrary rotation gates appear), it records `es_mode: "unsupported"` and keeps
+the other ES fields `null`.
+
+### Optional decision-diagram and extended-stabilizer baselines
+
+Enable additional baselines by passing the corresponding flags. Both baselines
+run in isolated subprocesses with hard wall-clock timeouts so they are safe to
+use inside batch jobs:
+
+```bash
+python test_suite/cutoff_suite.py \
+  --out out/cutoff_dd_es \
+  --ns 20 22 \
+  --depth-min 200 \
+  --depth-max 20000 \
+  --target-speedup 2.0 \
+  --sv-timeout-sec 60 \
+  --run-dd --dd-timeout-sec 60 \
+  --run-es --es-timeout-sec 60
+```
+
+The JSON rows then include timing and memory estimates (RSS at completion when
+`psutil` is available) for each requested baseline. Timeouts are reported with
+`*_timed_out: true`; crashes surface through the `*_error` field.
 
 The `runs` array records every depth that was evaluated during the search so you
 can post-process or replay the measurements.
