@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
-REPO_ROOT = PACKAGE_ROOT.parents[1]
+REPO_ROOT = PACKAGE_ROOT.parents[2]
 
 if __package__ in {None, ""}:
     if str(PACKAGE_ROOT) not in os.sys.path:
@@ -46,6 +46,16 @@ if __package__ in {None, ""}:
     import circuits as circuit_lib  # type: ignore[no-redef]
     import stitched_suite as stitched_suites  # type: ignore[no-redef]
     from database import BenchmarkDatabase, BenchmarkRun, open_database  # type: ignore[no-redef]
+    from memory_utils import max_qubits_statevector  # type: ignore[no-redef]
+    from progress import ProgressReporter  # type: ignore[no-redef]
+    from ssd_metrics import partition_metrics_from_result  # type: ignore[no-redef]
+    from threading_utils import resolve_worker_count, thread_engine  # type: ignore[no-redef]
+    from benchmarks.theoretical_baselines import (  # type: ignore[no-redef]
+        count_gates,
+        predict_sv_peak_bytes,
+        predict_sv_runtime_au,
+        will_sv_oom,
+    )
 else:  # pragma: no cover - exercised when imported as a package module
     from .plot_utils import (
         backend_labels,
@@ -59,11 +69,6 @@ else:  # pragma: no cover - exercised when imported as a package module
     from . import circuits as circuit_lib
     from . import stitched_suite as stitched_suites
     from .database import BenchmarkDatabase, BenchmarkRun, open_database
-
-from quasar import SimulationEngine
-from quasar.cost import Backend
-
-try:  # shared utilities for both package and script execution
     from .memory_utils import max_qubits_statevector
     from .progress import ProgressReporter
     from .ssd_metrics import partition_metrics_from_result
@@ -74,17 +79,9 @@ try:  # shared utilities for both package and script execution
         predict_sv_runtime_au,
         will_sv_oom,
     )
-except ImportError:  # pragma: no cover - fallback when executed as a script
-    from memory_utils import max_qubits_statevector  # type: ignore
-    from progress import ProgressReporter  # type: ignore
-    from ssd_metrics import partition_metrics_from_result  # type: ignore
-    from threading_utils import resolve_worker_count, thread_engine  # type: ignore
-    from benchmarks.theoretical_baselines import (  # type: ignore
-        count_gates,
-        predict_sv_peak_bytes,
-        predict_sv_runtime_au,
-        will_sv_oom,
-    )
+
+from quasar import SimulationEngine
+from quasar.cost import Backend
 
 
 LOGGER = logging.getLogger(__name__)
