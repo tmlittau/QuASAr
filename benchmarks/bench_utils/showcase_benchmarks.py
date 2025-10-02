@@ -79,7 +79,7 @@ except ImportError:  # pragma: no cover - fallback when executed as a script
     from progress import ProgressReporter  # type: ignore
     from ssd_metrics import partition_metrics_from_result  # type: ignore
     from threading_utils import resolve_worker_count, thread_engine  # type: ignore
-    from theoretical_baselines import (  # type: ignore
+    from benchmarks.theoretical_baselines import (  # type: ignore
         count_gates,
         predict_sv_peak_bytes,
         predict_sv_runtime_au,
