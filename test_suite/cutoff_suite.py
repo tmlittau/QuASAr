@@ -136,7 +136,7 @@ def build_qiskit_from_stim(circ: "stim.Circuit") -> "QuantumCircuit":
     if QuantumCircuit is None:
         raise RuntimeError("qiskit-aer not installed. pip install qiskit qiskit-aer")
     max_qubit = max(
-        (t.qubit_value for inst in circ for t in inst.targets_copy() if t.is_qubit_target()),
+        (t.qubit_value for inst in circ for t in inst.targets_copy() if t.is_qubit_target),
         default=-1,
     )
     qc = QuantumCircuit(max_qubit + 1)
