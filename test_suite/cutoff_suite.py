@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 try:
     import stim
@@ -18,6 +18,7 @@ except Exception:
     QuantumCircuit = None
     Aer = None
 
+from test_suite.hybrid_random_tail import append_random_tail_qiskit
 from test_suite.theoretical_baselines import (
     predict_sv_peak_bytes,
     predict_sv_runtime_au,
@@ -59,6 +60,80 @@ def gate_counts_from_stim(circ: "stim.Circuit") -> Dict[str, int]:
             counts["other"] += 1
             counts["total"] += 1
     return counts
+
+
+def _counts_with_tail(
+    n: int,
+    base_counts: Dict[str, int],
+    tail: TailConfig,
+    stim_seed: int,
+    depth: int,
+) -> Dict[str, int]:
+    counts = dict(base_counts)
+    tail_counts = _simulate_tail_gate_counts(n, tail, stim_seed, depth)
+    for key, value in tail_counts.items():
+        counts[key] = counts.get(key, 0) + value
+    return counts
+
+
+def _simulate_tail_gate_counts(
+    n: int,
+    tail: TailConfig,
+    stim_seed: int,
+    depth: int,
+) -> Dict[str, int]:
+    if tail.layers <= 0:
+        return {"1q": 0, "2q": 0, "diag2q": 0, "3q": 0, "other": 0, "total": 0}
+
+    class _CountingCircuit:
+        def __init__(self, qubits: int) -> None:
+            self._n = qubits
+            self.counts = {"1q": 0, "2q": 0, "diag2q": 0, "3q": 0, "other": 0}
+
+        @property
+        def num_qubits(self) -> int:
+            return self._n
+
+        def rx(self, _theta: float, _q: int) -> None:
+            self.counts["1q"] += 1
+
+        def ry(self, _theta: float, _q: int) -> None:
+            self.counts["1q"] += 1
+
+        def rz(self, _theta: float, _q: int) -> None:
+            self.counts["1q"] += 1
+
+        def crx(self, _theta: float, _a: int, _b: int) -> None:
+            self.counts["2q"] += 1
+
+        def cry(self, _theta: float, _a: int, _b: int) -> None:
+            self.counts["2q"] += 1
+
+        def rzx(self, _theta: float, _a: int, _b: int) -> None:
+            self.counts["2q"] += 1
+
+        def rxx(self, _theta: float, _a: int, _b: int) -> None:
+            self.counts["2q"] += 1
+
+        def ryy(self, _theta: float, _a: int, _b: int) -> None:
+            self.counts["2q"] += 1
+
+    recorder = _CountingCircuit(n)
+    append_random_tail_qiskit(
+        recorder,
+        layers=tail.layers,
+        twoq_prob=tail.twoq_prob,
+        angle_eps=tail.angle_eps,
+        oneq_ops=tail.oneq_ops,
+        twoq_ops=tail.twoq_ops,
+        seed=tail.effective_seed(n, depth, stim_seed),
+    )
+    tail_counts = dict(recorder.counts)
+    tail_counts["total"] = tail_counts.get("1q", 0) + tail_counts.get("2q", 0)
+    tail_counts.setdefault("diag2q", 0)
+    tail_counts.setdefault("3q", 0)
+    tail_counts.setdefault("other", 0)
+    return tail_counts
 
 
 def build_random_clifford_stim(n: int, depth: int, seed: int = 1337) -> "stim.Circuit":
@@ -225,6 +300,25 @@ def estimate_counts_from_qc(qc: "QuantumCircuit") -> Dict[str, int]:
 
 
 # ---------- Cutoff search ----------
+@dataclass(frozen=True)
+class TailConfig:
+    layers: int = 0
+    twoq_prob: float = 0.3
+    angle_eps: float = 1e-3
+    seed: int = 2025
+    oneq_ops: Sequence[str] = ("rx", "ry", "rz")
+    twoq_ops: Sequence[str] = ("crx", "cry", "rzx", "rxx", "ryy")
+
+    def effective_seed(self, n: int, depth: int, stim_seed: int) -> int:
+        # Mix parameters to provide distinct reproducible RNG streams per trial.
+        return (
+            int(self.seed)
+            + 1_000_003 * int(stim_seed)
+            + 1_009 * int(n)
+            + int(depth)
+        )
+
+
 @dataclass
 class TrialRecord:
     n: int
@@ -239,13 +333,21 @@ class TrialRecord:
     speedup_vs_sv: float
 
 
-def measure_one(n: int, depth: int, seed: int, sv_timeout_sec: float) -> TrialRecord:
+def measure_one(
+    n: int,
+    depth: int,
+    seed: int,
+    sv_timeout_sec: float,
+    tail: TailConfig,
+) -> TrialRecord:
     circ = build_random_clifford_stim(n, depth, seed=seed)
     tab_t, tableau = run_stim_tableau_time(circ)
     conv_t = measure_conversion_time_from_tableau(n, tableau)
     if QuantumCircuit is None:
         # theoretical SV
         counts = gate_counts_from_stim(circ)
+        if tail.layers > 0:
+            counts = _counts_with_tail(n, counts, tail, seed, depth)
         sv_t = predict_sv_runtime_au(n, counts)
         sv_pk = predict_sv_peak_bytes(n)
         rec = TrialRecord(
@@ -262,6 +364,16 @@ def measure_one(n: int, depth: int, seed: int, sv_timeout_sec: float) -> TrialRe
         )
         return rec
     qc = build_qiskit_from_stim(circ)
+    if tail.layers > 0:
+        append_random_tail_qiskit(
+            qc,
+            layers=tail.layers,
+            twoq_prob=tail.twoq_prob,
+            angle_eps=tail.angle_eps,
+            oneq_ops=tail.oneq_ops,
+            twoq_ops=tail.twoq_ops,
+            seed=tail.effective_seed(n, depth, seed),
+        )
     sv_t, sv_pk, sv_oom, sv_to, sv_mode = run_qiskit_sv_time_and_mem_timeout(qc, sv_timeout_sec)
     return TrialRecord(
         n=n,
@@ -284,18 +396,19 @@ def find_cutoff(
     depth_min: int,
     depth_max: int,
     sv_timeout_sec: float,
+    tail: TailConfig,
 ) -> Tuple[int, List[TrialRecord]]:
     lo, hi = depth_min, depth_max
     history: List[TrialRecord] = []
     while lo < hi:
         mid = (lo + hi) // 2
-        rec = measure_one(n, mid, seed, sv_timeout_sec)
+        rec = measure_one(n, mid, seed, sv_timeout_sec, tail)
         history.append(rec)
         if rec.speedup_vs_sv >= target_speedup:
             hi = mid
         else:
             lo = mid + 1
-    final = measure_one(n, lo, seed, sv_timeout_sec)
+    final = measure_one(n, lo, seed, sv_timeout_sec, tail)
     history.append(final)
     return lo, history
 
@@ -315,9 +428,42 @@ def main() -> None:
         default=60.0,
         help="Wall-clock timeout for Aer SV. On timeout, fall back to theoretical.",
     )
+    ap.add_argument(
+        "--tail-layers",
+        type=int,
+        default=0,
+        help=(
+            "Number of random non-Clifford tail layers appended after the Clifford "
+            "prefix. Set to 0 to disable."
+        ),
+    )
+    ap.add_argument(
+        "--tail-twoq-prob",
+        type=float,
+        default=0.3,
+        help="Probability of placing a 2-qubit gate on an eligible pair in the tail.",
+    )
+    ap.add_argument(
+        "--tail-angle-eps",
+        type=float,
+        default=1e-3,
+        help="Reject tail angles within eps of k*pi/4 (avoids Clifford+T).",
+    )
+    ap.add_argument(
+        "--tail-seed",
+        type=int,
+        default=2025,
+        help="Base seed for the random tail RNG (per trial seed mixing applied).",
+    )
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    tail_cfg = TailConfig(
+        layers=args.tail_layers,
+        twoq_prob=args.tail_twoq_prob,
+        angle_eps=args.tail_angle_eps,
+        seed=args.tail_seed,
+    )
     results: Dict[str, Any] = {"params": vars(args), "runs": [], "cutoffs": {}}
 
     for n in args.ns:
@@ -328,6 +474,7 @@ def main() -> None:
             args.depth_min,
             args.depth_max,
             args.sv_timeout_sec,
+            tail_cfg,
         )
         print(
             f"[n={n}] cutoff≈{cutoff} (target {args.target_speedup}x). "
