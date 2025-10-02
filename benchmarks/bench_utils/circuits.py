@@ -1108,7 +1108,7 @@ def clustered_entanglement_circuit(
     depth: int | Sequence[int] = 1000,
     *,
     seed: int | None = 1337,
-    stage_params: Dict[str, Dict[str, Any]] | None = None,
+    stage_params: Dict[str, Dict[str, Any]] | None = None,  # optional per-stage kwargs
 ) -> Circuit:
     """Prepare clustered entangled states followed by configurable workloads.
 
@@ -1243,10 +1243,15 @@ def clustered_entanglement_circuit(
             summary.update({"layers": None, "region_blocks": region_blocks})
         elif stage == "work_qft":
             work_qubits = max(1, min(num_qubits, int(sp.get("work_qubits", 24))))
-            work_region = list(range(num_qubits - work_qubits, num_qubits))
+            default_start = max(0, num_qubits - work_qubits)
+            work_start = int(sp.get("work_start", default_start))
+            work_start = max(0, min(num_qubits - work_qubits, work_start))
+            work_region = list(range(work_start, work_start + work_qubits))
             local_gates = _qft_spec(len(work_region))
             stage_gates = _remap_gates(local_gates, work_region)
-            summary.update({"layers": None, "work_qubits": len(work_region)})
+            summary.update(
+                {"layers": None, "work_qubits": len(work_region), "work_start": work_start}
+            )
         elif stage == "neighbor_bridge":
             bridge_layers = max(1, min(3, int(sp.get("bridge_layers", 2))))
             region_blocks = max(1, int(sp.get("region_blocks", 3)))
@@ -1482,6 +1487,31 @@ def clustered_ghz_random_globalqft_random_circuit(
         entangler="random+global_qft+random",
         depth=stage_depths,
         seed=seed,
+    )
+
+
+def clustered_ghz_random_workqft_random_circuit(
+    num_qubits: int,
+    *,
+    block_size: int = 8,
+    work_qubits: int = 24,
+    work_start: int | None = None,
+    depth: int | Sequence[int] = (600, 0, 600),
+    seed: int | None = 1337,
+) -> Circuit:
+    """Random layers stitched with a bounded work-register QFT window."""
+
+    stage_options: Dict[str, Any] = {"work_qubits": work_qubits}
+    if work_start is not None:
+        stage_options["work_start"] = int(work_start)
+    return clustered_entanglement_circuit(
+        num_qubits,
+        block_size=block_size,
+        state="ghz",
+        entangler="random+work_qft+random",
+        depth=depth,
+        seed=seed,
+        stage_params={"work_qft": stage_options},
     )
 
 

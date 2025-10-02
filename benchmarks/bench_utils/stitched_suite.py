@@ -200,10 +200,27 @@ def build_stitched_disjoint_suite() -> Tuple[StitchedCircuitSpec, ...]:
     )
 
 
+def build_stitched_workqft_suite() -> Tuple[StitchedCircuitSpec, ...]:
+    """Return the stitched-workQFT showcase suite specification."""
+
+    return (
+        StitchedCircuitSpec(
+            name="stitched_rand_workqft_rand",
+            display_name="Random – Work-QFT – Random",
+            description="Random layers stitched with a bounded work-register QFT window.",
+            factory=lambda width: circuit_lib.clustered_ghz_random_workqft_random_circuit(
+                width, block_size=8, work_qubits=24
+            ),
+            widths=(128, 160, 192),
+        ),
+    )
+
+
 SUITES: Mapping[str, Callable[[], Tuple[StitchedCircuitSpec, ...]]] = {
     "stitched-big": build_stitched_big_suite,
     "stitched-2x": build_stitched_2x_suite,
     "stitched-disjoint": build_stitched_disjoint_suite,
+    "stitched-workqft": build_stitched_workqft_suite,
 }
 
 

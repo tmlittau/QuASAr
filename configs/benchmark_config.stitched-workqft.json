@@ -1,0 +1,14 @@
+{
+  "suite": [
+    {
+      "name": "rand-workqft-rand",
+      "builder": "clustered_ghz_random_workqft_random_circuit",
+      "params": [
+        { "num_qubits": 128, "block_size": 8, "work_qubits": 24 },
+        { "num_qubits": 160, "block_size": 8, "work_qubits": 24 },
+        { "num_qubits": 192, "block_size": 8, "work_qubits": 24 }
+      ],
+      "baselines": ["mps", "sv"]
+    }
+  ]
+}
