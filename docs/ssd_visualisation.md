@@ -59,6 +59,36 @@ An executable demonstration is provided in
 Running the script will open a Matplotlib window highlighting the
 long-range entanglement between distant qubits.
 
+## Stitched benchmark workflow
+
+Stitched benchmark circuits bundle several heterogeneous stages and
+produce substantially larger SSDs.  The helper script in
+[`docs/examples/ssd_visualisation_stitched.py`](examples/ssd_visualisation_stitched.py)
+illustrates the recommended workflow:
+
+1. Resolve the showcase definition with
+   ``stitched_suite.resolve_suite("stitched-big")`` and pick the desired
+   entry and width (e.g. ``spec.factory(spec.widths[0])``).
+2. Convert the resulting :class:`~quasar.circuit.Circuit` to a graph via
+   :meth:`Circuit.to_networkx_ssd`, keeping conversions and backend nodes
+   so that the stitched transitions remain visible.
+3. Derive a layout using :func:`compute_layout` and render either with
+   :func:`draw_ssd_matplotlib` for static figures or
+   :func:`draw_ssd_plotly` for interactive exploration.
+
+The stitched example guards all optional dependencies: ``networkx`` is
+required for the visualisation helpers, ``matplotlib`` powers the static
+plot and ``plotly`` enables the interactive view.  Install any missing
+packages before running the script.
+
+Large stitched graphs can overwhelm dense views.  Start with
+``HighlightOptions(only_problematic=True)`` and a generous
+``boundary_qubit_threshold`` to focus on bottlenecks, or increase the
+``partition_gap`` in :func:`compute_layout` to spread out the layout.
+When the figure still becomes cluttered, consider toggling
+``include_entanglement=False`` on :meth:`Circuit.to_networkx_ssd` to hide
+less critical edges and rely on the Plotly backend for targeted zooming.
+
 ## Filtering problematic regions
 
 Both rendering helpers accept :class:`HighlightOptions`.  Use the
