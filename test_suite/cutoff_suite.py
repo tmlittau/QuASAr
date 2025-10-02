@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:
     import stim
@@ -23,6 +23,10 @@ from test_suite.theoretical_baselines import (
     predict_sv_peak_bytes,
     predict_sv_runtime_au,
     predict_conversion_time_au,
+)
+from test_suite.baselines import (
+    run_dd_time_and_mem,
+    run_extended_stabilizer_time_and_mem,
 )
 
 
@@ -331,6 +335,16 @@ class TrialRecord:
     sv_timed_out: bool
     sv_mode: str
     speedup_vs_sv: float
+    dd_runtime: Optional[float] = None
+    dd_peak_mem: Optional[int] = None
+    dd_timed_out: Optional[bool] = None
+    dd_error: Optional[str] = None
+    dd_mode: Optional[str] = None
+    es_runtime: Optional[float] = None
+    es_peak_mem: Optional[int] = None
+    es_timed_out: Optional[bool] = None
+    es_error: Optional[str] = None
+    es_mode: Optional[str] = None
 
 
 def measure_one(
@@ -339,6 +353,10 @@ def measure_one(
     seed: int,
     sv_timeout_sec: float,
     tail: TailConfig,
+    run_dd: bool,
+    dd_timeout_sec: float,
+    run_es: bool,
+    es_timeout_sec: float,
 ) -> TrialRecord:
     circ = build_random_clifford_stim(n, depth, seed=seed)
     tab_t, tableau = run_stim_tableau_time(circ)
@@ -350,7 +368,7 @@ def measure_one(
             counts = _counts_with_tail(n, counts, tail, seed, depth)
         sv_t = predict_sv_runtime_au(n, counts)
         sv_pk = predict_sv_peak_bytes(n)
-        rec = TrialRecord(
+        return TrialRecord(
             n,
             depth,
             tab_t,
@@ -362,7 +380,6 @@ def measure_one(
             "theoretical (no Aer)",
             sv_t / max(tab_t + conv_t, 1e-12),
         )
-        return rec
     qc = build_qiskit_from_stim(circ)
     if tail.layers > 0:
         append_random_tail_qiskit(
@@ -375,6 +392,8 @@ def measure_one(
             seed=tail.effective_seed(n, depth, seed),
         )
     sv_t, sv_pk, sv_oom, sv_to, sv_mode = run_qiskit_sv_time_and_mem_timeout(qc, sv_timeout_sec)
+    dd_result = run_dd_time_and_mem(qc, timeout_sec=dd_timeout_sec) if run_dd else None
+    es_result = run_extended_stabilizer_time_and_mem(qc, timeout_sec=es_timeout_sec) if run_es else None
     return TrialRecord(
         n=n,
         depth=depth,
@@ -386,6 +405,16 @@ def measure_one(
         sv_timed_out=sv_to,
         sv_mode=sv_mode,
         speedup_vs_sv=sv_t / max(tab_t + conv_t, 1e-12),
+        dd_runtime=None if dd_result is None else dd_result["runtime"],
+        dd_peak_mem=None if dd_result is None else dd_result["peak_mem"],
+        dd_timed_out=None if dd_result is None else dd_result["timed_out"],
+        dd_error=None if dd_result is None else dd_result["error"],
+        dd_mode=None if dd_result is None else dd_result["mode"],
+        es_runtime=None if es_result is None else es_result["runtime"],
+        es_peak_mem=None if es_result is None else es_result["peak_mem"],
+        es_timed_out=None if es_result is None else es_result["timed_out"],
+        es_error=None if es_result is None else es_result["error"],
+        es_mode=None if es_result is None else es_result["mode"],
     )
 
 
@@ -397,18 +426,42 @@ def find_cutoff(
     depth_max: int,
     sv_timeout_sec: float,
     tail: TailConfig,
+    run_dd: bool,
+    dd_timeout_sec: float,
+    run_es: bool,
+    es_timeout_sec: float,
 ) -> Tuple[int, List[TrialRecord]]:
     lo, hi = depth_min, depth_max
     history: List[TrialRecord] = []
     while lo < hi:
         mid = (lo + hi) // 2
-        rec = measure_one(n, mid, seed, sv_timeout_sec, tail)
+        rec = measure_one(
+            n,
+            mid,
+            seed,
+            sv_timeout_sec,
+            tail,
+            run_dd,
+            dd_timeout_sec,
+            run_es,
+            es_timeout_sec,
+        )
         history.append(rec)
         if rec.speedup_vs_sv >= target_speedup:
             hi = mid
         else:
             lo = mid + 1
-    final = measure_one(n, lo, seed, sv_timeout_sec, tail)
+    final = measure_one(
+        n,
+        lo,
+        seed,
+        sv_timeout_sec,
+        tail,
+        run_dd,
+        dd_timeout_sec,
+        run_es,
+        es_timeout_sec,
+    )
     history.append(final)
     return lo, history
 
@@ -427,6 +480,19 @@ def main() -> None:
         type=float,
         default=60.0,
         help="Wall-clock timeout for Aer SV. On timeout, fall back to theoretical.",
+    )
+    ap.add_argument("--run-dd", action="store_true", help="Also run the MQT DDSIM baseline.")
+    ap.add_argument("--dd-timeout-sec", type=float, default=60.0, help="Timeout for DDSIM runs.")
+    ap.add_argument(
+        "--run-es",
+        action="store_true",
+        help="Also run the Aer extended-stabilizer baseline.",
+    )
+    ap.add_argument(
+        "--es-timeout-sec",
+        type=float,
+        default=60.0,
+        help="Timeout for Aer extended-stabilizer runs.",
     )
     ap.add_argument(
         "--tail-layers",
@@ -475,6 +541,10 @@ def main() -> None:
             args.depth_max,
             args.sv_timeout_sec,
             tail_cfg,
+            args.run_dd,
+            args.dd_timeout_sec,
+            args.run_es,
+            args.es_timeout_sec,
         )
         print(
             f"[n={n}] cutoff≈{cutoff} (target {args.target_speedup}x). "
