@@ -13,6 +13,7 @@ import pytest
 
 from benchmarks.bench_utils import showcase_benchmarks as sb
 from benchmarks.bench_utils import stitched_suite
+from benchmarks.bench_utils.runner import BenchmarkRunner
 from benchmarks.circuits import (
     CLIFFORD_GATES,
     classical_controlled_circuit,
@@ -210,6 +211,73 @@ def test_layered_clifford_magic_islands_helper_overrides_defaults():
     expected_post = _expected_island_flags(12, 2, 3, 4)
     assert flags[clifford_layers:] == expected_post
     assert metadata["non_clifford_layers"] == sum(flags)
+
+
+def test_wide_stitched_circuit_without_memory_uses_scheduler_run():
+    spec = stitched_suite.build_stitched_big_suite()[0]
+    circuit = spec.factory(40)
+    circuit.ssd = None
+
+    class DummyStatevectorSimulator:
+        def load(self, num_qubits: int) -> None:  # pragma: no cover - trivial
+            self.num_qubits = num_qubits
+
+        def apply_gate(self, gate, qubits, params) -> None:  # pragma: no cover
+            pass
+
+        def extract_ssd(self):  # pragma: no cover - trivial
+            return None
+
+    class DummyPlanner:
+        def __init__(self) -> None:
+            self.estimator = None
+
+        def plan(self, circuit, *, backend=None, max_memory=None):
+            return SimpleNamespace(
+                partitions=[SimpleNamespace(backend=Backend.STATEVECTOR)],
+                steps=[],
+                gates=list(circuit.gates),
+                conversions=[],
+            )
+
+    class DummyScheduler:
+        def __init__(self) -> None:
+            self.backends = {
+                Backend.STATEVECTOR: DummyStatevectorSimulator,
+                Backend.EXTENDED_STABILIZER: DummyStatevectorSimulator,
+            }
+            self.planner = DummyPlanner()
+            self.runs = 0
+
+        def should_use_quick_path(self, circuit, *, backend=None, force=False):
+            return False
+
+        def prepare_run(self, circuit, plan=None, *, backend=None, max_memory=None):
+            return plan
+
+        def run(self, circuit, plan, instrument=False):
+            self.runs += 1
+            backend_obj = SimpleNamespace(name="partitioned")
+            return SimpleNamespace(partitions=[SimpleNamespace(backend=backend_obj)])
+
+    scheduler = DummyScheduler()
+    engine = SimpleNamespace(scheduler=scheduler, planner=scheduler.planner)
+    runner = BenchmarkRunner()
+
+    summary = runner.run_quasar_multiple(
+        circuit,
+        engine,
+        backend=Backend.STATEVECTOR,
+        repetitions=1,
+    )
+
+    assert "run_time_mean" in summary and summary["run_time_mean"] is not None
+    assert (
+        "run_peak_memory_mean" in summary
+        and summary["run_peak_memory_mean"] is not None
+    )
+    assert summary["repetitions"] == 1
+    assert scheduler.runs == 1
 
 
 def test_layered_clifford_ramp_metadata():
