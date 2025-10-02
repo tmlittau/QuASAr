@@ -73,7 +73,7 @@ else:  # pragma: no cover - exercised when imported as a package module
     from .progress import ProgressReporter
     from .ssd_metrics import partition_metrics_from_result
     from .threading_utils import resolve_worker_count, thread_engine
-    from ..theoretical_baselines import (
+    from .theoretical_baselines import (
         count_gates,
         predict_sv_peak_bytes,
         predict_sv_runtime_au,
