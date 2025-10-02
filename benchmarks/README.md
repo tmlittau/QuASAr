@@ -90,6 +90,49 @@ classical-control variants.  Programmatic callers can pass ``suite="stitched-big
 to :func:`benchmarks.run_benchmark.run_showcase_suite` to obtain the same
 behaviour.
 
+### Visualising stitched benchmark runs
+
+The helper :mod:`benchmarks.plots_stitched` renders stacked runtime and
+peak-memory bars for stitched benchmark suites.  It consumes either the JSON
+summary emitted by :mod:`benchmarks.run_benchmark` or the consolidated SQLite
+database used by the showcase CLI.  After running a stitched suite, call the
+script with the location of the results file:
+
+```bash
+python benchmarks/run_benchmark.py --suite stitched-2x --out out/stitched-2x \
+  --repeats 3 --choose-best-baseline
+
+python benchmarks/plots_stitched.py \
+  --results out/stitched-2x/results.json \
+  --out-dir out/stitched-2x/plots \
+  --title "QuASAr stitched-2x"
+```
+
+When the showcase CLI stores results in the default SQLite database, the plots
+can be generated directly from the database file.  The script automatically
+selects the most recent benchmark run unless a specific run identifier is
+provided via ``--run-id``:
+
+```bash
+python benchmarks/plots_stitched.py \
+  --database benchmarks/bench_utils/results/benchmarks.sqlite \
+  --out-dir out/stitched-2x/plots \
+  --title "QuASAr stitched-2x"
+```
+
+Useful flags:
+
+* ``--show-all-baselines`` plots every baseline backend discovered in the
+  results instead of only the fastest baseline.
+* ``--circuit`` restricts the plots to the named circuits (repeat the flag to
+  select multiple circuits).
+* ``--csv`` writes a compact CSV summary comparing the best baseline against
+  QuASAr for each circuit.
+* ``--dpi`` adjusts the output resolution.
+
+The figures are saved as ``runtime_by_circuit.png`` and
+``memory_by_circuit.png`` inside the requested output directory.
+
 ### Programmatic access
 
 The CLI delegates to :func:`benchmarks.run_benchmark.run_showcase_suite` for
