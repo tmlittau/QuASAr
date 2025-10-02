@@ -1690,14 +1690,15 @@ def classical_controlled_circuit(
             flip_qubit = classical[(layer // toggle_period) % len(classical)]
             gates.append(Gate("X", [flip_qubit]))
         force_cz = bool(
-            cz_window_period is not None and layer % cz_window_period == 0
+            cz_window_period is not None
+            and (layer % (2 * cz_window_period)) < cz_window_period
         )
-        in_diag_window = bool(
+        diag_active = bool(
             diag_fixed_phi is not None
-            and (diag_period is not None)
-            and (layer % diag_period in (1, 2, 3))
+            and diag_period is not None
+            and (layer % (2 * diag_period)) < diag_period
         )
-        layer_phi = diag_fixed_phi if in_diag_window else None
+        layer_phi = diag_fixed_phi if diag_active else None
         for target in quantum:
             theta = ((layer + 1) * (target + 1)) % 31 / 31 * math.pi
             phi = (
@@ -1710,7 +1711,7 @@ def classical_controlled_circuit(
         for idx, ctrl in enumerate(classical):
             target = quantum[(layer * fanout + idx) % len(quantum)]
             pattern = (layer + idx) % 3
-            if force_cz:
+            if force_cz or diag_active:
                 gates.append(Gate("CZ", [ctrl, target]))
             else:
                 if pattern == 0:
