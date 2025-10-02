@@ -52,6 +52,13 @@ if __package__ in {None, ""}:
         ENV_VAR as STATEVECTOR_MEMORY_ENV_VAR,
         max_qubits_statevector,
     )
+    from baseline_support import (  # type: ignore[no-redef]
+        baseline_support_status,
+        estimate_backend_cost,
+        format_bytes,
+        format_seconds,
+    )
+    from theoretical_baselines import count_gates  # type: ignore[no-redef]
     from progress import ProgressReporter  # type: ignore[no-redef]
     from threading_utils import resolve_worker_count, thread_engine  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised via runtime execution
@@ -72,11 +79,19 @@ else:  # pragma: no cover - exercised via runtime execution
         ENV_VAR as STATEVECTOR_MEMORY_ENV_VAR,
         max_qubits_statevector,
     )
+    from .baseline_support import (
+        baseline_support_status,
+        estimate_backend_cost,
+        format_bytes,
+        format_seconds,
+    )
+    from .theoretical_baselines import count_gates
     from .progress import ProgressReporter
     from .threading_utils import resolve_worker_count, thread_engine
 
 from quasar import SimulationEngine
-from quasar.cost import Backend
+from quasar.cost import Backend, Cost
+from quasar.metrics import FragmentMetrics
 from quasar.method_selector import NoFeasibleBackendError
 
 
@@ -451,6 +466,65 @@ def _automatic_failure_reason(
     return "; ".join(details)
 
 
+def _forced_theoretical_record(
+    *,
+    spec: CircuitSpec,
+    requested_qubits: int,
+    actual_qubits: int | None,
+    backend: Backend,
+    cost: Cost,
+    reason: str,
+    metrics: FragmentMetrics | None,
+    extras: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Return a standardised theoretical forced baseline record."""
+
+    comment = reason.strip()
+    if comment:
+        comment = f"{comment}; theoretical estimate"
+    else:
+        comment = "theoretical estimate"
+    record: dict[str, object] = {
+        "circuit": spec.name,
+        "qubits": requested_qubits,
+        "actual_qubits": actual_qubits,
+        "framework": backend.name,
+        "backend": f"{backend.name.lower()}_theoretical",
+        "mode": "forced",
+        "unsupported": True,
+        "failed": False,
+        "error": reason,
+        "comment": comment,
+        "repetitions": 0,
+        "prepare_time_mean": 0.0,
+        "prepare_time_std": 0.0,
+        "run_time_mean": float(cost.time),
+        "run_time_std": 0.0,
+        "total_time_mean": float(cost.time),
+        "total_time_std": 0.0,
+        "prepare_peak_memory_mean": 0.0,
+        "prepare_peak_memory_std": 0.0,
+        "run_peak_memory_mean": float(cost.memory),
+        "run_peak_memory_std": 0.0,
+        "is_theoretical": True,
+        "theoretical_reason": reason,
+    }
+    if metrics is not None:
+        record.update(
+            {
+                "theoretical_num_qubits": metrics.num_qubits,
+                "theoretical_num_gates": metrics.num_gates,
+                "theoretical_num_1q": metrics.num_1q,
+                "theoretical_num_2q": metrics.num_2q,
+                "theoretical_num_meas": metrics.num_meas,
+                "theoretical_num_t": metrics.num_t,
+            }
+        )
+    if extras:
+        record.update(dict(extras))
+    return record
+
+
 def _collect_backend_for_width(
     engine: SimulationEngine,
     spec: CircuitSpec,
@@ -480,154 +554,8 @@ def _collect_backend_for_width(
     forced_width = _circuit_qubit_width(circuit_forced)
     auto_width = _circuit_qubit_width(circuit_auto)
     effective_timeout = run_timeout if run_timeout and run_timeout > 0 else None
-
-    for backend in backends:
-        status = f"{spec.name}@{n} {backend.name.lower()}"
-        if (
-            backend == Backend.STATEVECTOR
-            and forced_width is not None
-            and forced_width > STATEVECTOR_MAX_QUBITS
-        ):
-            message = (
-                f"circuit uses {forced_width} qubits exceeding "
-                f"statevector limit of {STATEVECTOR_MAX_QUBITS}"
-            )
-            forced_records.append(
-                {
-                    "circuit": spec.name,
-                    "qubits": n,
-                    "actual_qubits": forced_width,
-                    "framework": backend.name,
-                    "backend": backend.name,
-                    "unsupported": True,
-                    "failed": False,
-                    "error": message,
-                    "comment": message,
-                }
-            )
-            LOGGER.info(
-                "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
-                spec.name,
-                n,
-                backend.name,
-                message,
-            )
-            messages.append(f"{status} skip: {message}")
-            continue
-        if backend == Backend.MPS:
-            reason = _mps_skip_reason(
-                circuit_forced,
-                n,
-                forced_width=forced_width,
-            )
-            if reason:
-                forced_records.append(
-                    {
-                        "circuit": spec.name,
-                        "qubits": n,
-                        "actual_qubits": forced_width,
-                        "framework": backend.name,
-                        "backend": backend.name,
-                        "unsupported": True,
-                        "failed": False,
-                        "error": reason,
-                        "comment": reason,
-                    }
-                )
-                LOGGER.info(
-                    "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
-                    spec.name,
-                    n,
-                    backend.name,
-                    reason,
-                )
-                messages.append(f"{status} skip: {reason}")
-                continue
-        if not _supports_backend(circuit_forced, backend):
-            reason = (
-                "non-Clifford gates" if backend == Backend.TABLEAU else "unsupported gate set"
-            )
-            forced_records.append(
-                {
-                    "circuit": spec.name,
-                    "qubits": n,
-                    "actual_qubits": forced_width,
-                    "framework": backend.name,
-                    "backend": backend.name,
-                    "unsupported": True,
-                    "failed": False,
-                    "error": f"circuit uses {reason} unsupported by {backend.name}",
-                }
-            )
-            LOGGER.info(
-                "Skipping forced run: circuit=%s qubits=%s backend=%s reason=%s",
-                spec.name,
-                n,
-                backend.name,
-                reason,
-            )
-            messages.append(f"{status} skip: {reason}")
-            continue
-        runner = BenchmarkRunner()
-        LOGGER.info(
-            "Executing forced run: circuit=%s qubits=%s backend=%s",
-            spec.name,
-            n,
-            backend.name,
-        )
-        try:
-            rec = runner.run_quasar_multiple(
-                circuit_forced,
-                engine,
-                backend=backend,
-                repetitions=repetitions,
-                quick=True,
-                memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
-                run_timeout=effective_timeout,
-            )
-        except Exception as exc:  # pragma: no cover - backend limitations
-            forced_records.append(
-                {
-                    "circuit": spec.name,
-                    "qubits": n,
-                    "actual_qubits": forced_width,
-                    "framework": backend.name,
-                    "backend": backend.name,
-                    "unsupported": True,
-                    "failed": False,
-                    "error": str(exc),
-                }
-            )
-            LOGGER.warning(
-                "Forced run failed for circuit=%s qubits=%s backend=%s: %s",
-                spec.name,
-                n,
-                backend.name,
-                exc,
-            )
-            messages.append(f"{status} failed: {exc}")
-            continue
-
-        rec.pop("result", None)
-        rec.update(
-            {
-                "circuit": spec.name,
-                "qubits": n,
-                "actual_qubits": forced_width,
-                "framework": backend.name,
-                "backend": backend.name,
-                "mode": "forced",
-                "unsupported": bool(rec.get("unsupported", False)),
-            }
-        )
-        forced_records.append(rec)
-        LOGGER.info(
-            "Completed forced run: circuit=%s qubits=%s backend=%s",
-            spec.name,
-            n,
-            backend.name,
-        )
-        messages.append(status)
+    time_limit = effective_timeout
+    memory_limit = STATEVECTOR_SAFE_MEMORY_BYTES or None
 
     runner = BenchmarkRunner()
     LOGGER.info(
@@ -636,43 +564,13 @@ def _collect_backend_for_width(
         n,
     )
     auto_status = f"{spec.name}@{n} quasar"
-    auto_skip_reason = _mps_skip_reason(
-        circuit_auto,
-        n,
-        forced_width=auto_width,
-    )
-    if auto_skip_reason:
-        LOGGER.info(
-            "Skipping automatic run: circuit=%s qubits=%s reason=%s",
-            spec.name,
-            n,
-            auto_skip_reason,
-        )
-        auto_records.append(
-            {
-                "circuit": spec.name,
-                "qubits": n,
-                "actual_qubits": auto_width,
-                "framework": "quasar",
-                "backend": Backend.MPS.name,
-                "mode": "auto",
-                "unsupported": True,
-                "failed": False,
-                "error": auto_skip_reason,
-                "comment": auto_skip_reason,
-                "repetitions": 0,
-            }
-        )
-        messages.append(f"{auto_status} skip: {auto_skip_reason}")
-        return forced_records, auto_records, messages
-
     try:
         rec = runner.run_quasar_multiple(
             circuit_auto,
             engine,
             repetitions=repetitions,
             quick=False,
-            memory_bytes=STATEVECTOR_SAFE_MEMORY_BYTES,
+            memory_bytes=None,
             run_timeout=effective_timeout,
         )
     except NoFeasibleBackendError as exc:
@@ -704,7 +602,6 @@ def _collect_backend_for_width(
             }
         )
         messages.append(f"{auto_status} unsupported: {reason}")
-        return forced_records, auto_records, messages
     except Exception as exc:  # pragma: no cover - skip unsupported mixes
         LOGGER.warning(
             "Automatic scheduling failed for circuit=%s qubits=%s: %s",
@@ -712,30 +609,195 @@ def _collect_backend_for_width(
             n,
             exc,
         )
+        auto_records.append(
+            {
+                "circuit": spec.name,
+                "qubits": n,
+                "actual_qubits": auto_width,
+                "framework": "quasar",
+                "backend": None,
+                "mode": "auto",
+                "unsupported": False,
+                "failed": True,
+                "error": str(exc),
+                "comment": str(exc),
+                "repetitions": 0,
+            }
+        )
         messages.append(f"{auto_status} failed: {exc}")
-        return forced_records, auto_records, messages
+    else:
+        rec.pop("result", None)
+        backend_choice = rec.get("backend")
+        if isinstance(backend_choice, Backend):
+            rec["backend"] = backend_choice.name
+        rec.update(
+            {
+                "circuit": spec.name,
+                "qubits": n,
+                "actual_qubits": auto_width,
+                "framework": "quasar",
+                "mode": "auto",
+                "unsupported": bool(rec.get("unsupported", False)),
+            }
+        )
+        auto_records.append(rec)
+        messages.append(auto_status)
 
-    rec.pop("result", None)
-    backend_choice = rec.get("backend")
-    if isinstance(backend_choice, Backend):
-        rec["backend"] = backend_choice.name
-    rec.update(
-        {
-            "circuit": spec.name,
-            "qubits": n,
-            "actual_qubits": auto_width,
-            "framework": "quasar",
-            "mode": "auto",
-            "unsupported": bool(rec.get("unsupported", False)),
-        }
-    )
-    auto_records.append(rec)
-    LOGGER.info(
-        "Completed automatic run: circuit=%s qubits=%s backend=quasar",
-        spec.name,
-        n,
-    )
-    messages.append(auto_status)
+    sv_gate_counts: dict[str, int] | None = None
+    for backend in backends:
+        status = f"{spec.name}@{n} {backend.name.lower()}"
+        LOGGER.info(
+            "Evaluating forced baseline: circuit=%s qubits=%s backend=%s",
+            spec.name,
+            n,
+            backend.name,
+        )
+        cost, metrics = estimate_backend_cost(engine, circuit_forced, backend)
+        extras: dict[str, object] = {}
+        if backend == Backend.STATEVECTOR:
+            if sv_gate_counts is None:
+                sv_gate_counts = count_gates(getattr(circuit_forced, "gates", ()))
+            extras.update(
+                {
+                    "sv_gate_counts": sv_gate_counts,
+                    "sv_mem_budget_bytes": memory_limit,
+                }
+            )
+
+        reasons: list[str] = []
+        width_for_checks = forced_width if forced_width is not None else n
+        supported_basic, reason_basic = baseline_support_status(
+            backend,
+            width=width_for_checks,
+            circuit=None,
+            memory_bytes=memory_limit,
+        )
+        if not supported_basic and reason_basic:
+            reasons.append(reason_basic)
+        supported_full, reason_full = baseline_support_status(
+            backend,
+            width=width_for_checks,
+            circuit=circuit_forced,
+            memory_bytes=memory_limit,
+        )
+        if not supported_full and reason_full:
+            reasons.append(reason_full)
+        if not _supports_backend(circuit_forced, backend):
+            if backend == Backend.TABLEAU:
+                reasons.append(
+                    "circuit uses non-Clifford gates unsupported by the tableau backend"
+                )
+            else:
+                reasons.append("unsupported gate set")
+        if (
+            backend == Backend.STATEVECTOR
+            and forced_width is not None
+            and forced_width > STATEVECTOR_MAX_QUBITS
+        ):
+            reasons.append(
+                "circuit expands to "
+                f"{forced_width} qubits exceeding statevector limit of {STATEVECTOR_MAX_QUBITS}"
+            )
+        if backend == Backend.MPS:
+            reason = _mps_skip_reason(
+                circuit_forced,
+                n,
+                forced_width=forced_width,
+            )
+            if reason:
+                reasons.append(reason)
+        if time_limit is not None and cost.time > time_limit:
+            reasons.append(
+                f"estimated runtime {format_seconds(cost.time)} exceeds timeout {format_seconds(time_limit)}"
+            )
+        if memory_limit is not None and cost.memory > memory_limit:
+            reasons.append(
+                f"estimated peak memory {format_bytes(cost.memory)} exceeds limit {format_bytes(memory_limit)}"
+            )
+
+        if reasons:
+            reason_text = "; ".join(reasons)
+            LOGGER.info(
+                "Recording theoretical forced baseline: circuit=%s qubits=%s backend=%s reason=%s",
+                spec.name,
+                n,
+                backend.name,
+                reason_text,
+            )
+            record = _forced_theoretical_record(
+                spec=spec,
+                requested_qubits=n,
+                actual_qubits=forced_width,
+                backend=backend,
+                cost=cost,
+                reason=reason_text,
+                metrics=metrics,
+                extras=extras,
+            )
+            forced_records.append(record)
+            messages.append(f"{status} theoretical: {reason_text}")
+            continue
+
+        runner = BenchmarkRunner()
+        LOGGER.info(
+            "Executing forced run: circuit=%s qubits=%s backend=%s",
+            spec.name,
+            n,
+            backend.name,
+        )
+        try:
+            rec = runner.run_quasar_multiple(
+                circuit_forced,
+                engine,
+                backend=backend,
+                repetitions=repetitions,
+                quick=True,
+                memory_bytes=memory_limit,
+                run_timeout=effective_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - backend limitations
+            LOGGER.warning(
+                "Forced run failed for circuit=%s qubits=%s backend=%s: %s",
+                spec.name,
+                n,
+                backend.name,
+                exc,
+            )
+            record = _forced_theoretical_record(
+                spec=spec,
+                requested_qubits=n,
+                actual_qubits=forced_width,
+                backend=backend,
+                cost=cost,
+                reason=str(exc),
+                metrics=metrics,
+                extras=extras,
+            )
+            forced_records.append(record)
+            messages.append(f"{status} failed: {exc}")
+            continue
+
+        rec.pop("result", None)
+        rec.update(
+            {
+                "circuit": spec.name,
+                "qubits": n,
+                "actual_qubits": forced_width,
+                "framework": backend.name,
+                "backend": backend.name,
+                "mode": "forced",
+                "unsupported": bool(rec.get("unsupported", False)),
+            }
+        )
+        forced_records.append(rec)
+        LOGGER.info(
+            "Completed forced run: circuit=%s qubits=%s backend=%s",
+            spec.name,
+            n,
+            backend.name,
+        )
+        messages.append(status)
+
     return forced_records, auto_records, messages
 
 

@@ -48,16 +48,16 @@ if __package__ in {None, ""}:
     import circuits as circuit_lib  # type: ignore[no-redef]
     import stitched_suite as stitched_suites  # type: ignore[no-redef]
     from database import BenchmarkDatabase, BenchmarkRun, open_database  # type: ignore[no-redef]
-    from memory_utils import max_qubits_statevector  # type: ignore[no-redef]
+    from baseline_support import (  # type: ignore[no-redef]
+        baseline_support_status,
+        estimate_backend_cost,
+        format_bytes,
+        format_seconds,
+    )
     from progress import ProgressReporter  # type: ignore[no-redef]
     from ssd_metrics import partition_metrics_from_result  # type: ignore[no-redef]
     from threading_utils import resolve_worker_count, thread_engine  # type: ignore[no-redef]
-    from theoretical_baselines import (  # type: ignore[no-redef]
-        count_gates,
-        predict_sv_peak_bytes,
-        predict_sv_runtime_au,
-        will_sv_oom,
-    )
+    from theoretical_baselines import count_gates  # type: ignore[no-redef]
 else:  # pragma: no cover - exercised when imported as a package module
     from .plot_utils import (
         backend_labels,
@@ -71,19 +71,21 @@ else:  # pragma: no cover - exercised when imported as a package module
     from . import circuits as circuit_lib
     from . import stitched_suite as stitched_suites
     from .database import BenchmarkDatabase, BenchmarkRun, open_database
-    from .memory_utils import max_qubits_statevector
+    from .baseline_support import (
+        baseline_support_status,
+        estimate_backend_cost,
+        format_bytes,
+        format_seconds,
+    )
     from .progress import ProgressReporter
     from .ssd_metrics import partition_metrics_from_result
     from .threading_utils import resolve_worker_count, thread_engine
-    from .theoretical_baselines import (
-        count_gates,
-        predict_sv_peak_bytes,
-        predict_sv_runtime_au,
-        will_sv_oom,
-    )
+    from .theoretical_baselines import count_gates
 
 from quasar import SimulationEngine
-from quasar.cost import Backend
+from quasar.cost import Backend, Cost
+from quasar.metrics import FragmentMetrics
+from quasar.planner import _simulation_cost
 
 
 LOGGER = logging.getLogger(__name__)
@@ -103,6 +105,74 @@ BASELINE_BACKENDS: tuple[Backend, ...] = (
     Backend.MPS,
     Backend.DECISION_DIAGRAM,
 )
+
+# Backwards compatibility: existing tests patch this helper directly.
+_baseline_support_status = baseline_support_status
+
+
+def _create_theoretical_record(
+    *,
+    spec: "ShowcaseCircuit",
+    width: int,
+    backend: Backend,
+    cost: Cost,
+    reason: str,
+    metrics: FragmentMetrics | None,
+    extras: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Return a normalised theoretical baseline record."""
+
+    comment = reason.strip()
+    if comment:
+        comment = f"{comment}; theoretical estimate"
+    else:
+        comment = "theoretical estimate"
+    base_record: dict[str, object] = {
+        "framework": backend.name,
+        "backend": f"{backend.name.lower()}_theoretical",
+        "repetitions": 0,
+        "prepare_time_mean": 0.0,
+        "prepare_time_std": 0.0,
+        "run_time_mean": float(cost.time),
+        "run_time_std": 0.0,
+        "total_time_mean": float(cost.time),
+        "total_time_std": 0.0,
+        "prepare_peak_memory_mean": 0.0,
+        "prepare_peak_memory_std": 0.0,
+        "run_peak_memory_mean": float(cost.memory),
+        "run_peak_memory_std": 0.0,
+        "runtime": float(cost.time),
+        "peak_mem": float(cost.memory),
+        "peak_memory": float(cost.memory),
+        "result": None,
+        "failed": False,
+        "unsupported": True,
+        "comment": comment,
+        "is_baseline": True,
+        "is_theoretical": True,
+        "mode": "theoretical",
+    }
+    if metrics is not None:
+        base_record.update(
+            {
+                "theoretical_num_qubits": metrics.num_qubits,
+                "theoretical_num_gates": metrics.num_gates,
+                "theoretical_num_1q": metrics.num_1q,
+                "theoretical_num_2q": metrics.num_2q,
+                "theoretical_num_meas": metrics.num_meas,
+                "theoretical_num_t": metrics.num_t,
+            }
+        )
+    if extras:
+        base_record.update(dict(extras))
+    return _finalise_record(
+        base_record,
+        spec=spec,
+        width=width,
+        framework=backend.name,
+        backend=base_record["backend"],
+        mode="theoretical",
+    )
 
 
 def _result_to_json(result: Any) -> str | None:
@@ -787,42 +857,6 @@ def _build_circuit(
     circuit = spec.constructor(width)
     _set_classical_simplification(circuit, classical_simplification)
     return circuit
-
-
-def _baseline_support_status(
-    backend: Backend,
-    *,
-    width: int,
-    circuit: object | None,
-    memory_bytes: int | None,
-) -> tuple[bool, str | None]:
-    """Return whether ``backend`` can execute ``circuit`` and a skip reason."""
-
-    if backend == Backend.STATEVECTOR:
-        limit = max_qubits_statevector(memory_bytes)
-        if width > limit:
-            return (
-                False,
-                f"circuit width {width} exceeds statevector limit of {limit} qubits",
-            )
-
-    if backend == Backend.TABLEAU and circuit is not None:
-        gates = getattr(circuit, "gates", ())
-        forbidden = {"CCX", "CCZ", "MCX", "CSWAP"}
-        for gate in gates:
-            name = getattr(gate, "gate", "").upper()
-            if name in forbidden:
-                return False, f"{name} gate is unsupported by the tableau backend"
-        try:
-            is_clifford = circuit_lib.is_clifford(circuit)
-        except Exception:  # pragma: no cover - defensive
-            is_clifford = False
-        if not is_clifford:
-            return False, "non-Clifford gates are unsupported by the tableau backend"
-
-    return True, None
-
-
 def _run_backend_suite_for_width(
     engine: SimulationEngine,
     spec: ShowcaseCircuit,
@@ -874,11 +908,6 @@ def _run_backend_suite_for_width(
         "c_other": float(theoretical_options.get("c_other", 2.0)),
     }
 
-    has_statevector_backend = Backend.STATEVECTOR in baseline_backends
-    consider_sv_baseline = include_theoretical_sv or has_statevector_backend
-    sv_successful = False
-    sv_failure_reason: str | None = None
-
     LOGGER.info("Starting benchmarks for %s at %s qubits", spec.name, width)
 
     built_circuit: object | None = None
@@ -891,213 +920,8 @@ def _run_backend_suite_for_width(
             )
         return built_circuit
 
-    for backend in baseline_backends:
-        status_msg = f"{backend.name}@{width}"
-        supported, reason = _baseline_support_status(
-            backend,
-            width=width,
-            circuit=None,
-            memory_bytes=memory_bytes,
-        )
-        if not supported:
-            LOGGER.info(
-                "Skipping backend %s for %s qubits=%s: %s",
-                backend.name,
-                spec.name,
-                width,
-                reason,
-            )
-            if backend == Backend.STATEVECTOR and consider_sv_baseline:
-                sv_failure_reason = reason
-            record = _finalise_record(
-                {
-                    "unsupported": True,
-                    "failed": False,
-                    "comment": reason,
-                    "repetitions": 0,
-                    "result": None,
-                },
-                spec=spec,
-                width=width,
-                framework=backend.name,
-                backend=backend.name,
-                mode="forced",
-            )
-            records.append(record)
-            messages.append(f"{status_msg} skipped: {reason}")
-            continue
-
-        circuit = _ensure_circuit()
-        supported, reason = _baseline_support_status(
-            backend,
-            width=width,
-            circuit=circuit,
-            memory_bytes=memory_bytes,
-        )
-        if not supported:
-            LOGGER.info(
-                "Skipping backend %s for %s qubits=%s: %s",
-                backend.name,
-                spec.name,
-                width,
-                reason,
-            )
-            if backend == Backend.STATEVECTOR and consider_sv_baseline:
-                sv_failure_reason = reason
-            record = _finalise_record(
-                {
-                    "unsupported": True,
-                    "failed": False,
-                    "comment": reason,
-                    "repetitions": 0,
-                    "result": None,
-                },
-                spec=spec,
-                width=width,
-                framework=backend.name,
-                backend=backend.name,
-                mode="forced",
-            )
-            records.append(record)
-            messages.append(f"{status_msg} skipped: {reason}")
-            continue
-
-        runner = BenchmarkRunner()
-        if step_callback is not None:
-            step_callback(status_msg)
-        LOGGER.info(
-            "Running baseline backend %s for %s qubits=%s",
-            backend.name,
-            spec.name,
-            width,
-        )
-        try:
-            rec = runner.run_quasar_multiple(
-                circuit,
-                engine,
-                backend=backend,
-                repetitions=repetitions,
-                quick=quasar_quick,
-                memory_bytes=memory_bytes,
-                run_timeout=run_timeout,
-            )
-        except Exception as exc:  # pragma: no cover - backend implementation detail
-            LOGGER.warning(
-                "Backend %s failed for %s qubits=%s: %s",
-                backend.name,
-                spec.name,
-                width,
-                exc,
-            )
-            if backend == Backend.STATEVECTOR and consider_sv_baseline:
-                sv_failure_reason = str(exc)
-            record = _finalise_record(
-                {
-                    "unsupported": True,
-                    "failed": True,
-                    "error": str(exc),
-                    "repetitions": 0,
-                },
-                spec=spec,
-                width=width,
-                framework=backend.name,
-                backend=backend.name,
-                mode="forced",
-            )
-            records.append(record)
-            messages.append(f"{status_msg} failed: {exc}")
-            continue
-
-        record = _finalise_record(
-            rec,
-            spec=spec,
-            width=width,
-            framework=backend.name,
-            backend=backend.name,
-            mode="forced",
-        )
-        if backend == Backend.STATEVECTOR and consider_sv_baseline:
-            if not rec.get("failed") and not rec.get("unsupported"):
-                sv_successful = True
-                sv_failure_reason = None
-            else:
-                comment = rec.get("comment") or rec.get("error")
-                if comment:
-                    sv_failure_reason = str(comment)
-        records.append(record)
-        messages.append(status_msg)
-
-    if consider_sv_baseline:
-        predicted_oom = will_sv_oom(
-            width,
-            mem_budget_bytes,
-            dtype_bytes=dtype_bytes,
-            scratch_factor=scratch_factor,
-        )
-        add_theoretical = include_theoretical_sv or (
-            has_statevector_backend and (predicted_oom or not sv_successful)
-        )
-        if add_theoretical:
-            circuit = _ensure_circuit()
-            gates = getattr(circuit, "gates", ())
-            gate_counts = count_gates(gates)
-            runtime_value = float(
-                predict_sv_runtime_au(width, gate_counts, **runtime_constants)
-            )
-            peak_bytes = predict_sv_peak_bytes(
-                width, dtype_bytes=dtype_bytes, scratch_factor=scratch_factor
-            )
-            note = (
-                sv_failure_reason
-                or (
-                    "statevector backend skipped; recording theoretical baseline"
-                    if has_statevector_backend
-                    else "theoretical statevector baseline"
-                )
-            )
-            base_record: dict[str, Any] = {
-                "framework": Backend.STATEVECTOR.name,
-                "backend": "sv_theoretical",
-                "repetitions": 0,
-                "prepare_time_mean": 0.0,
-                "prepare_time_std": 0.0,
-                "run_time_mean": runtime_value,
-                "run_time_std": 0.0,
-                "total_time_mean": runtime_value,
-                "total_time_std": 0.0,
-                "prepare_peak_memory_mean": 0.0,
-                "prepare_peak_memory_std": 0.0,
-                "run_peak_memory_mean": float(peak_bytes),
-                "run_peak_memory_std": 0.0,
-                "runtime": runtime_value,
-                "peak_mem": float(peak_bytes),
-                "peak_memory": float(peak_bytes),
-                "result": None,
-                "failed": False,
-                "unsupported": True,
-                "comment": note,
-                "is_baseline": True,
-                "is_theoretical": True,
-                "oom_predicted": predicted_oom,
-                "sv_gate_counts": gate_counts,
-                "sv_mem_budget_bytes": mem_budget_bytes,
-                "sv_runtime_constants": dict(runtime_constants),
-                "sv_dtype_bytes": dtype_bytes,
-                "sv_scratch_factor": scratch_factor,
-            }
-            theoretical_record = _finalise_record(
-                base_record,
-                spec=spec,
-                width=width,
-                framework=Backend.STATEVECTOR.name,
-                backend="sv_theoretical",
-                mode="theoretical",
-            )
-            theoretical_record["runtime"] = runtime_value
-            theoretical_record["peak_mem"] = float(peak_bytes)
-            theoretical_record.setdefault("peak_memory", float(peak_bytes))
-            records.append(theoretical_record)
-
+    # Always run QuASAr first so that partitioning succeeds regardless of
+    # baseline feasibility.  Baseline checks are performed afterwards.
     circuit = _ensure_circuit()
     runner = BenchmarkRunner()
     quasar_status = f"quasar@{width}"
@@ -1105,12 +929,12 @@ def _run_backend_suite_for_width(
         step_callback(quasar_status)
     LOGGER.info("Running QuASAr for %s qubits=%s", spec.name, width)
     try:
-        rec = runner.run_quasar_multiple(
+        quasar_result = runner.run_quasar_multiple(
             circuit,
             engine,
             repetitions=repetitions,
             quick=quasar_quick,
-            memory_bytes=memory_bytes,
+            memory_bytes=None,
             run_timeout=run_timeout,
         )
     except Exception as exc:  # pragma: no cover - scheduler limitations
@@ -1133,19 +957,168 @@ def _run_backend_suite_for_width(
         records.append(record)
         messages.append(f"{quasar_status} failed: {exc}")
     else:
-        backend_choice = rec.get("backend")
+        backend_choice = quasar_result.get("backend")
         if isinstance(backend_choice, Backend):
-            rec["backend"] = backend_choice.name
+            quasar_result["backend"] = backend_choice.name
         record = _finalise_record(
-            rec,
+            quasar_result,
             spec=spec,
             width=width,
             framework="quasar",
-            backend=rec.get("backend"),
+            backend=quasar_result.get("backend"),
             mode="auto",
         )
         records.append(record)
         messages.append(quasar_status)
+
+    metrics_cache: FragmentMetrics | None = None
+    cost_cache: dict[Backend, Cost] = {}
+    sv_gate_counts: dict[str, int] | None = None
+
+    def _cost_for_backend(backend: Backend) -> tuple[Cost, FragmentMetrics | None]:
+        nonlocal metrics_cache
+        cached = cost_cache.get(backend)
+        if cached is not None:
+            return cached, metrics_cache
+        cost, metrics = estimate_backend_cost(engine, circuit, backend)
+        cost_cache[backend] = cost
+        if metrics_cache is None:
+            metrics_cache = metrics
+        return cost, metrics
+
+    time_limit = run_timeout if run_timeout and run_timeout > 0 else None
+    memory_limit = memory_bytes if memory_bytes and memory_bytes > 0 else None
+
+    for backend in baseline_backends:
+        status_msg = f"{backend.name}@{width}"
+        if step_callback is not None:
+            step_callback(status_msg)
+
+        cost, metrics = _cost_for_backend(backend)
+        extras: dict[str, object] = {}
+        if backend == Backend.STATEVECTOR:
+            if sv_gate_counts is None:
+                sv_gate_counts = count_gates(getattr(circuit, "gates", ()))
+            extras.update(
+                {
+                    "sv_gate_counts": sv_gate_counts,
+                    "sv_mem_budget_bytes": mem_budget_bytes,
+                    "sv_runtime_constants": dict(runtime_constants),
+                    "sv_dtype_bytes": dtype_bytes,
+                    "sv_scratch_factor": scratch_factor,
+                }
+            )
+
+        supported, reason = _baseline_support_status(
+            backend,
+            width=width,
+            circuit=None,
+            memory_bytes=memory_limit,
+        )
+        reasons: list[str] = []
+        if not supported and reason:
+            reasons.append(reason)
+
+        supported_full, reason_full = _baseline_support_status(
+            backend,
+            width=width,
+            circuit=circuit,
+            memory_bytes=memory_limit,
+        )
+        if not supported_full and reason_full:
+            reasons.append(reason_full)
+
+        if time_limit is not None and cost.time > time_limit:
+            reasons.append(
+                f"estimated runtime {format_seconds(cost.time)} exceeds timeout {format_seconds(time_limit)}"
+            )
+
+        if memory_limit is not None and cost.memory > memory_limit:
+            reasons.append(
+                f"estimated peak memory {format_bytes(cost.memory)} exceeds limit {format_bytes(memory_limit)}"
+            )
+
+        if reasons:
+            reason_text = "; ".join(reasons)
+            LOGGER.info(
+                "Recording theoretical baseline for %s (%s qubits): %s",
+                backend.name,
+                width,
+                reason_text,
+            )
+            record = _create_theoretical_record(
+                spec=spec,
+                width=width,
+                backend=backend,
+                cost=cost,
+                reason=reason_text,
+                metrics=metrics,
+                extras=extras,
+            )
+            records.append(record)
+            messages.append(f"{status_msg} theoretical: {reason_text}")
+            continue
+
+        LOGGER.info(
+            "Running baseline backend %s for %s qubits=%s",
+            backend.name,
+            spec.name,
+            width,
+        )
+        runner = BenchmarkRunner()
+        try:
+            rec = runner.run_quasar_multiple(
+                circuit,
+                engine,
+                backend=backend,
+                repetitions=repetitions,
+                quick=quasar_quick,
+                memory_bytes=memory_bytes,
+                run_timeout=run_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - backend implementation detail
+            LOGGER.warning(
+                "Backend %s failed for %s qubits=%s: %s",
+                backend.name,
+                spec.name,
+                width,
+                exc,
+            )
+            record = _create_theoretical_record(
+                spec=spec,
+                width=width,
+                backend=backend,
+                cost=cost,
+                reason=str(exc),
+                metrics=metrics,
+                extras=extras,
+            )
+            records.append(record)
+            messages.append(f"{status_msg} failed: {exc}")
+            continue
+
+        record = _finalise_record(
+            rec,
+            spec=spec,
+            width=width,
+            framework=backend.name,
+            backend=backend.name,
+            mode="forced",
+        )
+        records.append(record)
+        messages.append(status_msg)
+
+        if backend == Backend.STATEVECTOR and include_theoretical_sv:
+            theory_record = _create_theoretical_record(
+                spec=spec,
+                width=width,
+                backend=backend,
+                cost=cost,
+                reason="requested theoretical statevector baseline",
+                metrics=metrics,
+                extras=extras,
+            )
+            records.append(theory_record)
 
     LOGGER.info("Completed benchmarks for %s qubits=%s", spec.name, width)
     return records, messages
