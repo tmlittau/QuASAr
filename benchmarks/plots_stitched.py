@@ -25,7 +25,13 @@ COL_BACKEND = {
     "tableau": "#2e7d32",
     "conversion": "#f5a623",
     "other": "#546e7a",
+    "sv_theoretical": "#bdbdbd",
 }
+THEORETICAL_BACKENDS = {"sv_theoretical"}
+THEORETICAL_LABEL = "SV (theoretical)"
+THEORETICAL_COLOR = "#bdbdbd"
+THEORETICAL_EDGE = "#616161"
+THEORETICAL_HATCH = "//"
 
 BASELINE_BACKENDS = {"sv", "mps", "dd", "es", "tableau"}
 BACKEND_LABELS = {
@@ -37,6 +43,7 @@ BACKEND_LABELS = {
     "conversion": "Conversion",
     "other": "Other",
     "baseline": "Baseline",
+    "sv_theoretical": THEORETICAL_LABEL,
 }
 
 BACKEND_ALIASES = {
@@ -51,6 +58,8 @@ BACKEND_ALIASES = {
     "tableau": "tableau",
     "tab": "tableau",
     "quasar": "quasar",
+    "sv_theoretical": "sv_theoretical",
+    "statevector_theoretical": "sv_theoretical",
 }
 
 
@@ -152,7 +161,11 @@ def choose_best_baseline(
     recs: List[Dict[str, Any]]
 ) -> Tuple[Dict[str, Any] | None, List[Dict[str, Any]]]:
     baselines = [
-        r for r in recs if is_baseline(r) and isinstance(r.get("runtime"), (int, float))
+        r
+        for r in recs
+        if is_baseline(r)
+        and isinstance(r.get("runtime"), (int, float))
+        and backend_key(r) not in THEORETICAL_BACKENDS
     ]
     if not baselines:
         return None, []
@@ -466,24 +479,49 @@ def summarise_and_plot(args: argparse.Namespace, records: List[Dict[str, Any]]) 
         elif best_base:
             base_list = [best_base]
 
+        theoretical_entries = [
+            rec
+            for rec in recs
+            if backend_key(rec) in THEORETICAL_BACKENDS
+            and isinstance(rec.get("runtime"), (int, float))
+        ]
+        for entry in theoretical_entries:
+            if entry not in base_list:
+                base_list.append(entry)
+
         for base in base_list:
             runtime = base.get("runtime")
             if runtime is None or runtime <= 0:
                 continue
-            colour_key = backend_key(base) if args.show_all_baselines else "baseline"
-            colour = COL_BACKEND.get(colour_key, COL_BACKEND["baseline"])
-            label_text = (
-                f"{BACKEND_LABELS.get(backend_key(base), backend_key(base).upper())} baseline"
-                if args.show_all_baselines
-                else "Best baseline"
-            )
-            bar = ax_r.bar(xpos, runtime, color=colour, label=label_text)
+            key = backend_key(base)
+            is_theoretical = key in THEORETICAL_BACKENDS or base.get("is_theoretical")
+            if is_theoretical:
+                label_text = THEORETICAL_LABEL
+                bar = ax_r.bar(
+                    xpos,
+                    runtime,
+                    color=THEORETICAL_COLOR,
+                    edgecolor=THEORETICAL_EDGE,
+                    linewidth=1.0,
+                    hatch=THEORETICAL_HATCH,
+                    label=label_text,
+                )
+            else:
+                colour_key = key if args.show_all_baselines else "baseline"
+                colour = COL_BACKEND.get(colour_key, COL_BACKEND["baseline"])
+                label_text = (
+                    f"{BACKEND_LABELS.get(key, key.upper())} baseline"
+                    if args.show_all_baselines
+                    else "Best baseline"
+                )
+                bar = ax_r.bar(xpos, runtime, color=colour, label=label_text)
             if label_text not in legend_entries:
                 legend_entries[label_text] = bar[0]
             tick_positions.append(xpos)
-            tick_labels.append(
-                backend_key(base).upper() if args.show_all_baselines else "Best baseline"
-            )
+            if is_theoretical:
+                tick_labels.append(THEORETICAL_LABEL)
+            else:
+                tick_labels.append(key.upper() if args.show_all_baselines else "Best baseline")
             xpos += 1
 
         if qrec and qrec.get("runtime"):
@@ -516,7 +554,6 @@ def summarise_and_plot(args: argparse.Namespace, records: List[Dict[str, Any]]) 
         mem_positions: List[int] = []
         mem_labels: List[str] = []
         mem_values: List[float] = []
-        mem_colors: List[str] = []
         xpos_mem = 0
 
         for base in base_list:
@@ -528,11 +565,23 @@ def summarise_and_plot(args: argparse.Namespace, records: List[Dict[str, Any]]) 
             except (TypeError, ValueError):
                 peak_val = float("nan")
             mem_positions.append(xpos_mem)
-            mem_labels.append(
-                backend_key(base).upper() if args.show_all_baselines else "Best baseline"
-            )
-            colour_key = backend_key(base) if args.show_all_baselines else "baseline"
-            mem_colors.append(COL_BACKEND.get(colour_key, COL_BACKEND["baseline"]))
+            key = backend_key(base)
+            is_theoretical = key in THEORETICAL_BACKENDS or base.get("is_theoretical")
+            if is_theoretical:
+                mem_labels.append(THEORETICAL_LABEL)
+                ax_m.bar(
+                    xpos_mem,
+                    peak_val,
+                    color=THEORETICAL_COLOR,
+                    edgecolor=THEORETICAL_EDGE,
+                    linewidth=1.0,
+                    hatch=THEORETICAL_HATCH,
+                )
+            else:
+                mem_labels.append(key.upper() if args.show_all_baselines else "Best baseline")
+                colour_key = key if args.show_all_baselines else "baseline"
+                colour = COL_BACKEND.get(colour_key, COL_BACKEND["baseline"])
+                ax_m.bar(xpos_mem, peak_val, color=colour)
             mem_values.append(peak_val)
             xpos_mem += 1
 
@@ -544,11 +593,8 @@ def summarise_and_plot(args: argparse.Namespace, records: List[Dict[str, Any]]) 
                 peak_val = float("nan")
             mem_positions.append(xpos_mem)
             mem_labels.append("QuASAr")
-            mem_colors.append("#2bbbad")
+            ax_m.bar(xpos_mem, peak_val, color="#2bbbad")
             mem_values.append(peak_val)
-
-        if mem_positions:
-            ax_m.bar(mem_positions, mem_values, color=mem_colors)
         ax_m.set_xticks(mem_positions)
         ax_m.set_xticklabels(mem_labels)
         ax_m.set_yscale("log")
