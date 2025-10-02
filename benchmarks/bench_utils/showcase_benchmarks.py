@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import os
+import sqlite3
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -475,6 +476,298 @@ def _merge_results(
         if sortable:
             combined = combined.sort_values(sortable).reset_index(drop=True)
     return combined
+
+
+def _decode_json_field(value: Any) -> Any:
+    """Return ``value`` decoded from JSON when possible."""
+
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+    return value
+
+
+def _optional_int_equal(a: Any, b: Any) -> bool:
+    """Compare optional integer-like values."""
+
+    if a is None:
+        return b is None
+    if b is None:
+        return False
+    try:
+        return int(a) == int(b)
+    except (TypeError, ValueError):
+        return False
+
+
+def _optional_float_equal(a: Any, b: Any, *, tolerance: float = 1e-9) -> bool:
+    """Compare optional floating-point values."""
+
+    if a is None:
+        return b is None
+    if b is None:
+        return False
+    try:
+        return math.isclose(float(a), float(b), rel_tol=tolerance, abs_tol=tolerance)
+    except (TypeError, ValueError):
+        return False
+
+
+def _backend_names(backends: Iterable[Backend] | None) -> tuple[str, ...]:
+    """Return backend identifiers for comparison."""
+
+    if not backends:
+        return ()
+    names: list[str] = []
+    for backend in backends:
+        if isinstance(backend, Backend):
+            names.append(backend.name)
+        else:
+            names.append(str(backend))
+    return tuple(sorted(set(names)))
+
+
+def _load_cached_suite_results(
+    database: BenchmarkDatabase,
+    *,
+    spec: ShowcaseCircuit,
+    widths: Iterable[int],
+    repetitions: int,
+    run_timeout: float | None,
+    memory_bytes: int | None,
+    classical_simplification: bool,
+    include_baselines: bool,
+    baseline_backends: Iterable[Backend] | None,
+    quasar_quick: bool,
+    include_theoretical_sv: bool,
+    theoretical_sv_options: Mapping[str, Any] | None = None,
+) -> pd.DataFrame | None:
+    """Return cached showcase results matching the requested configuration."""
+
+    width_list = sorted({int(width) for width in widths})
+    if not width_list:
+        return None
+
+    baseline_expected = _backend_names(
+        tuple(baseline_backends) if baseline_backends is not None else BASELINE_BACKENDS
+    )
+
+    theoretical_expected = {
+        "sv_mem_budget_bytes": None,
+        "sv_scratch_factor": 1.5,
+        "sv_dtype_bytes": 16,
+        "sv_c1": 1.0,
+        "sv_c2": 2.5,
+        "sv_cdiag": 0.8,
+        "sv_c3": 5.0,
+        "sv_cother": 2.0,
+    }
+    if theoretical_sv_options:
+        overrides = dict(theoretical_sv_options)
+        if overrides.get("mem_budget_bytes") is not None:
+            theoretical_expected["sv_mem_budget_bytes"] = overrides.get("mem_budget_bytes")
+        if overrides.get("scratch_factor") is not None:
+            theoretical_expected["sv_scratch_factor"] = overrides.get("scratch_factor")
+        if overrides.get("dtype_bytes") is not None:
+            theoretical_expected["sv_dtype_bytes"] = overrides.get("dtype_bytes")
+        if overrides.get("c_1q") is not None:
+            theoretical_expected["sv_c1"] = overrides.get("c_1q")
+        if overrides.get("c_2q") is not None:
+            theoretical_expected["sv_c2"] = overrides.get("c_2q")
+        if overrides.get("c_diag2q") is not None:
+            theoretical_expected["sv_cdiag"] = overrides.get("c_diag2q")
+        if overrides.get("c_3q") is not None:
+            theoretical_expected["sv_c3"] = overrides.get("c_3q")
+        if overrides.get("c_other") is not None:
+            theoretical_expected["sv_cother"] = overrides.get("c_other")
+
+    placeholders = ",".join("?" for _ in width_list)
+    query = f"""
+        SELECT
+            sr.id AS simulation_id,
+            sr.framework,
+            sr.backend,
+            sr.mode,
+            sr.repetitions,
+            COALESCE(sr.qubits, b.qubits) AS qubits,
+            sr.prepare_time_mean,
+            sr.prepare_time_std,
+            sr.run_time_mean,
+            sr.run_time_std,
+            sr.total_time_mean,
+            sr.total_time_std,
+            sr.prepare_peak_memory_mean,
+            sr.prepare_peak_memory_std,
+            sr.run_peak_memory_mean,
+            sr.run_peak_memory_std,
+            sr.unsupported,
+            sr.failed,
+            sr.timeout,
+            sr.comment,
+            sr.error,
+            sr.failed_runs,
+            sr.partition_count,
+            sr.partition_total_subsystems,
+            sr.partition_unique_backends,
+            sr.partition_max_multiplicity,
+            sr.partition_mean_multiplicity,
+            sr.partition_backend_breakdown,
+            sr.hierarchy_available,
+            sr.result_json,
+            sr.extra,
+            sr.created_at,
+            b.qubits AS bench_qubits,
+            b.repetitions AS bench_repetitions,
+            b.run_timeout,
+            b.memory_bytes,
+            b.classical_simplification,
+            b.include_baselines,
+            b.quick,
+            b.baseline_backends,
+            b.metadata AS benchmark_metadata,
+            br.parameters AS run_parameters
+        FROM simulation_run sr
+        JOIN benchmark b ON sr.benchmark_id = b.id
+        JOIN benchmark_run br ON b.run_id = br.id
+        WHERE b.circuit_id = ?
+          AND b.qubits IN ({placeholders})
+        ORDER BY sr.created_at DESC, sr.id DESC
+    """
+
+    connection: sqlite3.Connection = database.connection()
+    rows = connection.execute(query, [spec.name, *width_list]).fetchall()
+    if not rows:
+        return None
+
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[int, str | None, str | None, str | None]] = set()
+
+    for row in rows:
+        bench_qubits = row["bench_qubits"]
+        if bench_qubits is None:
+            continue
+        if int(bench_qubits) not in width_list:
+            continue
+
+        run_params = _decode_json_field(row["run_parameters"]) or {}
+        benchmark_metadata = _decode_json_field(row["benchmark_metadata"]) or {}
+        baseline_stored = _decode_json_field(row["baseline_backends"])
+        extra = _decode_json_field(row["extra"]) or {}
+        failed_runs = _decode_json_field(row["failed_runs"])
+
+        if not _optional_int_equal(row["bench_repetitions"], repetitions):
+            continue
+        if not _optional_float_equal(row["run_timeout"], run_timeout):
+            continue
+        if not _optional_int_equal(row["memory_bytes"], memory_bytes):
+            continue
+        if bool(row["classical_simplification"]) != classical_simplification:
+            continue
+        if bool(row["include_baselines"]) != include_baselines:
+            continue
+        if bool(row["quick"]) != quasar_quick:
+            continue
+
+        baseline_names = _backend_names(baseline_stored or ())
+        if baseline_names != baseline_expected:
+            continue
+
+        include_theoretical_cached = bool(
+            run_params.get("include_theoretical_sv")
+        ) or bool(benchmark_metadata.get("include_theoretical_sv"))
+        if include_theoretical_cached != include_theoretical_sv:
+            continue
+
+        matches_options = True
+        for key, expected in theoretical_expected.items():
+            actual = run_params.get(key, benchmark_metadata.get(key))
+            if expected is None:
+                if actual not in (None, ""):
+                    matches_options = False
+                    break
+                continue
+            if not _optional_float_equal(actual, expected):
+                matches_options = False
+                break
+        if not matches_options:
+            continue
+
+        key = (
+            int(bench_qubits),
+            row["framework"],
+            row["backend"],
+            row["mode"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+
+        record: dict[str, Any] = {
+            "framework": row["framework"],
+            "backend": row["backend"],
+            "mode": row["mode"],
+            "repetitions": row["repetitions"]
+            if row["repetitions"] is not None
+            else row["bench_repetitions"],
+            "qubits": row["qubits"] if row["qubits"] is not None else bench_qubits,
+            "prepare_time_mean": row["prepare_time_mean"],
+            "prepare_time_std": row["prepare_time_std"],
+            "run_time_mean": row["run_time_mean"],
+            "run_time_std": row["run_time_std"],
+            "total_time_mean": row["total_time_mean"],
+            "total_time_std": row["total_time_std"],
+            "prepare_peak_memory_mean": row["prepare_peak_memory_mean"],
+            "prepare_peak_memory_std": row["prepare_peak_memory_std"],
+            "run_peak_memory_mean": row["run_peak_memory_mean"],
+            "run_peak_memory_std": row["run_peak_memory_std"],
+            "unsupported": bool(row["unsupported"]) if row["unsupported"] is not None else None,
+            "failed": bool(row["failed"]) if row["failed"] is not None else None,
+            "timeout": bool(row["timeout"]) if row["timeout"] is not None else None,
+            "comment": row["comment"],
+            "error": row["error"],
+            "failed_runs": failed_runs,
+            "partition_count": row["partition_count"],
+            "partition_total_subsystems": row["partition_total_subsystems"],
+            "partition_unique_backends": row["partition_unique_backends"],
+            "partition_max_multiplicity": row["partition_max_multiplicity"],
+            "partition_mean_multiplicity": row["partition_mean_multiplicity"],
+            "partition_backend_breakdown": row["partition_backend_breakdown"],
+            "hierarchy_available": bool(row["hierarchy_available"]) if row["hierarchy_available"] is not None else None,
+            "result_json": row["result_json"],
+        }
+        record.update(extra)
+        record.setdefault("circuit", spec.name)
+        record.setdefault("display_name", spec.display_name)
+        if record.get("qubits") is not None:
+            try:
+                record["qubits"] = int(record["qubits"])
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                pass
+        records.append(record)
+
+    if not records:
+        return None
+
+    df = pd.DataFrame.from_records(records)
+    width_set = {int(width) for width in df.get("qubits", pd.Series(dtype=int)).dropna()}
+    if not all(width in width_set for width in width_list):
+        return None
+
+    LOGGER.info(
+        "Reusing cached results for %s (qubits=%s)",
+        spec.name,
+        ", ".join(str(width) for width in width_list),
+    )
+    return df
 
 
 def _configure_logging(verbosity: int) -> None:
@@ -1342,50 +1635,92 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
     export_summaries: list[pd.DataFrame] = []
     export_speedups: list[pd.DataFrame] = []
     choose_best_baseline = bool(getattr(args, "choose_best_baseline", False))
+    reuse_existing = bool(getattr(args, "reuse_existing", False))
+    include_baselines = bool(getattr(args, "include_baselines", True))
+    baseline_override = getattr(args, "baseline_backends", None)
+    quasar_quick = bool(getattr(args, "quick", False))
+    baseline_for_reuse: Iterable[Backend] | None
+    if include_baselines:
+        baseline_for_reuse = baseline_override
+    else:
+        baseline_for_reuse = ()
 
     with open_database(database_path) as database:
-        run = database.start_run(
-            description="showcase_cli",
-            parameters={
-                "circuits": selected_names,
-                "repetitions": args.repetitions,
-                "workers": args.workers,
-                "run_timeout": run_timeout,
-                "memory_bytes": memory_bytes,
-                "classical_simplification": classical_simplification,
-                "metric": args.metric,
-                "suite": suite_name,
-                "include_theoretical_sv": include_theoretical_sv,
-                "sv_mem_budget_gib": mem_budget_gib,
-                "sv_mem_budget_bytes": mem_budget_bytes,
-                "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
-                "sv_dtype_bytes": dtype_bytes,
-                "sv_c1": theoretical_sv_options["c_1q"],
-                "sv_c2": theoretical_sv_options["c_2q"],
-                "sv_cdiag": theoretical_sv_options["c_diag2q"],
-                "sv_c3": theoretical_sv_options["c_3q"],
-                "sv_cother": theoretical_sv_options["c_other"],
-            },
-        )
+        run: BenchmarkRun | None = None
+
+        def ensure_run() -> BenchmarkRun:
+            nonlocal run
+            if run is None:
+                run = database.start_run(
+                    description="showcase_cli",
+                    parameters={
+                        "circuits": selected_names,
+                        "repetitions": args.repetitions,
+                        "workers": args.workers,
+                        "run_timeout": run_timeout,
+                        "memory_bytes": memory_bytes,
+                        "classical_simplification": classical_simplification,
+                        "metric": args.metric,
+                        "suite": suite_name,
+                        "include_theoretical_sv": include_theoretical_sv,
+                        "sv_mem_budget_gib": mem_budget_gib,
+                        "sv_mem_budget_bytes": mem_budget_bytes,
+                        "sv_scratch_factor": theoretical_sv_options["scratch_factor"],
+                        "sv_dtype_bytes": dtype_bytes,
+                        "sv_c1": theoretical_sv_options["c_1q"],
+                        "sv_c2": theoretical_sv_options["c_2q"],
+                        "sv_cdiag": theoretical_sv_options["c_diag2q"],
+                        "sv_c3": theoretical_sv_options["c_3q"],
+                        "sv_cother": theoretical_sv_options["c_other"],
+                    },
+                )
+            return run
 
         for name in selected_names:
             spec = catalog[name]
             widths = qubit_overrides.get(name, spec.default_qubits)
             LOGGER.info("Benchmarking %s across widths: %s", name, widths)
 
-            raw_df = _run_backend_suite(
-                spec,
-                widths,
-                repetitions=args.repetitions,
-                run_timeout=run_timeout,
-                memory_bytes=memory_bytes,
-                classical_simplification=classical_simplification,
-                max_workers=args.workers,
-                include_theoretical_sv=include_theoretical_sv,
-                theoretical_sv_options=theoretical_sv_options,
-                database=database,
-                run=run,
-            )
+            raw_df: pd.DataFrame | None = None
+            if reuse_existing:
+                raw_df = _load_cached_suite_results(
+                    database,
+                    spec=spec,
+                    widths=widths,
+                    repetitions=args.repetitions,
+                    run_timeout=run_timeout,
+                    memory_bytes=memory_bytes,
+                    classical_simplification=classical_simplification,
+                    include_baselines=include_baselines,
+                    baseline_backends=baseline_for_reuse,
+                    quasar_quick=quasar_quick,
+                    include_theoretical_sv=include_theoretical_sv,
+                    theoretical_sv_options=theoretical_sv_options,
+                )
+
+            if raw_df is None:
+                if reuse_existing:
+                    LOGGER.info(
+                        "Cached results unavailable for %s; executing benchmarks",
+                        spec.name,
+                    )
+                run_record = ensure_run()
+                raw_df = _run_backend_suite(
+                    spec,
+                    widths,
+                    repetitions=args.repetitions,
+                    run_timeout=run_timeout,
+                    memory_bytes=memory_bytes,
+                    classical_simplification=classical_simplification,
+                    max_workers=args.workers,
+                    include_baselines=include_baselines,
+                    baseline_backends=baseline_override,
+                    quasar_quick=quasar_quick,
+                    include_theoretical_sv=include_theoretical_sv,
+                    theoretical_sv_options=theoretical_sv_options,
+                    database=database,
+                    run=run_record,
+                )
 
             if raw_df.empty:
                 LOGGER.warning("No results recorded for %s; skipping summary", name)
@@ -1616,6 +1951,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Number of worker threads for circuit execution (default: auto).",
+    )
+    parser.add_argument(
+        "--reuse-existing",
+        action="store_true",
+        help="Reuse cached benchmark results when available instead of rerunning simulations.",
     )
     parser.add_argument(
         "--out",
