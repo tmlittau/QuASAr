@@ -540,8 +540,8 @@ def _run_backend_suite_for_width(
     classical_simplification: bool,
     baseline_backends: Iterable[Backend],
     quasar_quick: bool,
-    include_theoretical_sv: bool,
-    theoretical_sv_options: Mapping[str, Any] | None,
+    include_theoretical_sv: bool = False,
+    theoretical_sv_options: Mapping[str, Any] | None = None,
     step_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     baseline_backends = tuple(baseline_backends)
@@ -867,8 +867,8 @@ def _run_backend_suite_for_width_worker(
     classical_simplification: bool,
     baseline_backends: Iterable[Backend],
     quasar_quick: bool,
-    include_theoretical_sv: bool,
-    theoretical_sv_options: Mapping[str, Any] | None,
+    include_theoretical_sv: bool = False,
+    theoretical_sv_options: Mapping[str, Any] | None = None,
     step_callback: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     engine = thread_engine()
