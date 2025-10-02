@@ -1,0 +1,50 @@
+{
+  "suite": [
+    {
+      "name": "magic-islands",
+      "builder": "layered_clifford_magic_islands_circuit",
+      "params": [
+        {"num_qubits": 128, "depth": 2000},
+        {"num_qubits": 192, "depth": 2000}
+      ],
+      "baselines": ["es"]
+    },
+    {
+      "name": "diag-qft-diag",
+      "builder": "clustered_ghz_diag_globalqft_diag_circuit",
+      "params": [
+        {"num_qubits": 128, "block_size": 8},
+        {"num_qubits": 160, "block_size": 8},
+        {"num_qubits": 192, "block_size": 8}
+      ],
+      "baselines": ["sv"]
+    },
+    {
+      "name": "rand-qft-rand",
+      "builder": "clustered_ghz_random_globalqft_random_circuit",
+      "params": [
+        {"num_qubits": 128, "block_size": 8},
+        {"num_qubits": 160, "block_size": 8}
+      ],
+      "baselines": ["mps", "sv"]
+    },
+    {
+      "name": "classical-dd-sandwich",
+      "builder": "classical_controlled_dd_sandwich_circuit",
+      "params": [
+        {"num_qubits": 128},
+        {"num_qubits": 160}
+      ],
+      "baselines": ["dd", "tableau"]
+    },
+    {
+      "name": "rand-xburst-rand",
+      "builder": "clustered_w_random_xburst_random_circuit",
+      "params": [
+        {"num_qubits": 192, "block_size": 8},
+        {"num_qubits": 256, "block_size": 8}
+      ],
+      "baselines": ["mps", "sv"]
+    }
+  ]
+}

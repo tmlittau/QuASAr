@@ -103,8 +103,72 @@ def build_stitched_big_suite() -> Tuple[StitchedCircuitSpec, ...]:
     )
 
 
+def build_stitched_2x_suite() -> Tuple[StitchedCircuitSpec, ...]:
+    """Return the stitched-2x showcase suite specification."""
+
+    def _magic_islands_factory(width: int) -> object:
+        return circuit_lib.layered_clifford_magic_islands_circuit(width, depth=2000)
+
+    def _diag_qft_diag_factory(width: int) -> object:
+        return circuit_lib.clustered_ghz_diag_globalqft_diag_circuit(
+            width, block_size=8
+        )
+
+    def _rand_qft_rand_factory(width: int) -> object:
+        return circuit_lib.clustered_ghz_random_globalqft_random_circuit(
+            width, block_size=8
+        )
+
+    def _classical_dd_factory(width: int) -> object:
+        return circuit_lib.classical_controlled_dd_sandwich_circuit(width)
+
+    def _rand_xburst_rand_factory(width: int) -> object:
+        return circuit_lib.clustered_w_random_xburst_random_circuit(
+            width, block_size=8
+        )
+
+    return (
+        StitchedCircuitSpec(
+            name="stitched_magic_islands",
+            display_name="Magic islands",
+            description="Layered Clifford transition with spaced magic windows.",
+            factory=_magic_islands_factory,
+            widths=(128, 192),
+        ),
+        StitchedCircuitSpec(
+            name="stitched_diag_qft_diag",
+            display_name="Diag – QFT – Diag",
+            description="Diagonal slabs surrounding a global QFT landing zone.",
+            factory=_diag_qft_diag_factory,
+            widths=(128, 160, 192),
+        ),
+        StitchedCircuitSpec(
+            name="stitched_rand_qft_rand",
+            display_name="Random – QFT – Random",
+            description="Random layers with a global QFT spike.",
+            factory=_rand_qft_rand_factory,
+            widths=(128, 160),
+        ),
+        StitchedCircuitSpec(
+            name="stitched_classical_dd_sandwich",
+            display_name="Classical DD sandwich",
+            description="Classical controls with DD/Tableau stitched windows.",
+            factory=_classical_dd_factory,
+            widths=(128, 160),
+        ),
+        StitchedCircuitSpec(
+            name="stitched_rand_xburst_rand",
+            display_name="Random – X-burst – Random",
+            description="W-state clusters with a cross-block burst landing zone.",
+            factory=_rand_xburst_rand_factory,
+            widths=(192, 256),
+        ),
+    )
+
+
 SUITES: Mapping[str, Callable[[], Tuple[StitchedCircuitSpec, ...]]] = {
     "stitched-big": build_stitched_big_suite,
+    "stitched-2x": build_stitched_2x_suite,
 }
 
 
