@@ -26,13 +26,26 @@ from test_suite.theoretical_baselines import (
 
 
 # ---------- Helpers ----------
+def _qubit_targets(inst: "stim.CircuitInstruction") -> List[int]:
+    """Extract qubit targets from a stim instruction following stim's API."""
+
+    qubits: List[int] = []
+    for target in inst.targets_copy():
+        if target.is_combiner:
+            # Combiners split multi-target operations (e.g. pair targets).
+            continue
+        if target.is_qubit_target:
+            qubits.append(target.qubit_value)
+    return qubits
+
+
 def gate_counts_from_stim(circ: "stim.Circuit") -> Dict[str, int]:
     counts = {"1q": 0, "2q": 0, "diag2q": 0, "3q": 0, "other": 0, "total": 0}
     oneq = {"H", "S", "S_DAG", "X", "Y", "Z"}
     twoq = {"CX", "CZ", "SWAP"}
     for inst in circ:
         name = inst.name
-        targs = inst.targets_copy()
+        targs = _qubit_targets(inst)
         if name in oneq:
             counts["1q"] += len(targs)
             counts["total"] += len(targs)
@@ -75,15 +88,30 @@ def build_random_clifford_stim(n: int, depth: int, seed: int = 1337) -> "stim.Ci
 def run_stim_tableau_time(circ: "stim.Circuit") -> Tuple[float, Any]:
     t0 = time.perf_counter()
     sim = stim.TableauSimulator()
+    one_qubit_map = {
+        "H": sim.h,
+        "S": sim.s,
+        "S_DAG": sim.s_dag,
+        "X": sim.x,
+        "Y": sim.y,
+        "Z": sim.z,
+    }
+    two_qubit_map = {
+        "CX": sim.cx,
+        "CZ": sim.cz,
+        "SWAP": sim.swap,
+    }
     for inst in circ:
         name = inst.name
-        targs = [int(t) for t in inst.targets_copy()]
-        if name in ("H", "S", "S_DAG", "X", "Y", "Z"):
+        targs = _qubit_targets(inst)
+        if name in one_qubit_map:
+            op = one_qubit_map[name]
             for q in targs:
-                sim.do(name, q)
-        elif name in ("CX", "CZ", "SWAP"):
+                op(q)
+        elif name in two_qubit_map:
+            op = two_qubit_map[name]
             for a, b in zip(targs[::2], targs[1::2]):
-                sim.do(name, a, b)
+                op(a, b)
         else:
             pass
     t1 = time.perf_counter()
@@ -107,10 +135,14 @@ def measure_conversion_time_from_tableau(n: int, tableau: Any, repeats: int = 3)
 def build_qiskit_from_stim(circ: "stim.Circuit") -> "QuantumCircuit":
     if QuantumCircuit is None:
         raise RuntimeError("qiskit-aer not installed. pip install qiskit qiskit-aer")
-    qc = QuantumCircuit(max(int(t) for inst in circ for t in inst.targets_copy()) + 1)
+    max_qubit = max(
+        (t.qubit_value for inst in circ for t in inst.targets_copy() if t.is_qubit_target()),
+        default=-1,
+    )
+    qc = QuantumCircuit(max_qubit + 1)
     for inst in circ:
         name = inst.name
-        targs = [int(t) for t in inst.targets_copy()]
+        targs = _qubit_targets(inst)
         if name == "H":
             for q in targs:
                 qc.h(q)
