@@ -654,6 +654,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             parser.error("--suite cannot be combined with --circuit/--circuits")
         if getattr(args, "groups", None):
             parser.error("--suite cannot be combined with --group")
+    if getattr(args, "repetitions", None) is not None and args.repetitions <= 0:
+        parser.error("--repetitions must be a positive integer")
 
     return args
 
