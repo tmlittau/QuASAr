@@ -737,6 +737,7 @@ class BenchmarkRunner:
         simple_backend: Backend | None = None
         simple_gates: List[Any] | None = None
         max_q = max_qubits_statevector(memory_bytes)
+        sv_limit_warning: str | None = None
         if (
             backend == Backend.STATEVECTOR
             and getattr(circuit, "num_qubits", 0) > max_q
@@ -745,16 +746,21 @@ class BenchmarkRunner:
                 f"circuit width {circuit.num_qubits} exceeds statevector "
                 f"limit of {max_q} qubits"
             )
-            warnings.warn(msg)
-            summary = {
-                "framework": "quasar",
-                "repetitions": 0,
-                "backend": Backend.STATEVECTOR.name,
-                "unsupported": True,
-                "comment": msg,
-            }
-            self.results.append(summary)
-            return summary
+            if memory_bytes is None:
+                warnings.warn(msg)
+                use_quick = False
+                sv_limit_warning = msg
+            else:
+                warnings.warn(msg)
+                summary = {
+                    "framework": "quasar",
+                    "repetitions": 0,
+                    "backend": Backend.STATEVECTOR.name,
+                    "unsupported": True,
+                    "comment": msg,
+                }
+                self.results.append(summary)
+                return summary
         conversion_layers: List[Any] = []
         if use_quick:
             plan = None
@@ -816,17 +822,23 @@ class BenchmarkRunner:
                 f"circuit width {circuit.num_qubits} exceeds statevector "
                 f"limit of {max_q} qubits"
             )
-            warnings.warn(msg)
-            summary = {
-                "framework": "quasar",
-                "repetitions": 0,
-                "backend": Backend.STATEVECTOR.name,
-                "unsupported": True,
-                "comment": msg,
-            }
-            summary.update(_conversion_summary(conversion_layers))
-            self.results.append(summary)
-            return summary
+            if memory_bytes is None:
+                if sv_limit_warning is None:
+                    warnings.warn(msg)
+                simple_backend = None
+                use_quick = False
+            else:
+                warnings.warn(msg)
+                summary = {
+                    "framework": "quasar",
+                    "repetitions": 0,
+                    "backend": Backend.STATEVECTOR.name,
+                    "unsupported": True,
+                    "comment": msg,
+                }
+                summary.update(_conversion_summary(conversion_layers))
+                self.results.append(summary)
+                return summary
 
         def _run_once() -> Dict[str, Any]:
             if use_quick:
