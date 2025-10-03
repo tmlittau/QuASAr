@@ -14,6 +14,11 @@ from quasar.circuit import Circuit, Gate
 from quasar.decompositions import decompose_mcx
 
 
+# Useful constants shared by random tail helpers.
+_TWO_PI = 2.0 * math.pi
+_PI_OVER_4 = math.pi / 4.0
+
+
 # Names of gates forming the Clifford group used in benchmark filtering.
 CLIFFORD_GATES = {
     "I",
@@ -1781,6 +1786,168 @@ def layered_clifford_ramp_circuit(
         "layer_offsets": offsets,
         "non_clifford_layer_flags": non_flags,
         "seed": seed,
+    }
+    setattr(circuit, "metadata", metadata)
+    return circuit
+
+
+def _distance_to_pi_over_4(theta: float) -> float:
+    """Return the circular distance from ``theta`` to the closest multiple of π/4."""
+
+    t = theta % _TWO_PI
+    min_distance = _TWO_PI
+    for k in range(8):
+        target = k * _PI_OVER_4
+        direct = abs(t - target)
+        min_distance = min(min_distance, direct, _TWO_PI - direct)
+    return min_distance
+
+
+def sample_nonclifford_angle(rng: Random, eps: float = 1e-3) -> float:
+    """Sample ``θ`` uniformly in ``[0, 2π)`` avoiding Clifford-compatible angles."""
+
+    if eps < 0:
+        raise ValueError("eps must be non-negative")
+    while True:
+        theta = rng.random() * _TWO_PI
+        if _distance_to_pi_over_4(theta) > eps:
+            return theta
+
+
+def _normalise_gate_choices(
+    choices: Sequence[str | Tuple[str, float]]
+) -> Tuple[Tuple[str, float], ...]:
+    weighted: list[Tuple[str, float]] = []
+    for spec in choices:
+        if isinstance(spec, tuple):
+            name, weight = spec
+        else:
+            name, weight = spec, 1.0
+        weight = float(weight)
+        if weight <= 0:
+            continue
+        weighted.append((name.upper(), weight))
+    if not weighted:
+        raise ValueError("At least one gate choice with positive weight is required.")
+    return tuple(weighted)
+
+
+def _weighted_choice(rng: Random, choices: Tuple[Tuple[str, float], ...]) -> str:
+    total = sum(weight for _, weight in choices)
+    pick = rng.random() * total
+    accum = 0.0
+    for name, weight in choices:
+        accum += weight
+        if pick <= accum:
+            return name
+    return choices[-1][0]
+
+
+def random_clifford_with_tail_circuit(
+    num_qubits: int,
+    *,
+    clifford_depth: int,
+    total_depth: int,
+    clifford_seed: int = 1337,
+    tail_seed: int = 2025,
+    tail_twoq_prob: float = 0.3,
+    tail_angle_eps: float = 1e-3,
+    tail_oneq_ops: Sequence[str | Tuple[str, float]] = ("RX", "RY", "RZ"),
+    tail_twoq_ops: Sequence[str | Tuple[str, float]] = ("CRX", "CRY", "RZX", "RXX", "RYY"),
+) -> Circuit:
+    """Return a random Clifford circuit with a non-Clifford rotation tail."""
+
+    if num_qubits <= 0:
+        return Circuit([], use_classical_simplification=False)
+    if clifford_depth < 0:
+        raise ValueError("clifford_depth must be non-negative")
+    if total_depth <= 0:
+        raise ValueError("total_depth must be positive")
+    if total_depth < clifford_depth:
+        raise ValueError("total_depth must be >= clifford_depth")
+    if not (0.0 <= tail_twoq_prob <= 1.0):
+        raise ValueError("tail_twoq_prob must lie in [0, 1]")
+
+    tail_layers = total_depth - clifford_depth
+    gates: List[Gate] = []
+
+    clifford_rng = Random(
+        int(clifford_seed)
+        + 1009 * num_qubits
+        + 10007 * max(0, clifford_depth)
+        + 10037 * total_depth
+    )
+    for _ in range(clifford_depth):
+        for qubit in range(num_qubits):
+            roll = clifford_rng.random()
+            if roll < 0.33:
+                gate = "H"
+            elif roll < 0.66:
+                gate = "S"
+            else:
+                gate = "SDG"
+            gates.append(Gate(gate, [qubit]))
+        if num_qubits > 1:
+            for offset in (0, 1):
+                for q in range(offset, num_qubits - 1, 2):
+                    two_gate = "CX" if clifford_rng.random() < 0.5 else "CZ"
+                    gates.append(Gate(two_gate, [q, q + 1]))
+
+    if tail_layers <= 0:
+        circuit = Circuit(gates, use_classical_simplification=False)
+        metadata = {
+            "family": "random_clifford_with_tail",
+            "clifford_depth": clifford_depth,
+            "total_depth": total_depth,
+            "tail_layers": 0,
+            "tail_twoq_prob": tail_twoq_prob,
+            "tail_angle_eps": tail_angle_eps,
+            "clifford_seed": clifford_seed,
+            "tail_seed": tail_seed,
+        }
+        setattr(circuit, "metadata", metadata)
+        return circuit
+
+    oneq_choices = _normalise_gate_choices(tail_oneq_ops)
+    twoq_choices = _normalise_gate_choices(tail_twoq_ops)
+    tail_rng = Random(
+        int(tail_seed)
+        + 1009 * num_qubits
+        + 10007 * max(0, clifford_depth)
+        + 10037 * total_depth
+    )
+
+    for _ in range(tail_layers):
+        for qubit in range(num_qubits):
+            gate = _weighted_choice(tail_rng, oneq_choices)
+            theta = sample_nonclifford_angle(tail_rng, eps=tail_angle_eps)
+            gates.append(Gate(gate, [qubit], {"theta": theta}))
+        if num_qubits < 2:
+            continue
+        for offset in (0, 1):
+            for q in range(offset, num_qubits - 1, 2):
+                if tail_rng.random() > tail_twoq_prob:
+                    continue
+                gate = _weighted_choice(tail_rng, twoq_choices)
+                theta = sample_nonclifford_angle(tail_rng, eps=tail_angle_eps)
+                label = gate.upper()
+                if label in {"CRX", "CRY"}:
+                    gates.append(Gate(label, [q, q + 1], {"theta": theta}))
+                elif label in {"RZX", "RXX", "RYY"}:
+                    gates.append(Gate(label, [q, q + 1], {"theta": theta}))
+                else:
+                    raise ValueError(f"Unsupported tail gate '{gate}'")
+
+    circuit = Circuit(gates, use_classical_simplification=False)
+    metadata = {
+        "family": "random_clifford_with_tail",
+        "clifford_depth": clifford_depth,
+        "total_depth": total_depth,
+        "tail_layers": tail_layers,
+        "tail_twoq_prob": tail_twoq_prob,
+        "tail_angle_eps": tail_angle_eps,
+        "clifford_seed": clifford_seed,
+        "tail_seed": tail_seed,
     }
     setattr(circuit, "metadata", metadata)
     return circuit
