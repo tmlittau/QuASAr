@@ -41,7 +41,9 @@ def test_partition_detects_blocks() -> None:
             assert mapped == list(global_gate.qubits)
 
 
-@pytest.mark.parametrize("width", [128, 160])
+# Use modest widths so the test remains fast on CI; larger instances are
+# exercised in the stitched-disjoint benchmark suite.
+@pytest.mark.parametrize("width", [32, 48])
 def test_planner_plans_fragments_under_cap(width: int, caplog: pytest.LogCaptureFixture) -> None:
     circuit = _synthetic_disjoint_circuit(width, block_size=8)
     planner = Planner(max_memory=64 * 1024 ** 3, batch_size=32)
