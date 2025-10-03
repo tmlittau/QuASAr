@@ -42,6 +42,7 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution
 try:  # package execution
     from .bench_utils import paper_figures
     from .bench_utils import showcase_benchmarks
+    from .bench_utils import circuits as circuit_lib
     from .bench_utils.showcase_benchmarks import RUN_TIMEOUT_DEFAULT_SECONDS
     from .bench_utils.theoretical_estimation_runner import (
         LARGE_GATE_THRESHOLD_DEFAULT,
@@ -70,6 +71,7 @@ try:  # package execution
 except ImportError:  # pragma: no cover - script execution fallback
     from bench_utils import paper_figures  # type: ignore
     from bench_utils import showcase_benchmarks  # type: ignore
+    from bench_utils import circuits as circuit_lib  # type: ignore
     from bench_utils.showcase_benchmarks import (  # type: ignore
         RUN_TIMEOUT_DEFAULT_SECONDS,
     )
@@ -107,6 +109,7 @@ LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "generate_theoretical_estimates",
+    "run_clifford_random_suite",
     "run_showcase_suite",
     "summarise_partitioning",
 ]
@@ -121,6 +124,49 @@ def _configure_logging(verbosity: int) -> None:
     elif verbosity == 1:
         level = logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+
+
+def _parse_range_spec(spec: str) -> list[int]:
+    parts = [int(part) for part in spec.split(":")]
+    if len(parts) == 1:
+        return parts
+    if len(parts) == 2:
+        start, stop = parts
+        if stop < start:
+            raise ValueError("range end must be >= start")
+        return list(range(start, stop + 1))
+    if len(parts) == 3:
+        start, stop, step = parts
+        if step <= 0:
+            raise ValueError("range step must be positive")
+        if stop < start:
+            raise ValueError("range end must be >= start")
+        return list(range(start, stop + 1, step))
+    raise ValueError("range must be start[:end[:step]]")
+
+
+def _parse_qubit_values(values: Sequence[str] | None) -> tuple[int, ...]:
+    if not values:
+        return tuple()
+    qubits: list[int] = []
+    for spec in values:
+        if not spec:
+            continue
+        for chunk in spec.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            try:
+                if ":" in chunk:
+                    qubits.extend(_parse_range_spec(chunk))
+                else:
+                    qubits.append(int(chunk))
+            except ValueError as exc:  # pragma: no cover - defensive
+                raise ValueError(f"invalid qubit specification '{chunk}': {exc}") from exc
+    unique = sorted(dict.fromkeys(qubits))
+    if any(q <= 0 for q in unique):
+        raise ValueError("qubit widths must be positive integers")
+    return tuple(unique)
 
 
 def _list_circuits() -> str:
@@ -245,6 +291,165 @@ def run_showcase_suite(
     finally:
         if managed_db is not None:
             managed_db.close()
+
+
+def run_clifford_random_suite(
+    widths: Iterable[int],
+    clifford_depths: Iterable[int],
+    total_depths: Iterable[int],
+    *,
+    repetitions: int = 1,
+    run_timeout: float | None = None,
+    memory_bytes: int | None = None,
+    classical_simplification: bool = False,
+    workers: int | None = None,
+    quasar_quick: bool = False,
+    reuse_existing: bool = False,
+    database: BenchmarkDatabase | None = None,
+    run: BenchmarkRun | None = None,
+    database_path: Path | None = None,
+    include_theoretical_sv: bool = False,
+    theoretical_sv_options: Mapping[str, object] | None = None,
+    tail_twoq_prob: float = 0.3,
+    tail_angle_eps: float = 1e-3,
+    clifford_seed: int = 1337,
+    tail_seed: int = 2025,
+) -> pd.DataFrame:
+    """Execute the Clifford+rotation suite across all depth combinations."""
+
+    width_list = tuple(sorted(dict.fromkeys(int(w) for w in widths if int(w) > 0)))
+    if not width_list:
+        raise ValueError("at least one positive qubit width is required")
+
+    clifford_list = tuple(sorted(dict.fromkeys(int(d) for d in clifford_depths)))
+    total_list = tuple(sorted(dict.fromkeys(int(d) for d in total_depths)))
+    if not clifford_list:
+        raise ValueError("at least one Clifford depth is required")
+    if not total_list:
+        raise ValueError("at least one total depth is required")
+    if any(depth < 0 for depth in clifford_list):
+        raise ValueError("clifford depths must be non-negative")
+    if any(depth <= 0 for depth in total_list):
+        raise ValueError("total depths must be positive")
+
+    combinations: list[tuple[int, int]] = []
+    for clifford_depth in clifford_list:
+        for total_depth in total_list:
+            if total_depth < clifford_depth:
+                raise ValueError(
+                    f"total depth {total_depth} cannot be smaller than Clifford depth {clifford_depth}"
+                )
+            combinations.append((clifford_depth, total_depth))
+
+    managed_db: BenchmarkDatabase | None = None
+    if database is None and database_path is not None:
+        managed_db = BenchmarkDatabase(database_path)
+        database = managed_db
+
+    active_run = run
+    if database is not None and active_run is None:
+        active_run = database.start_run(
+            description="clifford_random_suite",
+            parameters={
+                "widths": list(width_list),
+                "clifford_depths": list(clifford_list),
+                "total_depths": list(total_list),
+                "repetitions": repetitions,
+                "run_timeout": run_timeout,
+                "memory_bytes": memory_bytes,
+                "classical_simplification": classical_simplification,
+                "quasar_quick": quasar_quick,
+                "tail_twoq_prob": tail_twoq_prob,
+                "tail_angle_eps": tail_angle_eps,
+                "clifford_seed": clifford_seed,
+                "tail_seed": tail_seed,
+            },
+        )
+
+    frames: list[pd.DataFrame] = []
+    baseline_selection = (Backend.STATEVECTOR, Backend.EXTENDED_STABILIZER)
+
+    try:
+        for clifford_depth, total_depth in combinations:
+            name = f"clifford_random_cd{clifford_depth}_td{total_depth}"
+            description = (
+                "Random Clifford prefix with rotation tail "
+                f"(clifford_depth={clifford_depth}, total_depth={total_depth}, "
+                f"twoq_prob={tail_twoq_prob}, angle_eps={tail_angle_eps})"
+            )
+
+            def constructor(
+                width: int,
+                *,
+                _cd: int = clifford_depth,
+                _td: int = total_depth,
+            ) -> object:
+                return circuit_lib.random_clifford_with_tail_circuit(
+                    width,
+                    clifford_depth=_cd,
+                    total_depth=_td,
+                    clifford_seed=clifford_seed,
+                    tail_seed=tail_seed,
+                    tail_twoq_prob=tail_twoq_prob,
+                    tail_angle_eps=tail_angle_eps,
+                )
+
+            spec = showcase_benchmarks.ShowcaseCircuit(
+                name=name,
+                display_name=f"Clifford {clifford_depth} / total {total_depth}",
+                constructor=constructor,
+                default_qubits=width_list,
+                description=description,
+            )
+
+            LOGGER.info(
+                "Benchmarking %s across widths: %s", spec.name, ", ".join(map(str, width_list))
+            )
+
+            raw_df: pd.DataFrame | None = None
+            if reuse_existing and database is not None:
+                raw_df = showcase_benchmarks._load_cached_suite_results(  # type: ignore[attr-defined]
+                    database,
+                    spec=spec,
+                    widths=width_list,
+                    repetitions=repetitions,
+                    run_timeout=run_timeout,
+                    memory_bytes=memory_bytes,
+                    classical_simplification=classical_simplification,
+                    include_baselines=True,
+                    baseline_backends=baseline_selection,
+                    quasar_quick=quasar_quick,
+                    include_theoretical_sv=include_theoretical_sv,
+                    theoretical_sv_options=theoretical_sv_options,
+                )
+
+            if raw_df is None:
+                raw_df = showcase_benchmarks._run_backend_suite(  # type: ignore[attr-defined]
+                    spec,
+                    width_list,
+                    repetitions=repetitions,
+                    run_timeout=run_timeout,
+                    memory_bytes=memory_bytes,
+                    classical_simplification=classical_simplification,
+                    max_workers=workers,
+                    include_baselines=True,
+                    baseline_backends=baseline_selection,
+                    quasar_quick=quasar_quick,
+                    include_theoretical_sv=include_theoretical_sv,
+                    theoretical_sv_options=theoretical_sv_options,
+                    database=database,
+                    run=active_run,
+                )
+
+            if not raw_df.empty:
+                frames.append(raw_df)
+    finally:
+        if managed_db is not None:
+            managed_db.close()
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def generate_theoretical_estimates(
@@ -537,6 +742,60 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run only the theoretical estimation pipeline and skip benchmarks.",
     )
     parser.add_argument(
+        "--clifford-random-suite",
+        action="store_true",
+        help="Run the Clifford + random rotation depth sweep suite.",
+    )
+    parser.add_argument(
+        "--clifford-depths",
+        type=int,
+        nargs="+",
+        metavar="DEPTH",
+        default=None,
+        help="Clifford prefix depths to evaluate for the Clifford+random suite.",
+    )
+    parser.add_argument(
+        "--total-depths",
+        type=int,
+        nargs="+",
+        metavar="DEPTH",
+        default=None,
+        help="Total circuit depths to evaluate for the Clifford+random suite.",
+    )
+    parser.add_argument(
+        "--clifford-random-qubits",
+        action="append",
+        metavar="RANGE",
+        help="Qubit widths for the Clifford+random suite (start:end[:step] or comma list).",
+    )
+    parser.add_argument(
+        "--clifford-tail-twoq-prob",
+        type=float,
+        default=0.3,
+        help="Two-qubit gate probability within the random tail (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--clifford-tail-angle-eps",
+        type=float,
+        default=1e-3,
+        help=(
+            "Minimum distance from Clifford-compatible angles for tail rotations "
+            "(default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--clifford-seed",
+        type=int,
+        default=1337,
+        help="Base RNG seed for the Clifford prefix (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--clifford-tail-seed",
+        type=int,
+        default=2025,
+        help="Base RNG seed for the non-Clifford tail (default: %(default)s).",
+    )
+    parser.add_argument(
         "--ops-per-second",
         type=float,
         default=OPS_PER_SECOND_DEFAULT,
@@ -684,6 +943,31 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if getattr(args, "repetitions", None) is not None and args.repetitions <= 0:
         parser.error("--repetitions must be a positive integer")
 
+    if getattr(args, "clifford_random_suite", False):
+        if not getattr(args, "clifford_depths", None):
+            parser.error("--clifford-random-suite requires --clifford-depths")
+        if not getattr(args, "total_depths", None):
+            parser.error("--clifford-random-suite requires --total-depths")
+        if args.clifford_tail_twoq_prob < 0 or args.clifford_tail_twoq_prob > 1:
+            parser.error("--clifford-tail-twoq-prob must lie within [0, 1]")
+        if args.clifford_tail_angle_eps < 0:
+            parser.error("--clifford-tail-angle-eps must be non-negative")
+        try:
+            widths = _parse_qubit_values(getattr(args, "clifford_random_qubits", None))
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not widths:
+            widths = (20,)
+        args.clifford_random_widths = widths
+    else:
+        if getattr(args, "clifford_depths", None):
+            parser.error("--clifford-depths requires --clifford-random-suite")
+        if getattr(args, "total_depths", None):
+            parser.error("--total-depths requires --clifford-random-suite")
+        if getattr(args, "clifford_random_qubits", None):
+            parser.error("--clifford-random-qubits requires --clifford-random-suite")
+        args.clifford_random_widths = tuple()
+
     return args
 
 
@@ -709,9 +993,63 @@ def main(argv: Sequence[str] | None = None) -> None:  # pragma: no cover - CLI
     throughput = args.ops_per_second if args.ops_per_second > 0 else None
     large_overrides = _large_planner_overrides_from_args(args)
 
+    run_showcase_flag = True
+    if getattr(args, "clifford_random_suite", False):
+        run_showcase_flag = bool(
+            getattr(args, "circuit_names", None)
+            or getattr(args, "groups", None)
+            or getattr(args, "suite", None)
+        )
+
     if not args.estimate_only:
-        LOGGER.info("Running showcase benchmarks")
-        showcase_benchmarks.run_showcase_benchmarks(args)
+        if getattr(args, "clifford_random_suite", False):
+            LOGGER.info("Running Clifford + random rotation suite")
+            run_timeout = None if args.run_timeout <= 0 else args.run_timeout
+            memory_bytes = (
+                args.memory_bytes if args.memory_bytes and args.memory_bytes > 0 else None
+            )
+            include_theoretical_sv = bool(getattr(args, "include_theoretical_sv", False))
+            mem_budget_gib = getattr(args, "sv_mem_budget_gib", None)
+            mem_budget_bytes: int | None = None
+            if mem_budget_gib is not None and mem_budget_gib > 0:
+                mem_budget_bytes = int(mem_budget_gib * (1024 ** 3))
+            dtype_bytes = max(1, int(getattr(args, "sv_dtype_bytes", 16)))
+            theoretical_sv_options = {
+                "mem_budget_bytes": mem_budget_bytes,
+                "scratch_factor": float(getattr(args, "sv_scratch_factor", 1.5)),
+                "dtype_bytes": dtype_bytes,
+                "c_1q": float(getattr(args, "sv_c1", 1.0)),
+                "c_2q": float(getattr(args, "sv_c2", 2.5)),
+                "c_diag2q": float(getattr(args, "sv_cdiag", 0.8)),
+                "c_3q": float(getattr(args, "sv_c3", 5.0)),
+                "c_other": float(getattr(args, "sv_cother", 2.0)),
+            }
+            database_path = Path(getattr(args, "database", showcase_benchmarks.DATABASE_PATH))
+            run_clifford_random_suite(
+                widths=args.clifford_random_widths or (20,),
+                clifford_depths=args.clifford_depths,
+                total_depths=args.total_depths,
+                repetitions=args.repetitions,
+                run_timeout=run_timeout,
+                memory_bytes=memory_bytes,
+                classical_simplification=args.enable_classical_simplification,
+                workers=args.workers,
+                quasar_quick=bool(getattr(args, "quick", False)),
+                reuse_existing=bool(getattr(args, "reuse_existing", False)),
+                database_path=database_path,
+                include_theoretical_sv=include_theoretical_sv,
+                theoretical_sv_options=theoretical_sv_options,
+                tail_twoq_prob=args.clifford_tail_twoq_prob,
+                tail_angle_eps=args.clifford_tail_angle_eps,
+                clifford_seed=args.clifford_seed,
+                tail_seed=args.clifford_tail_seed,
+            )
+
+        if run_showcase_flag:
+            LOGGER.info("Running showcase benchmarks")
+            showcase_benchmarks.run_showcase_benchmarks(args)
+        else:
+            LOGGER.info("Skipping default showcase benchmarks (Clifford suite requested)")
 
     if args.estimate:
         LOGGER.info("Running theoretical estimation")
