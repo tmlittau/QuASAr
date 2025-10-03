@@ -41,16 +41,30 @@ def test_partition_detects_blocks() -> None:
             assert mapped == list(global_gate.qubits)
 
 
-# Use modest widths so the test remains fast on CI; larger instances are
-# exercised in the stitched-disjoint benchmark suite.
-@pytest.mark.parametrize("width", [32, 48])
+# Use tiny widths so the test remains fast on CI; larger instances are
+# exercised in the stitched-disjoint benchmark suite and during manual runs.
+@pytest.mark.parametrize("width", [4, 6])
 def test_planner_plans_fragments_under_cap(width: int, caplog: pytest.LogCaptureFixture) -> None:
-    circuit = _synthetic_disjoint_circuit(width, block_size=8)
+    circuit = _synthetic_disjoint_circuit(width, block_size=2)
     planner = Planner(max_memory=64 * 1024 ** 3, batch_size=32)
     with caplog.at_level(logging.INFO):
         plan = planner.plan(circuit)
     assert plan.steps
     assert any("Detected" in rec.message for rec in caplog.records)
+    assert any("Fragment concurrency" in rec.message for rec in caplog.records)
+
+
+def test_planner_two_single_qubit_fragments(caplog: pytest.LogCaptureFixture) -> None:
+    circuit = _synthetic_disjoint_circuit(2, block_size=1)
+    fragments = partition_into_disjoint_fragments(circuit)
+    assert len(fragments) == 2
+    assert all(len(fragment.qubits) == 1 for fragment in fragments)
+
+    planner = Planner(max_memory=1_024, batch_size=4)
+    with caplog.at_level(logging.INFO):
+        plan = planner.plan(circuit)
+
+    assert plan.steps
     assert any("Fragment concurrency" in rec.message for rec in caplog.records)
 
 
