@@ -37,6 +37,6 @@ def test_plan_choice_heatmap():
     for (name, alpha), steps in expected.items():
         circ = circuits()[name]
         planner = Planner(conversion_cost_multiplier=alpha)
-        plan = planner.plan(circ)
+        plan = planner.plan(circ, target_accuracy=0.999)
         observed = [s.backend.name for s in plan.steps]
         assert observed == steps
