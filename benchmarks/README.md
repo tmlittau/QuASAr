@@ -86,6 +86,14 @@ width.  The preconfigured JSON file
 ``configs/benchmark_config.stitched-disjoint.json`` mirrors the CLI suite and
 lets automation trigger the same runs via ``--config``.
 
+The showcase CLI exposes dedicated switches for the suite so that automation
+can tune resource usage without editing the JSON configuration.  Use
+``--enforce-disjoint/--no-enforce-disjoint`` to toggle the cross-block guard,
+``--auto-size-by-ram/--no-auto-size-by-ram`` to control automatic block-size
+downscaling, ``--max-ram-gb`` to specify the per-region SV cap (default ``64``)
+and ``--max-concurrency`` to limit the number of simultaneous regions (default
+``auto``).
+
 ```bash
 python benchmarks/run_benchmark.py --suite stitched-big --workers 16 \
   --reuse-existing

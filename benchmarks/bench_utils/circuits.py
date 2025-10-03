@@ -1258,7 +1258,7 @@ def clustered_entanglement_circuit(
                 {"layers": None, "work_qubits": len(work_region), "work_start": work_start}
             )
         elif stage == "neighbor_bridge":
-            bridge_layers = max(1, min(3, int(sp.get("bridge_layers", 2))))
+            bridge_layers = max(0, min(3, int(sp.get("bridge_layers", 2))))
             region_blocks = max(1, int(sp.get("region_blocks", 3)))
             stage_gates = []
             for _ in range(bridge_layers):
