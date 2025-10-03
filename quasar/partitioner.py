@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import partial
 from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Set
 
 from .ssd import SSD, SSDPartition, ConversionLayer, PartitionTraceEntry
@@ -312,7 +313,7 @@ class Partitioner:
             num_t = sum(1 for g in gate_seq if g.gate.upper() in {"T", "TDG"})
             return qubits, num_gates, num_meas, num_1q, num_2q, num_t
 
-        def _estimate_cost(
+        def _estimate_fragment_cost(
             backend: Backend,
             gate_seq: List['Gate'],
         ) -> Cost:
@@ -356,6 +357,46 @@ class Partitioner:
                 num_1q,
                 num_2q,
                 num_meas,
+            )
+
+        def _estimate_cost(
+            backend: Backend,
+            gate_seq: List['Gate'],
+        ) -> Cost:
+            if not gate_seq:
+                return Cost(0.0, 0.0)
+
+            base_cost = _estimate_fragment_cost(backend, gate_seq)
+
+            groups = [
+                (qubits, seq)
+                for qubits, seq in self.parallel_groups(gate_seq)
+                if qubits and seq
+            ]
+            if len(groups) <= 1:
+                return base_cost
+
+            group_costs: List[Cost] = [
+                _estimate_fragment_cost(backend, list(seq)) for _, seq in groups
+            ]
+            combined = group_costs[0]
+            for extra in group_costs[1:]:
+                combined = Cost(
+                    time=max(combined.time, extra.time),
+                    memory=combined.memory + extra.memory,
+                    log_depth=max(combined.log_depth, extra.log_depth),
+                    conversion=combined.conversion + extra.conversion,
+                    replay=combined.replay + extra.replay,
+                )
+
+            return Cost(
+                time=combined.time
+                + self.estimator.parallel_time_overhead(len(group_costs)),
+                memory=combined.memory
+                + self.estimator.parallel_memory_overhead(len(group_costs)),
+                log_depth=combined.log_depth,
+                conversion=combined.conversion,
+                replay=combined.replay,
             )
 
         def _combine_costs(*costs: Cost) -> Cost:
@@ -765,7 +806,14 @@ class Partitioner:
                             target_accuracy=self.target_accuracy,
                         )
                         partitions.extend(
-                            self._build_partitions(prefix, p_backend, p_cost)
+                            self._build_partitions(
+                                prefix,
+                                p_backend,
+                                p_cost,
+                                estimate_subsystem_cost=partial(
+                                    _estimate_fragment_cost, p_backend
+                                ),
+                            )
                         )
                     else:
                         p_backend = current_backend
@@ -976,7 +1024,14 @@ class Partitioner:
 
         if current_gates:
             partitions.extend(
-                self._build_partitions(current_gates, current_backend, current_cost)
+                self._build_partitions(
+                    current_gates,
+                    current_backend,
+                    current_cost,
+                    estimate_subsystem_cost=partial(
+                        _estimate_fragment_cost, current_backend
+                    ),
+                )
             )
 
         trace_data: List[PartitionTraceEntry]
@@ -1219,7 +1274,12 @@ class Partitioner:
         return best_idx, best_boundary
 
     def _build_partitions(
-        self, gates: List['Gate'], backend: Backend, cost: Cost
+        self,
+        gates: List['Gate'],
+        backend: Backend,
+        cost: Cost,
+        *,
+        estimate_subsystem_cost: Callable[[List['Gate']], Cost] | None = None,
     ) -> List[SSDPartition]:
         """Compress a contiguous gate list into SSD partitions.
 
@@ -1278,12 +1338,16 @@ class Partitioner:
         parts: List[SSDPartition] = []
         for hist, group_list in hist_map.items():
             qubit_groups = [qs for qs, _ in group_list]
+            if estimate_subsystem_cost is not None and group_list:
+                representative_cost = estimate_subsystem_cost(group_list[0][1])
+            else:
+                representative_cost = cost
             parts.append(
                 SSDPartition(
                     subsystems=tuple(qubit_groups),
                     history=hist,
                     backend=backend,
-                    cost=cost,
+                    cost=representative_cost,
                 )
             )
         return parts
