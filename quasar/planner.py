@@ -11,6 +11,7 @@ an optimal execution plan.
 """
 
 import math
+import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, Iterator
@@ -24,6 +25,8 @@ from . import config
 from .analyzer import AnalysisResult
 from .method_selector import MethodSelector, NoFeasibleBackendError
 from .metrics import FragmentMetricRecord
+
+LOGGER = logging.getLogger(__name__)
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -521,6 +524,7 @@ def _supported_backends(
     allow_tableau: bool = True,
     estimator: CostEstimator | None = None,
     max_memory: float | None = None,
+    statevector_qubit_cap: int | None = None,
 ) -> List[Backend]:
     """Determine which backends can simulate a gate sequence.
 
@@ -577,10 +581,12 @@ def _supported_backends(
         else metrics_amp
     )
 
+    gate_list = list(gates)
+
     metrics_obj = metrics
     if metrics_obj is None:
         metrics_obj = SupportedBackendMetrics.from_gates(
-            gates,
+            gate_list,
             sparsity=sparse_input,
             phase_rotation_diversity=phase_input,
             amplitude_rotation_diversity=amp_input,
@@ -716,12 +722,25 @@ def _supported_backends(
 
         return ranking
 
-    if metrics_obj.two_qubit_only:
-        chi_cap = estimator.chi_max
-        if chi_cap is not None and chi_cap > 1:
-            cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi_cap)
+    precomputed_mps_cost: Cost | None = None
+    if gate_list and metrics_obj.two_qubit_only:
+        chi_cap = estimator.chi_for_constraints(
+            num_qubits,
+            gate_list,
+            fidelity=1.0,
+            max_memory=max_memory if max_memory is not None else None,
+        )
+        if chi_cap >= 1:
+            cost = estimator.mps(
+                num_qubits,
+                num_1q + num_meas,
+                num_2q,
+                chi=chi_cap,
+                svd=True,
+            )
             if max_memory is None or cost.memory <= max_memory:
                 mps_metric = True
+                precomputed_mps_cost = cost
 
     costs: Dict[Backend, Cost] = {}
     # Estimates rely on calibrated coefficients for realistic costs.
@@ -737,10 +756,13 @@ def _supported_backends(
         )
         if max_memory is None or dd_cost.memory <= max_memory:
             costs[Backend.DECISION_DIAGRAM] = dd_cost
-    if mps_metric:
-        mps_cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi=4, svd=True)
-        if max_memory is None or mps_cost.memory <= max_memory:
-            costs[Backend.MPS] = mps_cost
+    if mps_metric and Backend.MPS not in costs:
+        if precomputed_mps_cost is not None:
+            costs[Backend.MPS] = precomputed_mps_cost
+        else:
+            mps_cost = estimator.mps(num_qubits, num_1q + num_meas, num_2q, chi=4, svd=True)
+            if max_memory is None or mps_cost.memory <= max_memory:
+                costs[Backend.MPS] = mps_cost
     if clifford_t:
         ext_cost = estimator.extended_stabilizer(
             num_qubits,
@@ -751,9 +773,13 @@ def _supported_backends(
         )
         if max_memory is None or ext_cost.memory <= max_memory:
             costs[Backend.EXTENDED_STABILIZER] = ext_cost
-    sv_cost = estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
-    if max_memory is None or sv_cost.memory <= max_memory:
-        costs[Backend.STATEVECTOR] = sv_cost
+    allow_sv = True
+    if statevector_qubit_cap is not None and num_qubits > statevector_qubit_cap:
+        allow_sv = False
+    if allow_sv:
+        sv_cost = estimator.statevector(num_qubits, num_1q, num_2q, num_meas)
+        if max_memory is None or sv_cost.memory <= max_memory:
+            costs[Backend.STATEVECTOR] = sv_cost
     candidates = list(costs.keys())
     # Select backends by estimated memory then runtime to respect calibration.
     ranking = sorted(candidates, key=lambda b: (costs[b].memory, costs[b].time))
@@ -852,11 +878,14 @@ def _parallel_simulation_cost(
     estimator: CostEstimator,
     backend: Backend,
     groups: List[Tuple[Tuple[int, ...], List["Gate"]]],
-) -> Cost:
+    *,
+    memory_limit: float | None = None,
+    max_groups: int | None = None,
+) -> tuple[Cost, bool]:
     """Estimate cost for executing independent groups in parallel."""
 
     if not groups:
-        return Cost(0.0, 0.0)
+        return Cost(0.0, 0.0), False
     costs: List[Cost] = []
     for qubits, gates in groups:
         m = len(gates)
@@ -881,16 +910,42 @@ def _parallel_simulation_cost(
                 depth=depth,
             )
         )
+    truncated = False
+    if max_groups is not None and max_groups > 0 and len(groups) > max_groups:
+        LOGGER.info(
+            "Reducing parallel groups from %d to %d due to max_concurrency",
+            len(groups),
+            max_groups,
+        )
+        truncated = True
     total = costs[0]
     for cost in costs[1:]:
         total = _add_cost(total, cost, parallel=True)
-    return Cost(
+    concurrent_cost = Cost(
         time=total.time + estimator.parallel_time_overhead(len(groups)),
         memory=total.memory + estimator.parallel_memory_overhead(len(groups)),
         log_depth=total.log_depth,
         conversion=total.conversion,
         replay=total.replay,
     )
+    exceeds_memory = memory_limit is not None and concurrent_cost.memory > memory_limit
+    if truncated or exceeds_memory:
+        if exceeds_memory:
+            LOGGER.info(
+                "Parallel execution of %d groups exceeds memory cap %.3eB; executing sequentially",
+                len(groups),
+                memory_limit,
+            )
+        else:
+            LOGGER.info(
+                "Parallel execution of %d groups trimmed to sequential by concurrency limit",
+                len(groups),
+            )
+        total_seq = costs[0]
+        for cost in costs[1:]:
+            total_seq = _add_cost(total_seq, cost)
+        return total_seq, False
+    return concurrent_cost, len(groups) > 1
 
 
 # ---------------------------------------------------------------------------
@@ -908,6 +963,7 @@ class Planner:
         top_k: int = 4,
         batch_size: int = 1,
         max_memory: float | None = None,
+        max_concurrency: int | None = None,
         quick_max_qubits: int | None = config.DEFAULT.quick_max_qubits,
         quick_max_gates: int | None = config.DEFAULT.quick_max_gates,
         quick_max_depth: int | None = config.DEFAULT.quick_max_depth,
@@ -996,6 +1052,11 @@ class Planner:
         self.selector = selector or MethodSelector(self.estimator)
         self.top_k = top_k
         self.batch_size = batch_size
+        self._max_memory: float | None = None
+        self.max_statevector_qubits: int | None = None
+        if max_concurrency is not None and max_concurrency < 1:
+            max_concurrency = 1
+        self.max_concurrency: int | None = max_concurrency
         self.max_memory = max_memory
         self.quick_max_qubits = quick_max_qubits
         self.quick_max_gates = quick_max_gates
@@ -1026,6 +1087,31 @@ class Planner:
         # times during scheduling.
         self.cache: Dict[tuple[Hashable, Backend | None], PlanResult] = {}
         self.cache_hits = 0
+
+    @property
+    def max_memory(self) -> float | None:
+        return self._max_memory
+
+    @max_memory.setter
+    def max_memory(self, value: float | None) -> None:
+        self._max_memory = None if value is None else float(value)
+        self._update_statevector_qubit_cap()
+
+    def _update_statevector_qubit_cap(self) -> None:
+        if self._max_memory is None:
+            self.max_statevector_qubits = None
+            return
+        bytes_per_amp = float(self.estimator.coeff.get("sv_bytes_per_amp", 1.0)) * 16.0
+        base_mem = float(self.estimator.coeff.get("sv_base_mem", 0.0))
+        avail = max(0.0, float(self._max_memory) - base_mem)
+        if avail <= 0.0 or bytes_per_amp <= 0.0:
+            self.max_statevector_qubits = 0
+            return
+        amps = avail / bytes_per_amp
+        if amps < 1.0:
+            self.max_statevector_qubits = 0
+        else:
+            self.max_statevector_qubits = int(math.floor(math.log2(amps)))
 
     # ------------------------------------------------------------------
     def _backend_rank(self, backend: Backend) -> int:
@@ -1509,6 +1595,7 @@ class Planner:
                         allow_tableau=allow_tableau,
                         estimator=self.estimator,
                         max_memory=max_memory,
+                        statevector_qubit_cap=self.max_statevector_qubits,
                     ),
                     dd_metric=dd_metric,
                 )
@@ -1519,7 +1606,7 @@ class Planner:
                             f"Backend {forced_backend} unsupported for given circuit segment"
                         )
                     backends = [forced_backend]
-                candidates: List[Tuple[Backend, Cost]] = []
+                candidates: List[Tuple[Backend, Cost, Tuple[Tuple[int, ...], ...]]] = []
                 violations: List[Tuple[Backend, Cost]] = []
                 for backend in backends:
                     depth_hint: int | None = None
@@ -1539,16 +1626,30 @@ class Planner:
                         depth=depth_hint,
                     )
                     groups = ensure_groups()
+                    parallel_groups_tuple: Tuple[Tuple[int, ...], ...] = ()
+                    used_parallel = False
                     if len(groups) > 1:
-                        par_cost = _parallel_simulation_cost(
-                            self.estimator, backend, groups
+                        par_cost, parallel_flag = _parallel_simulation_cost(
+                            self.estimator,
+                            backend,
+                            groups,
+                            memory_limit=max_memory,
+                            max_groups=self.max_concurrency,
                         )
-                        if _better(par_cost, cost, self.perf_prio, parallel=True):
+                        if _better(par_cost, cost, self.perf_prio, parallel=parallel_flag):
                             cost = par_cost
+                            used_parallel = parallel_flag
+                            if parallel_flag:
+                                parallel_groups_tuple = tuple(group[0] for group in groups)
+                        elif not parallel_flag:
+                            cost = par_cost
+                            used_parallel = False
+                    else:
+                        used_parallel = False
                     if max_memory is not None and cost.memory > max_memory:
                         violations.append((backend, cost))
                         continue
-                    candidates.append((backend, cost))
+                    candidates.append((backend, cost, parallel_groups_tuple if used_parallel else ()))
                 if not candidates:
                     if max_memory is not None:
                         if not backends:
@@ -1561,6 +1662,7 @@ class Planner:
                                 allow_tableau=allow_tableau,
                                 estimator=self.estimator,
                                 max_memory=None,
+                                statevector_qubit_cap=self.max_statevector_qubits,
                             )
                             for backend in retry_backends:
                                 depth_hint = None
@@ -1581,17 +1683,24 @@ class Planner:
                                 )
                                 groups = ensure_groups()
                                 if len(groups) > 1:
-                                    par_retry = _parallel_simulation_cost(
-                                        self.estimator, backend, groups
+                                    par_retry, retry_parallel = _parallel_simulation_cost(
+                                        self.estimator,
+                                        backend,
+                                        groups,
+                                        memory_limit=max_memory,
+                                        max_groups=self.max_concurrency,
                                     )
                                     if _better(
-                                        par_retry, retry_cost, self.perf_prio, parallel=True
+                                        par_retry,
+                                        retry_cost,
+                                        self.perf_prio,
+                                        parallel=retry_parallel,
                                     ):
                                         retry_cost = par_retry
                                 violations.append((backend, retry_cost))
                         infeasible_segments.append((j, i, violations.copy()))
                     continue
-                for backend, sim_cost in candidates:
+                for backend, sim_cost, parallel_tuple in candidates:
                     for prev_backend, prev_entry in table[j].items():
                         if bound is not None and _dominates(bound, prev_entry.cost, eps):
                             continue
@@ -1696,12 +1805,7 @@ class Planner:
                             continue
                         entry = table[i].get(backend)
                         if entry is None or _better(total_cost, entry.cost, self.perf_prio):
-                            cached_groups = ensure_groups()
-                            parallel_qubits = (
-                                tuple(group[0] for group in cached_groups)
-                                if cached_groups
-                                else ()
-                            )
+                            parallel_qubits = parallel_tuple
                             table[i][backend] = DPEntry(
                                 cost=total_cost,
                                 prev_index=j,
@@ -1729,21 +1833,33 @@ class Planner:
         final_entries = table[n]
         if not final_entries:
             if max_memory is not None:
-                detail = ""
-                best: Tuple[int, int, Backend, Cost] | None = None
+                largest_region = 0
+                region_details: List[str] = []
                 for start, end, options in infeasible_segments:
-                    for backend, cost in options:
-                        if best is None or cost.memory < best[3].memory:
-                            best = (start, end, backend, cost)
-                if best is not None:
-                    start, end, backend, cost = best
-                    detail = (
-                        f" Smallest estimated requirement is {cost.memory:.3e}B "
-                        f"with {backend.name} for segment [{start}, {end})."
+                    segment = gates[start:end]
+                    qubit_count = len({q for gate in segment for q in gate.qubits})
+                    largest_region = max(largest_region, qubit_count)
+                    if not options:
+                        continue
+                    attempt = ", ".join(
+                        f"{backend.name}({cost.memory:.3e}B)" for backend, cost in options
+                    )
+                    region_details.append(
+                        f"[{start}, {end}) q={qubit_count}: {attempt}"
+                    )
+                detail = ""
+                if region_details:
+                    detail = " Attempts: " + "; ".join(region_details)
+                sv_hint = ""
+                if self.max_statevector_qubits is not None:
+                    sv_hint = (
+                        f" Statevector fits up to {self.max_statevector_qubits} qubit(s) per region."
                     )
                 raise NoFeasibleBackendError(
                     "No backend combination satisfies the memory limit of "
-                    f"{max_memory:.3e}B." + detail
+                    f"{max_memory:.3e}B. Largest region spans {largest_region} qubit(s)."
+                    + detail
+                    + sv_hint
                 )
             raise NoFeasibleBackendError(
                 "No feasible backend combination found for the provided circuit"
@@ -2067,9 +2183,21 @@ class Planner:
             for part in circuit.ssd.partitions:
                 if part.backend not in part.compatible_methods:
                     raise ValueError("Assigned backend incompatible with partition")
+            steps = list(res.steps)
+            if LOGGER.isEnabledFor(logging.INFO):
+                for idx, step in enumerate(steps):
+                    segment = gates[step.start : step.end]
+                    qubit_set = {q for gate in segment for q in gate.qubits}
+                    LOGGER.info(
+                        "Planner selected %s for fragment %d (qubits=%d, gates=%d, parallel_groups=%d)",
+                        step.backend.name,
+                        idx,
+                        len(qubit_set),
+                        len(segment),
+                        len(step.parallel),
+                    )
             if res.diagnostics is not None:
                 fragments: List[FragmentMetricRecord] = []
-                steps = list(res.steps)
                 for idx, step in enumerate(steps):
                     segment = gates[step.start : step.end]
                     summary = self.selector.describe_fragment(segment)
@@ -2258,10 +2386,14 @@ class Planner:
         )
         groups = part.parallel_groups(gates) if num_qubits > 1 else []
         if single_backend_choice is not None and len(groups) > 1:
-            par_cost = _parallel_simulation_cost(
-                self.estimator, single_backend_choice, groups
+            par_cost, par_flag = _parallel_simulation_cost(
+                self.estimator,
+                single_backend_choice,
+                groups,
+                memory_limit=threshold,
+                max_groups=self.max_concurrency,
             )
-            if _better(par_cost, single_cost, perf_prio, parallel=True):
+            if _better(par_cost, single_cost, perf_prio, parallel=par_flag):
                 single_cost = par_cost
         if diagnostics is not None:
             diagnostics.single_backend = single_backend_choice
@@ -2530,10 +2662,14 @@ class Planner:
                     depth=seg_depth,
                 )
                 if len(groups) > 1:
-                    par_cost = _parallel_simulation_cost(
-                        self.estimator, sub_step.backend, groups
+                    par_cost, par_flag = _parallel_simulation_cost(
+                        self.estimator,
+                        sub_step.backend,
+                        groups,
+                        memory_limit=threshold,
+                        max_groups=self.max_concurrency,
                     )
-                    if _better(par_cost, cost, self.perf_prio, parallel=True):
+                    if _better(par_cost, cost, self.perf_prio, parallel=par_flag):
                         cost = par_cost
                 total_cost = _add_cost(total_cost, cost)
 

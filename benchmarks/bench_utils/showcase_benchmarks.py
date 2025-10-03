@@ -871,6 +871,7 @@ def _run_backend_suite_for_width(
     include_theoretical_sv: bool = False,
     theoretical_sv_options: Mapping[str, Any] | None = None,
     step_callback: Callable[[str], None] | None = None,
+    max_concurrency: int | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     baseline_backends = tuple(baseline_backends)
     records: list[dict[str, object]] = []
@@ -924,6 +925,8 @@ def _run_backend_suite_for_width(
     # baseline feasibility.  Baseline checks are performed afterwards.
     circuit = _ensure_circuit()
     runner = BenchmarkRunner()
+    if max_concurrency is not None and hasattr(engine, "planner"):
+        engine.planner.max_concurrency = max(1, int(max_concurrency))
     quasar_status = f"quasar@{width}"
     if step_callback is not None:
         step_callback(quasar_status)
@@ -1137,6 +1140,7 @@ def _run_backend_suite_for_width_worker(
     include_theoretical_sv: bool = False,
     theoretical_sv_options: Mapping[str, Any] | None = None,
     step_callback: Callable[[str], None] | None = None,
+    max_concurrency: int | None = None,
 ) -> tuple[list[dict[str, object]], list[str]]:
     engine = thread_engine()
     return _run_backend_suite_for_width(
@@ -1152,6 +1156,7 @@ def _run_backend_suite_for_width_worker(
         include_theoretical_sv=include_theoretical_sv,
         theoretical_sv_options=theoretical_sv_options,
         step_callback=step_callback,
+        max_concurrency=max_concurrency,
     )
 
 
@@ -1171,6 +1176,7 @@ def _run_backend_suite(
     theoretical_sv_options: Mapping[str, Any] | None = None,
     database: BenchmarkDatabase | None = None,
     run: BenchmarkRun | None = None,
+    max_concurrency: int | None = None,
 ) -> pd.DataFrame:
     """Execute the benchmark for ``spec`` across the provided widths."""
 
@@ -1255,6 +1261,7 @@ def _run_backend_suite(
                     include_theoretical_sv=include_theoretical_sv,
                     theoretical_sv_options=sv_options,
                     step_callback=progress.announce,
+                    max_concurrency=max_concurrency,
                 )
                 ordered[index] = recs
                 if database is not None and benchmark_id is not None:
@@ -1303,6 +1310,7 @@ def _run_backend_suite(
                         quasar_quick=quasar_quick,
                         include_theoretical_sv=include_theoretical_sv,
                         theoretical_sv_options=sv_options,
+                        max_concurrency=max_concurrency,
                     )
                     futures[future] = index
 
@@ -1535,6 +1543,12 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
     suite_specs: tuple[stitched_suites.StitchedCircuitSpec, ...] = ()
     suite_overrides: dict[str, tuple[int, ...]] = {}
     if suite_name:
+        if suite_name == "stitched-disjoint":
+            stitched_suites.configure_disjoint_suite(
+                enforce_disjoint=getattr(args, "enforce_disjoint", True),
+                auto_size_by_ram=getattr(args, "auto_size_by_ram", True),
+                max_ram_gb=getattr(args, "max_ram_gb", 64.0),
+            )
         suite_specs = stitched_suites.resolve_suite(suite_name)
         catalog: Mapping[str, ShowcaseCircuit] = OrderedDict(
             (
@@ -1693,6 +1707,7 @@ def run_showcase_benchmarks(args: argparse.Namespace) -> None:
                     theoretical_sv_options=theoretical_sv_options,
                     database=database,
                     run=run_record,
+                    max_concurrency=getattr(args, "max_concurrency", None),
                 )
 
             if raw_df.empty:
@@ -1813,6 +1828,33 @@ def build_arg_parser() -> argparse.ArgumentParser:
             default=None,
             help="Run a preconfigured showcase suite (e.g. stitched-big).",
         )
+        parser.add_argument(
+            "--enforce-disjoint",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Enable (or disable with --no-enforce-disjoint) the stitched-disjoint "
+                "cross-block gate guard. Default: enabled."
+            ),
+        )
+        parser.add_argument(
+            "--auto-size-by-ram",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Scale stitched-disjoint block sizes to fit the SV memory budget. "
+                "Disable with --no-auto-size-by-ram. Default: enabled."
+            ),
+        )
+        parser.add_argument(
+            "--max-ram-gb",
+            type=float,
+            default=None,
+            help=(
+                "Per-region RAM cap in GiB for stitched-disjoint SV sizing "
+                "(default: 64)."
+            ),
+        )
     parser.add_argument(
         "--list-groups",
         action="store_true",
@@ -1873,6 +1915,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=16,
         help="Bytes per amplitude assumed for the SV estimate (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=None,
+        help=(
+            "Maximum number of stitched regions to run concurrently when planning "
+            "(default: auto)."
+        ),
     )
     parser.add_argument(
         "--sv-c1",
