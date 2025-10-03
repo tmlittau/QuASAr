@@ -70,6 +70,16 @@ class FakeEstimator:
     def statevector(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         return Cost(time=1.0, memory=2.0)
 
+    def parallel_time_overhead(self, groups: int) -> float:
+        if groups <= 1:
+            return 0.0
+        return self.coeff.get("parallel_time_overhead", 0.0) * (groups - 1)
+
+    def parallel_memory_overhead(self, groups: int) -> float:
+        if groups <= 1:
+            return 0.0
+        return self.coeff.get("parallel_memory_overhead", 0.0) * (groups - 1)
+
     def derive_conversion_window(self, num_qubits, *, rank, compressed_terms=None, bond_dimension=None):  # type: ignore[no-untyped-def]
         return min(num_qubits, 4)
 
@@ -540,11 +550,15 @@ def test_conversion_primitive_respects_entanglement_bound() -> None:
 
     ssd = partitioner.partition(circuit, debug=True)
 
-    assert ssd.conversions
-    layer = ssd.conversions[0]
-    assert layer.primitive == "ST"
-    assert layer.rank == 1
-    assert layer.frontier == 0
+    candidate = next(
+        entry
+        for entry in ssd.trace
+        if entry.reason == "deferred_switch_candidate"
+        and entry.to_backend is Backend.MPS
+    )
+    assert candidate.primitive == "ST"
+    assert candidate.rank == 1
+    assert candidate.frontier == 0
     assert estimator.last_rank == 1
     assert estimator.last_frontier == 0
 
@@ -571,11 +585,15 @@ def test_conversion_primitive_respects_entanglement_bound() -> None:
 
     dense_ssd = dense_partitioner.partition(dense_circuit, debug=True)
 
-    assert dense_ssd.conversions
-    dense_layer = dense_ssd.conversions[0]
-    assert dense_layer.primitive == "B2B"
-    assert dense_layer.rank >= 4
-    assert dense_layer.frontier >= 2
+    dense_candidate = next(
+        entry
+        for entry in dense_ssd.trace
+        if entry.reason == "deferred_switch_candidate"
+        and entry.to_backend is Backend.MPS
+    )
+    assert dense_candidate.primitive == "B2B"
+    assert dense_candidate.rank >= 4
+    assert dense_candidate.frontier >= 2
     assert dense_estimator.last_rank is not None and dense_estimator.last_rank >= 4
     assert dense_estimator.last_frontier is not None and dense_estimator.last_frontier >= 2
 
