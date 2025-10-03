@@ -13,7 +13,7 @@ an optimal execution plan.
 import math
 import logging
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Hashable, Iterator
 
 from .cost import Backend, Cost, CostEstimator, ConversionEstimate
@@ -27,6 +27,157 @@ from .method_selector import MethodSelector, NoFeasibleBackendError
 from .metrics import FragmentMetricRecord
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Subcircuit:
+    """Representation of a disjoint fragment extracted from a circuit."""
+
+    qubits: tuple[int, ...]
+    gates: list["Gate"]
+    global_to_local: dict[int, int]
+    local_to_global: dict[int, int]
+    original_gate_indices: tuple[int, ...]
+
+
+def partition_into_disjoint_fragments(circuit: "Circuit") -> list[Subcircuit]:
+    """Return disjoint circuit fragments based on qubit connectivity."""
+
+    gates = list(getattr(circuit, "gates", []))
+    if not gates:
+        return []
+
+    metadata = getattr(circuit, "metadata", {})
+    fragments: list[Subcircuit] = []
+
+    def _build_from_blocks(block_qubits: list[tuple[int, ...]]) -> list[Subcircuit] | None:
+        if not block_qubits:
+            return None
+        qubit_to_block: dict[int, int] = {
+            qubit: block for block, qubits in enumerate(block_qubits) for qubit in qubits
+        }
+        block_gate_indices: dict[int, list[int]] = {i: [] for i in range(len(block_qubits))}
+        for idx, gate in enumerate(gates):
+            if not gate.qubits:
+                continue
+            blocks = {qubit_to_block.get(q) for q in gate.qubits}
+            if None in blocks or len(blocks) != 1:
+                return None
+            block_gate_indices[next(iter(blocks))].append(idx)
+        fragments_local: list[Subcircuit] = []
+        for block, qubits in enumerate(block_qubits):
+            indices = sorted(block_gate_indices.get(block, []))
+            if not indices:
+                continue
+            qubit_tuple = tuple(qubits)
+            global_to_local = {q: i for i, q in enumerate(qubit_tuple)}
+            local_to_global = {i: q for q, i in global_to_local.items()}
+            remapped_gates: list["Gate"] = []
+            for gate_idx in indices:
+                gate = gates[gate_idx]
+                local_qubits = [global_to_local[q] for q in gate.qubits]
+                remapped_gates.append(
+                    replace(gate, qubits=local_qubits)
+                )
+            fragments_local.append(
+                Subcircuit(
+                    qubits=tuple(sorted(qubit_tuple)),
+                    gates=remapped_gates,
+                    global_to_local=global_to_local,
+                    local_to_global=local_to_global,
+                    original_gate_indices=tuple(indices),
+                )
+            )
+        return fragments_local
+
+    block_size = None
+    num_blocks = None
+    if isinstance(metadata, dict):
+        block_size = metadata.get("block_size")
+        num_blocks = metadata.get("num_blocks")
+
+    if (
+        isinstance(block_size, int)
+        and block_size > 0
+        and isinstance(num_blocks, int)
+        and num_blocks > 0
+    ):
+        block_qubits = [
+            tuple(
+                range(start, min(start + block_size, getattr(circuit, "num_qubits", 0)))
+            )
+            for start in range(0, block_size * num_blocks, block_size)
+        ]
+        block_qubits = [block for block in block_qubits if block]
+        fragments = _build_from_blocks(block_qubits) or []
+
+    if not fragments:
+        parent: dict[int, int] = {}
+
+        def find(x: int) -> int:
+            parent.setdefault(x, x)
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for gate in gates:
+            if not gate.qubits:
+                continue
+            base = gate.qubits[0]
+            for qubit in gate.qubits:
+                parent.setdefault(qubit, qubit)
+            for qubit in gate.qubits[1:]:
+                union(base, qubit)
+
+        components: dict[int, list[int]] = {}
+        for qubit in parent:
+            root = find(qubit)
+            components.setdefault(root, []).append(qubit)
+
+        gate_allocation: dict[int, list[int]] = {root: [] for root in components}
+        for idx, gate in enumerate(gates):
+            if not gate.qubits:
+                continue
+            root = find(gate.qubits[0])
+            if any(find(q) != root for q in gate.qubits):
+                LOGGER.warning(
+                    "partition_into_disjoint_fragments: cross-component gate detected; falling back to whole-circuit planning"
+                )
+                return []
+            gate_allocation[root].append(idx)
+
+        fragments = []
+        for root, qubits in components.items():
+            indices = sorted(gate_allocation.get(root, []))
+            if not indices:
+                continue
+            sorted_qubits = tuple(sorted(qubits))
+            global_to_local = {q: i for i, q in enumerate(sorted_qubits)}
+            local_to_global = {i: q for q, i in global_to_local.items()}
+            remapped_gates = []
+            for gate_idx in indices:
+                gate = gates[gate_idx]
+                remapped_gates.append(
+                    replace(gate, qubits=[global_to_local[q] for q in gate.qubits])
+                )
+            fragments.append(
+                Subcircuit(
+                    qubits=sorted_qubits,
+                    gates=remapped_gates,
+                    global_to_local=global_to_local,
+                    local_to_global=local_to_global,
+                    original_gate_indices=tuple(indices),
+                )
+            )
+
+    fragments.sort(key=lambda frag: frag.original_gate_indices[0])
+    return fragments
 
 if True:  # pragma: no cover - used for type checking when available
     try:
@@ -946,6 +1097,21 @@ def _parallel_simulation_cost(
             total_seq = _add_cost(total_seq, cost)
         return total_seq, False
     return concurrent_cost, len(groups) > 1
+
+
+def _choose_concurrency(mems: Iterable[float], cap_bytes: float | None) -> int:
+    """Return maximum concurrency respecting ``cap_bytes``."""
+
+    mem_list = [float(m) for m in mems if m is not None]
+    if not mem_list:
+        return 0
+    if cap_bytes is None or math.isinf(cap_bytes):
+        return len(mem_list)
+    mem_list.sort(reverse=True)
+    for k in range(len(mem_list), 0, -1):
+        if sum(mem_list[:k]) <= cap_bytes:
+            return k
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -2078,6 +2244,327 @@ class Planner:
         key = (self._fingerprint(gates), backend)
         self.cache[key] = result
 
+    def _fragment_peak_memory(
+        self,
+        plan: PlanResult,
+        *,
+        threshold: float | None,
+    ) -> float:
+        if not plan.steps:
+            return 0.0
+        gates = plan.gates
+        part = Partitioner(
+            staging_chi_cap=self.staging_chi_cap,
+            graph_cut_candidate_limit=self.graph_cut_candidate_limit,
+            graph_cut_neighbor_radius=self.graph_cut_neighbor_radius,
+            graph_cut_boundary_weight=self.graph_cut_boundary_weight,
+            graph_cut_rank_weight=self.graph_cut_rank_weight,
+            graph_cut_cost_weight=self.graph_cut_cost_weight,
+        )
+        peak = 0.0
+        for step in plan.steps:
+            segment = gates[step.start : step.end]
+            if not segment:
+                continue
+            qubit_set = {q for gate in segment for q in gate.qubits}
+            if not qubit_set:
+                continue
+            num_qubits = len(qubit_set)
+            num_gates = len(segment)
+            num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
+            num_1q = sum(
+                1
+                for g in segment
+                if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+            )
+            num_2q = num_gates - num_1q - num_meas
+            num_t = sum(1 for g in segment if g.gate.upper() in {"T", "TDG"})
+            depth = _circuit_depth(segment)
+            cost = _simulation_cost(
+                self.estimator,
+                step.backend,
+                num_qubits,
+                num_1q,
+                num_2q,
+                num_meas,
+                num_t_gates=num_t,
+                depth=depth,
+            )
+            groups = part.parallel_groups(segment) if num_qubits > 1 else []
+            if len(groups) > 1:
+                par_cost, par_flag = _parallel_simulation_cost(
+                    self.estimator,
+                    step.backend,
+                    groups,
+                    memory_limit=threshold,
+                    max_groups=self.max_concurrency,
+                )
+                if _better(par_cost, cost, self.perf_prio, parallel=par_flag):
+                    cost = par_cost
+            peak = max(peak, cost.memory)
+        return peak
+
+    def _remap_fragment_steps(
+        self,
+        fragment: Subcircuit,
+        fragment_steps: List[PlanStep],
+    ) -> List[PlanStep]:
+        if not fragment_steps:
+            return []
+        index_map = fragment.original_gate_indices
+        remapped: List[PlanStep] = []
+        for step in fragment_steps:
+            if step.end <= step.start:
+                continue
+            local_indices = list(index_map[step.start : step.end])
+            if not local_indices:
+                continue
+            runs: List[Tuple[int, int]] = []
+            current_start = local_indices[0]
+            current_end = current_start
+            for idx in local_indices[1:]:
+                if idx == current_end + 1:
+                    current_end = idx
+                else:
+                    runs.append((current_start, current_end))
+                    current_start = idx
+                    current_end = idx
+            runs.append((current_start, current_end))
+            parallel_groups = tuple(
+                tuple(fragment.local_to_global[q] for q in group)
+                for group in step.parallel
+            )
+            for start_idx, end_idx in runs:
+                remapped.append(
+                    PlanStep(
+                        start=start_idx,
+                        end=end_idx + 1,
+                        backend=step.backend,
+                        parallel=parallel_groups,
+                    )
+                )
+        return remapped
+
+    def _remap_fragment_conversions(
+        self,
+        fragment: Subcircuit,
+        conversions: List["ConversionLayer"],
+    ) -> List["ConversionLayer"]:
+        if not conversions:
+            return []
+        remapped: List["ConversionLayer"] = []
+        for layer in conversions:
+            boundary = tuple(fragment.local_to_global[q] for q in layer.boundary)
+            retained = tuple(fragment.local_to_global[q] for q in layer.retained)
+            if layer.full_boundary is None:
+                full_boundary = None
+            else:
+                full_boundary = tuple(
+                    fragment.local_to_global[q] for q in layer.full_boundary
+                )
+            remapped.append(
+                replace(
+                    layer,
+                    boundary=boundary,
+                    retained=retained,
+                    full_boundary=full_boundary,
+                )
+            )
+        return remapped
+
+    def _plan_disjoint_fragments(
+        self,
+        circuit: "Circuit",
+        fragments: List[Subcircuit],
+        *,
+        analysis: AnalysisResult | None,
+        use_cache: bool,
+        threshold: float | None,
+        backend: Backend | None,
+        target_accuracy: float | None,
+        max_time: float | None,
+        optimization_level: int | None,
+        explain: bool,
+        diagnostics: PlanDiagnostics | None,
+    ) -> PlanResult:
+        fragment_results: List[PlanResult] = []
+        fragment_peaks: List[float] = []
+        remapped_steps: List[PlanStep] = []
+        remapped_conversions: List["ConversionLayer"] = []
+        fragment_summaries: List[Dict[str, Any]] = []
+        LOGGER.info(
+            "Detected %d disjoint fragments (qubits per fragment: %s)",
+            len(fragments),
+            ", ".join(str(len(f.qubits)) for f in fragments),
+        )
+        metadata = getattr(circuit, "metadata", None)
+        for idx, fragment in enumerate(fragments):
+            frag_circuit = Circuit(
+                fragment.gates,
+                use_classical_simplification=circuit.use_classical_simplification,
+                ssd_mode=circuit.ssd_mode,
+            )
+            if metadata is not None:
+                setattr(frag_circuit, "metadata", metadata)
+            try:
+                frag_result = self.plan(
+                    frag_circuit,
+                    use_cache=use_cache,
+                    max_memory=threshold,
+                    backend=backend,
+                    target_accuracy=target_accuracy,
+                    max_time=max_time,
+                    optimization_level=optimization_level,
+                    explain=explain,
+                    allow_fragmentation=False,
+                )
+            except NoFeasibleBackendError as exc:
+                segment = fragment.gates
+                num_qubits = len(fragment.qubits)
+                num_gates = len(segment)
+                num_meas = sum(1 for g in segment if g.gate.upper() in {"MEASURE", "RESET"})
+                num_1q = sum(
+                    1
+                    for g in segment
+                    if len(g.qubits) == 1 and g.gate.upper() not in {"MEASURE", "RESET"}
+                )
+                num_2q = num_gates - num_1q - num_meas
+                num_t = sum(1 for g in segment if g.gate.upper() in {"T", "TDG"})
+                depth = _circuit_depth(segment)
+                clifford = all(g.gate.upper() in CLIFFORD_GATES for g in segment)
+                estimates: List[str] = []
+                for candidate in (
+                    Backend.STATEVECTOR,
+                    Backend.MPS,
+                    Backend.DECISION_DIAGRAM,
+                    Backend.TABLEAU,
+                    Backend.EXTENDED_STABILIZER,
+                ):
+                    if candidate == Backend.TABLEAU and not clifford:
+                        continue
+                    cost = _simulation_cost(
+                        self.estimator,
+                        candidate,
+                        num_qubits,
+                        num_1q,
+                        num_2q,
+                        num_meas,
+                        num_t_gates=num_t,
+                        depth=depth,
+                    )
+                    estimates.append(f"{candidate.name}={cost.memory:.3e}B")
+                sv_cap_hint = ""
+                if threshold is not None and threshold > 0:
+                    base = float(self.estimator.coeff.get("sv_base_mem", 0.0))
+                    bytes_per_amp = (
+                        float(self.estimator.coeff.get("sv_bytes_per_amp", 1.0)) * 16.0
+                    )
+                    available = max(0.0, threshold - base)
+                    max_sv_qubits = (
+                        int(math.floor(math.log2(available / bytes_per_amp)))
+                        if available > 0 and bytes_per_amp > 0 and available >= bytes_per_amp
+                        else 0
+                    )
+                    if max_sv_qubits:
+                        sv_cap_hint = f" Hint: reduce block_size to ≤ {max_sv_qubits}."
+                    else:
+                        sv_cap_hint = " Hint: reduce block_size."
+                message = (
+                    "Fragment qubits "
+                    f"{fragment.qubits} cannot fit under memory limit {threshold if threshold is not None else float('inf'):.3e}B. "
+                    f"Estimated peak memory: {', '.join(estimates)}.{sv_cap_hint}"
+                )
+                raise NoFeasibleBackendError(message) from exc
+            frag_result.analysis = None
+            fragment_results.append(frag_result)
+            peak = self._fragment_peak_memory(frag_result, threshold=threshold)
+            fragment_peaks.append(peak)
+            backends = {step.backend.name for step in frag_result.steps}
+            LOGGER.info(
+                "Fragment %d spans %d qubits with peak memory %.3eB (backends: %s)",
+                idx,
+                len(fragment.qubits),
+                peak,
+                ",".join(sorted(backends)) or "-",
+            )
+            fragment_summaries.append(
+                {
+                    "fragment_index": idx,
+                    "qubits": list(fragment.qubits),
+                    "peak_memory": peak,
+                    "backends": sorted(backends),
+                }
+            )
+            remapped_steps.extend(self._remap_fragment_steps(fragment, frag_result.steps))
+            remapped_conversions.extend(
+                self._remap_fragment_conversions(fragment, list(frag_result.conversions))
+            )
+
+        if threshold is not None:
+            exceeding = [
+                (idx, peak)
+                for idx, peak in enumerate(fragment_peaks)
+                if peak > threshold
+            ]
+            if exceeding:
+                worst_idx, worst_peak = max(exceeding, key=lambda item: item[1])
+                fragment = fragments[worst_idx]
+                hint = ""
+                if threshold > 0:
+                    base = float(self.estimator.coeff.get("sv_base_mem", 0.0))
+                    bytes_per_amp = (
+                        float(self.estimator.coeff.get("sv_bytes_per_amp", 1.0)) * 16.0
+                    )
+                    available = max(0.0, threshold - base)
+                    max_sv_qubits = (
+                        int(math.floor(math.log2(available / bytes_per_amp)))
+                        if available > 0 and bytes_per_amp > 0 and available >= bytes_per_amp
+                        else 0
+                    )
+                    if max_sv_qubits:
+                        hint = f" Hint: reduce block_size to ≤ {max_sv_qubits}."
+                    else:
+                        hint = " Hint: reduce block_size."
+                raise NoFeasibleBackendError(
+                    "Fragment qubits "
+                    f"{fragment.qubits} require {worst_peak:.3e}B which exceeds memory limit {threshold:.3e}B.{hint}"
+                )
+
+        concurrency = _choose_concurrency(fragment_peaks, threshold)
+        concurrency = max(1, concurrency) if fragment_peaks else 1
+        if threshold is not None and concurrency < len(fragment_peaks):
+            LOGGER.info(
+                "Reducing fragment concurrency to %d to respect memory cap %.3eB",
+                concurrency,
+                threshold,
+            )
+        else:
+            LOGGER.info(
+                "Fragment concurrency set to %d under memory cap %s",
+                concurrency,
+                f"{threshold:.3e}B" if threshold is not None else "∞",
+            )
+
+        remapped_steps.sort(key=lambda step: (step.start, step.end))
+        result = PlanResult(
+            table=[],
+            final_backend=remapped_steps[-1].backend if remapped_steps else None,
+            gates=list(circuit.gates),
+            explicit_steps=remapped_steps,
+            explicit_conversions=remapped_conversions,
+            analysis=analysis,
+        )
+        circuit.ssd.conversions = list(remapped_conversions)
+        if diagnostics is not None:
+            diagnostics.strategy = "fragmented"
+            diagnostics.backend_selection["fragments"] = fragment_summaries
+            diagnostics.backend_selection["fragment_concurrency"] = {
+                "max_inflight": concurrency,
+                "memory_cap": threshold,
+            }
+            result.diagnostics = diagnostics
+        return result
+
     def _single_backend(
         self,
         gates: List["Gate"],
@@ -2126,6 +2613,7 @@ class Planner:
         max_time: float | None = None,
         optimization_level: int | None = None,
         explain: bool = False,
+        allow_fragmentation: bool = True,
     ) -> PlanResult:
         """Compute the optimal contiguous partition plan using optional
         coarse and refinement passes.
@@ -2160,6 +2648,9 @@ class Planner:
             When ``True`` collect diagnostic information about cost comparisons
             and conversion estimates.  The diagnostics are attached to the
             returned :class:`PlanResult` via ``plan.diagnostics``.
+        allow_fragmentation:
+            When ``True`` detect disjoint qubit fragments and plan them
+            independently before falling back to whole-circuit planning.
 
         Raises
         ------
@@ -2250,6 +2741,27 @@ class Planner:
             if analysis is not None:
                 cached.analysis = analysis
             return finalize(cached)
+
+        fragments: List[Subcircuit] = []
+        if allow_fragmentation:
+            fragments = partition_into_disjoint_fragments(circuit)
+        if allow_fragmentation and len(fragments) > 1:
+            fragmented = self._plan_disjoint_fragments(
+                circuit,
+                fragments,
+                analysis=analysis,
+                use_cache=use_cache,
+                threshold=threshold,
+                backend=backend,
+                target_accuracy=target_accuracy,
+                max_time=max_time,
+                optimization_level=optimization_level,
+                explain=explain,
+                diagnostics=diagnostics,
+            )
+            if use_cache and not explain:
+                self.cache_insert(gates, fragmented, backend)
+            return finalize(fragmented)
 
         num_qubits = circuit.num_qubits
         num_gates = circuit.num_gates
