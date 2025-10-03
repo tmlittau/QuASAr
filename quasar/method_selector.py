@@ -783,7 +783,7 @@ class MethodSelector:
                     "metric": metric,
                     "hybrid_frontier": hybrid_frontier,
                 }
-        elif diag_backends is not None:
+        elif diag_backends is not None and total_multi == 0:
             reasons = []
             if sparse < s_thresh:
                 reasons.append("sparsity below threshold")
@@ -864,7 +864,17 @@ class MethodSelector:
                 entry["hybrid_penalty"] = hybrid_penalty
                 diag_backends[Backend.DECISION_DIAGRAM] = entry
 
-        if total_multi:
+        evaluate_mps = total_multi > 0 and target_accuracy is not None
+        if total_multi and not evaluate_mps:
+            if diag_backends is not None:
+                diag_backends[Backend.MPS] = {
+                    "feasible": False,
+                    "reasons": ["requires target fidelity"],
+                    "long_range_fraction": long_range_fraction,
+                    "long_range_extent": long_range_extent,
+                    "max_interaction_distance": max_interaction_distance,
+                }
+        if evaluate_mps:
             chi = getattr(self.estimator, "chi_max", None) or 4
             chi_cap: int | None = None
             infeasible_chi = False
@@ -881,6 +891,7 @@ class MethodSelector:
                     chi = chi_cap
                 else:
                     infeasible_chi = True
+        if evaluate_mps:
             over_fraction = (
                 long_range_fraction
                 > config.DEFAULT.mps_long_range_fraction_threshold
@@ -960,7 +971,7 @@ class MethodSelector:
                 diag_backends[Backend.MPS] = entry
             if feasible:
                 candidates[Backend.MPS] = mps_cost
-        elif diag_backends is not None:
+        elif diag_backends is not None and total_multi == 0:
             reason = "no multi-qubit gates"
             diag_backends[Backend.MPS] = {
                 "feasible": False,

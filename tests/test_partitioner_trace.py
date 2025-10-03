@@ -258,7 +258,9 @@ def test_trace_records_statevector_lock() -> None:
             (Backend.MPS, Cost(time=2.0, memory=2.0)),
         ]
     )
-    partitioner = Partitioner(estimator=estimator, selector=selector)
+    partitioner = Partitioner(
+        estimator=estimator, selector=selector, target_accuracy=0.999
+    )
     circuit = build_circuit(Gate("H", [0]), Gate("CX", [0, 1]))
 
     ssd = partitioner.partition(circuit, debug=True)
@@ -283,7 +285,9 @@ def test_trace_marks_single_qubit_preamble_switch() -> None:
             (Backend.MPS, Cost(time=2.0, memory=2.0)),
         ]
     )
-    partitioner = Partitioner(estimator=estimator, selector=selector)
+    partitioner = Partitioner(
+        estimator=estimator, selector=selector, target_accuracy=0.999
+    )
     circuit = build_circuit(Gate("H", [0]), Gate("T", [0]))
 
     ssd = partitioner.partition(circuit, debug=True)
@@ -308,7 +312,9 @@ def test_trace_records_deferred_switch_candidate() -> None:
             (Backend.MPS, Cost(time=2.0, memory=2.0)),
         ]
     )
-    partitioner = Partitioner(estimator=estimator, selector=selector)
+    partitioner = Partitioner(
+        estimator=estimator, selector=selector, target_accuracy=0.999
+    )
     circuit = build_circuit(Gate("CX", [0, 1]), Gate("T", [0]))
 
     ssd = partitioner.partition(circuit, debug=True)
@@ -522,7 +528,9 @@ def test_conversion_primitive_respects_entanglement_bound() -> None:
         ]
     )
     estimator = PrimitiveSwitchEstimator(threshold=2, conversion_memory=1.0)
-    partitioner = Partitioner(estimator=estimator, selector=selector)
+    partitioner = Partitioner(
+        estimator=estimator, selector=selector, target_accuracy=0.999
+    )
     circuit = build_circuit(
         Gate("H", [0]),
         Gate("CX", [0, 1]),
@@ -535,10 +543,10 @@ def test_conversion_primitive_respects_entanglement_bound() -> None:
     assert ssd.conversions
     layer = ssd.conversions[0]
     assert layer.primitive == "ST"
-    assert layer.rank == 2
-    assert layer.frontier == 1
-    assert estimator.last_rank == 2
-    assert estimator.last_frontier == 1
+    assert layer.rank == 1
+    assert layer.frontier == 0
+    assert estimator.last_rank == 1
+    assert estimator.last_frontier == 0
 
     dense_selector = DummySelector(
         [
@@ -550,7 +558,9 @@ def test_conversion_primitive_respects_entanglement_bound() -> None:
         ]
     )
     dense_estimator = PrimitiveSwitchEstimator(threshold=2, conversion_memory=1.0)
-    dense_partitioner = Partitioner(estimator=dense_estimator, selector=dense_selector)
+    dense_partitioner = Partitioner(
+        estimator=dense_estimator, selector=dense_selector, target_accuracy=0.999
+    )
     dense_circuit = build_circuit(
         Gate("H", [0]),
         Gate("H", [1]),

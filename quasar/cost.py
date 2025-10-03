@@ -327,20 +327,49 @@ class CostEstimator:
         cut along the chain.
         """
 
-        bonds = [1] * max(0, num_qubits - 1)
+        gate_list = list(gates)
+        unique_qubits = sorted(
+            {
+                q
+                for gate in gate_list
+                for q in getattr(gate, "qubits", [])
+            }
+        )
+
+        effective_qubits = max(num_qubits, len(unique_qubits))
+        bonds = [1] * max(0, effective_qubits - 1)
         if not bonds:
             return bonds
+
         local_caps = [
-            2 ** min(i + 1, num_qubits - i - 1)
-            for i in range(num_qubits - 1)
+            2 ** min(i + 1, effective_qubits - i - 1)
+            for i in range(effective_qubits - 1)
         ]
-        for gate in gates:
+
+        needs_remap = bool(unique_qubits) and (
+            effective_qubits != len(unique_qubits)
+            or any(q != idx for idx, q in enumerate(unique_qubits))
+        )
+        mapping = {q: idx for idx, q in enumerate(unique_qubits)} if needs_remap else None
+
+        for gate in gate_list:
             qubits = getattr(gate, "qubits", [])
             if len(qubits) < 2:
                 continue
-            q0, q1 = min(qubits), max(qubits)
+            if mapping is not None:
+                try:
+                    mapped = [mapping[q] for q in qubits]
+                except KeyError:
+                    # Ignore gates touching qubits outside the analysed fragment
+                    continue
+            else:
+                mapped = list(qubits)
+            if len(mapped) < 2:
+                continue
+            q0, q1 = min(mapped), max(mapped)
             for i in range(q0, q1):
-                bonds[i] = min(bonds[i] * 2, local_caps[i])
+                if 0 <= i < len(bonds):
+                    bonds[i] = min(bonds[i] * 2, local_caps[i])
         return bonds
 
     def max_schmidt_rank(self, num_qubits: int, gates: Iterable["Gate"]) -> int:

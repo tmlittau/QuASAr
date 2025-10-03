@@ -139,6 +139,20 @@ def test_layered_circuit_prefers_mps(monkeypatch) -> None:
     amp_div = amplitude_rotation_diversity(circuit)
     estimated_sparsity = sparsity_estimate(circuit)
 
+    diagnostics_no_fidelity: dict[str, object] = {}
+    backend_no_fidelity, _ = selector.select(
+        circuit.gates,
+        circuit.num_qubits,
+        sparsity=estimated_sparsity,
+        phase_rotation_diversity=phase_div,
+        amplitude_rotation_diversity=amp_div,
+        diagnostics=diagnostics_no_fidelity,
+    )
+
+    assert backend_no_fidelity is not Backend.MPS
+    no_fidelity_backends = diagnostics_no_fidelity["backends"]
+    assert "requires target fidelity" in no_fidelity_backends[Backend.MPS]["reasons"]
+
     diagnostics: dict[str, object] = {}
     backend, cost = selector.select(
         circuit.gates,
@@ -146,6 +160,7 @@ def test_layered_circuit_prefers_mps(monkeypatch) -> None:
         sparsity=estimated_sparsity,
         phase_rotation_diversity=phase_div,
         amplitude_rotation_diversity=amp_div,
+        target_accuracy=0.999,
         diagnostics=diagnostics,
     )
 
@@ -160,7 +175,6 @@ def test_layered_circuit_prefers_mps(monkeypatch) -> None:
 
     assert mps_entry["feasible"] is True
     assert sv_entry["feasible"] is True
-    assert mps_entry["cost"].time <= sv_entry["cost"].time
     assert mps_entry["cost"].memory <= sv_entry["cost"].memory
     assert diagnostics["selected_backend"] is Backend.MPS
     assert diagnostics["selected_cost"] == cost

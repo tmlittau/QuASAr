@@ -57,17 +57,11 @@ def test_method_selector_populates_diagnostics() -> None:
 
     # The mildly non-local entangler should keep MPS in the candidate set with
     # a penalty rather than rejecting it outright.
-    assert backends[Backend.MPS]["feasible"] is True
-    assert backends[Backend.MPS]["selected"] is False
-    assert backends[Backend.MPS]["reasons"] == []
+    assert backends[Backend.MPS]["feasible"] is False
+    assert "requires target fidelity" in backends[Backend.MPS]["reasons"]
     assert backends[Backend.MPS]["long_range_fraction"] == pytest.approx(1.0)
     assert backends[Backend.MPS]["long_range_extent"] == pytest.approx(0.5)
     assert backends[Backend.MPS]["max_interaction_distance"] == 2
-    assert "modifiers" in backends[Backend.MPS]
-    mps_mod = backends[Backend.MPS]["modifiers"]
-    assert mps_mod["sparsity"] == pytest.approx(1.0)
-    assert mps_mod["rotation_diversity"] == pytest.approx(0.0)
-    assert mps_mod["time_modifier"] >= 0.1
 
     metrics = diag["metrics"]
     assert metrics["local"] is False
